@@ -1,0 +1,1 @@
+{"id":"data_interface_straight","staticMesh":"meshes/components/interface_data_b.mesh","dynamicMeshes":[{"index":0,"path":"meshes/components/cable_end_b.mesh","position":[0,0,0.08],"previewRotation":null,"addComponentTool":false}]}

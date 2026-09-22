@@ -1,0 +1,1 @@
+{"id":"throttle","staticMesh":"meshes/components/throttle_base_a.mesh","dynamicMeshes":[{"index":0,"path":"meshes/components/throttle_a.mesh","position":[0.04335069886728467,0.03869667016951461,-0.04046503855086549],"previewRotation":null,"addComponentTool":false}]}

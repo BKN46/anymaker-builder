@@ -1,0 +1,1 @@
+{"id":"handbrake","staticMesh":"meshes/components/handbrake_a.mesh","dynamicMeshes":[{"index":0,"path":"meshes/components/handbrake_a_handle.mesh","position":[0,0.02,-0.022],"previewRotation":null,"addComponentTool":false}]}

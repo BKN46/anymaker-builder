@@ -1,0 +1,1 @@
+{"id":"building_b_door_garage","staticMesh":"meshes/buildings/door_frame_e.mesh","dynamicMeshes":[{"index":0,"path":"meshes/buildings/door_panel_garage_a.mesh","position":[-0.97,-0.05,-0.04],"previewRotation":null,"addComponentTool":false},{"index":1,"path":"meshes/buildings/door_panel_garage_b.mesh","position":[1.05,-0.05,-0.04],"previewRotation":null,"addComponentTool":false}]}

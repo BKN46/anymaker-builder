@@ -1,0 +1,1 @@
+{"id":"pulley_wheel","staticMesh":"meshes/components/pulley_wheel_a.mesh","dynamicMeshes":[{"index":0,"path":"meshes/components/pulley_wheel_a_wheel.mesh","position":null,"previewRotation":null,"addComponentTool":false}]}

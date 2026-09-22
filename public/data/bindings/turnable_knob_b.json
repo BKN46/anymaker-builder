@@ -1,0 +1,1 @@
+{"id":"turnable_knob_b","staticMesh":"meshes/components/dial_a_base_a.mesh","dynamicMeshes":[{"index":0,"path":"meshes/components/dial_b.mesh","position":null,"previewRotation":null,"addComponentTool":false}]}

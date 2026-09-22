@@ -1,0 +1,1 @@
+{"id":"air_filter","staticMesh":"meshes/components/air_filter_base_a.mesh","dynamicMeshes":[{"index":0,"path":"meshes/components/air_filter_a.mesh","position":[0.04,0.16,0.04],"previewRotation":null,"addComponentTool":false}]}

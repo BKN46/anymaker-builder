@@ -1,0 +1,1 @@
+{"id":"radiator_fan_c","staticMesh":"meshes/components/radiator_fan_c.mesh","dynamicMeshes":[{"index":0,"path":"meshes/components/radiator_fan_c_fans.mesh","position":null,"previewRotation":null,"addComponentTool":false}]}

@@ -1,0 +1,1 @@
+{"id":"toggle_switch","staticMesh":"meshes/components/toggle_switch_b.mesh","dynamicMeshes":[{"index":0,"path":"meshes/components/toggle_switch_a.mesh","position":[0,-0.026726543121185612,0],"previewRotation":[1,0,0,0,0.9684853786245996,-0.24907041452241171,0,0.24907041452241171,0.9684853786245996],"addComponentTool":false}]}

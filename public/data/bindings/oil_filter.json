@@ -1,0 +1,1 @@
+{"id":"oil_filter","staticMesh":"meshes/components/oil_filter_base_a.mesh","dynamicMeshes":[{"index":0,"path":"meshes/components/oil_filter_a.mesh","position":[0,0.08,0],"previewRotation":null,"addComponentTool":false}]}

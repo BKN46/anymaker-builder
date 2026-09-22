@@ -1,0 +1,1 @@
+{"id":"short_shifter","staticMesh":"meshes/components/short_shifter_base_a.mesh","dynamicMeshes":[{"index":0,"path":"meshes/components/short_shifter_a.mesh","position":[0,0.077,0],"previewRotation":null,"addComponentTool":false}]}

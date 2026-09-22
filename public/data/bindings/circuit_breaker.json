@@ -1,0 +1,1 @@
+{"id":"circuit_breaker","staticMesh":"meshes/components/rcd_circuit_breaker_a.mesh","dynamicMeshes":[{"index":0,"path":"meshes/components/rcd_circuit_breaker_b.mesh","position":[0,-0.04,0.04],"previewRotation":null,"addComponentTool":false}]}

@@ -1,0 +1,1 @@
+{"id":"fighter_jet_throttle","staticMesh":"meshes/components/fighter_jet_throttle_base.mesh","dynamicMeshes":[{"index":0,"path":"meshes/components/fighter_jet_throttle.mesh","position":[0.039978286346638026,0.03566783429398207,0.0004723870204486613],"previewRotation":null,"addComponentTool":false}]}

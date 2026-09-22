@@ -1,0 +1,1 @@
+{"id":"keycard_reader","staticMesh":"meshes/components/keycard_scanner_a.mesh","dynamicMeshes":[{"index":0,"path":"meshes/components/keycard_scanner_a_b.mesh","position":null,"previewRotation":null,"addComponentTool":false}]}

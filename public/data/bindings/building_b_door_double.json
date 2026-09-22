@@ -1,0 +1,1 @@
+{"id":"building_b_door_double","staticMesh":"meshes/buildings/door_frame_d.mesh","dynamicMeshes":[{"index":0,"path":"meshes/buildings/door_panel_double_a.mesh","position":[-0.81,-0.04,-0.04],"previewRotation":null,"addComponentTool":false},{"index":1,"path":"meshes/buildings/door_panel_double_b.mesh","position":[0.73,-0.04,-0.04],"previewRotation":null,"addComponentTool":false}]}

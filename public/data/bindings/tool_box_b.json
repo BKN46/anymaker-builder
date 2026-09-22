@@ -1,0 +1,1 @@
+{"id":"tool_box_b","staticMesh":"meshes/components/tool_box_b.mesh","dynamicMeshes":[{"index":0,"path":"meshes/components/tool_box_lid_b.mesh","position":[0,0.05,-0.19],"previewRotation":null,"addComponentTool":false}]}

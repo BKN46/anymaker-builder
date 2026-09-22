@@ -1,0 +1,1 @@
+{"id":"boat_rudder_b","staticMesh":"meshes/components/boat_rudder_base_b.mesh","dynamicMeshes":[{"index":0,"path":"meshes/components/boat_rudder_b.mesh","position":[0,0,-0.03],"previewRotation":null,"addComponentTool":false}]}
