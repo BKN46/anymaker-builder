@@ -21,8 +21,12 @@ src/
     published/            正式发布资产 manifest、lazy loader、解压和缓存
   editor/
     document.js           工程 schema、输入校验、XML 中间格式、历史快照
+    model.js              Project/Vehicle/Grid/Component/Node/Edge/Plate/Link 领域模型与适配
+    operations.js         组件复制、镜像、移动、子网格拆分/合并纯数据命令
+    topology.js           节点、梁、面板创建、分割、合并与几何校验
   components/             目标目录，尚未实现：每组件装配、端口和 Mesh 绑定模块
 public/data/
+  index.json               稳定组件索引、schema/resourceVersion 与 Mesh manifest 引用
   component-index.json    轻量搜索索引
   definitions/            每组件独立详情
   bindings/               每组件独立 Mesh 绑定
@@ -68,9 +72,9 @@ flowchart LR
 - `PublishedAssetLoader`：已发布资源状态，不进入工程文件；工程保存组件定义 ID，由绑定和 manifest 找到 lazy-loaded 资产。
 - `AssetLibrary`：开发/审计辅助状态，不进入工程文件，也不属于 GitHub Pages 完整使用路径。
 
-## 下一阶段的领域架构（尚未实现）
+## 当前领域架构
 
-Project 包含 Vehicle、Grid、Component 和 Node/Edge/Plate/Link 图。当前场景数组将改为领域模型的渲染投影，纯数据 Command 负责预览、验证、提交及撤销。ID、坐标转换和拓扑重映射由共享领域模块实现。
+`src/editor/model.js` 已提供 Project、Vehicle、Grid、Component、Node、Edge、Plate、Link，以及 editor document 的双向适配。现有场景仍是领域模型的渲染投影，结构操作通过 `operations.js` 生成快照，纯数据模型保存 `gridId`、局部 transform、父级 transform、单位和未知字段 extras。原生端口、梁、面板连接仍待 `.data` 适配器接入。
 
 节点/梁/面板在原生样本中位于 vehicle 层级；目标模型不能直接把它们全部强制塞入 grid。Grid 局部坐标与渲染 submesh 也必须分开。原生适配器负责表达游戏字段，中间 XML 适配器负责版本化的交换格式。
 

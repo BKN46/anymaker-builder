@@ -30,5 +30,17 @@ const definitions = raw.definitions.map(definition => {
   return { id, name: definition.name, name_zh: nameZh, category: definition.category || 'miscellaneous', class: definition.class || '', detail: 'data/definitions/' + id + '.json', binding: 'data/bindings/' + id + '.json' };
 });
 definitions.sort((a, b) => a.category.localeCompare(b.category) || a.name.localeCompare(b.name));
-writeJson(path.join(output, 'component-index.json'), { format: 'anymaker-component-index', version: 1, source: 'rom/' + source, sourceSha256: createHash('sha256').update(definitionBytes).digest('hex'), count: definitions.length, definitions });
+const index = {
+  format: 'anymaker-component-index',
+  version: 1,
+  schema: 'anymaker-component-index/1',
+  resourceVersion: 1,
+  assetManifest: 'assets/manifests/mesh-manifest.json',
+  source: 'rom/' + source,
+  sourceSha256: createHash('sha256').update(definitionBytes).digest('hex'),
+  count: definitions.length,
+  definitions,
+};
+writeJson(path.join(output, 'component-index.json'), index);
+writeJson(path.join(output, 'index.json'), index);
 console.log('Wrote ' + definitions.length + ' indexed definitions, details, and Mesh bindings');

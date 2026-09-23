@@ -52,8 +52,13 @@ export class PublishedAssetLibrary {
     const promise = fetch(this.baseUrl + entry.url).then(async response => {
       if (!response.ok) throw new Error(`Published Mesh HTTP ${response.status}: ${source}`);
       let stream = response.body;
-      if (typeof DecompressionStream === 'function' && entry.compression === 'gzip') stream = stream.pipeThrough(new DecompressionStream('gzip'));
-      else if (entry.compression === 'gzip') throw new Error('该浏览器不支持 gzip Mesh 解压');
+      // Some static hosts transparently decode Content-Encoding: gzip before
+      // JavaScript receives the body; manually decompress only when the .gz
+      // bytes are still encoded. This keeps GitHub Pages and Vite preview
+      // behavior identical.
+      const alreadyDecoded = /gzip/i.test(response.headers.get('content-encoding') || '');
+      if (typeof DecompressionStream === 'function' && entry.compression === 'gzip' && !alreadyDecoded) stream = stream.pipeThrough(new DecompressionStream('gzip'));
+      else if (entry.compression === 'gzip' && !alreadyDecoded) throw new Error('该浏览器不支持 gzip Mesh 解压');
       const payload = JSON.parse(await new Response(stream).text());
       if (payload.source !== source || payload.sourceSha256 !== entry.sourceSha256) throw new Error(`Published Mesh hash/source mismatch: ${source}`);
       return parsedFromPublished(payload);

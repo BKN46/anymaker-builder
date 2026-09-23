@@ -20,6 +20,8 @@ button:focus-visible, input:focus-visible, select:focus-visible { outline: 2px s
 .top-actions { display: flex; gap: 5px; align-items: center; margin-left: auto; }
 .top-actions button { padding: 7px 9px; font-size: 11px; }
 .top-actions #library-btn { color: var(--accent); }
+.icon-action { width: 30px; height: 30px; padding: 0 !important; font-size: 17px !important; color: #475467; }
+.icon-action:hover { color: var(--accent); }
 .primary { color: #fff; background: var(--accent); border-color: var(--accent); font-weight: 650; }
 .primary:hover { background: #1d5db6; }
 .workspace { min-height: 0; display: grid; grid-template-columns: 304px minmax(520px, 1fr); }

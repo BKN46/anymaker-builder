@@ -12,10 +12,10 @@ export class ComponentCatalog {
   }
 
   async load() {
-    const response = await fetch(this.baseUrl + 'data/component-index.json');
+    const response = await fetch(this.baseUrl + 'data/index.json');
     if (!response.ok) throw new Error('组件索引加载失败 HTTP ' + response.status);
     const payload = await response.json();
-    if (payload.format !== 'anymaker-component-index' || payload.version !== 1 || !Array.isArray(payload.definitions)) throw new Error('不支持的组件索引格式');
+    if (payload.format !== 'anymaker-component-index' || payload.version !== 1 || payload.schema !== 'anymaker-component-index/1' || !Number.isInteger(payload.resourceVersion) || !Array.isArray(payload.definitions)) throw new Error('不支持的组件索引格式');
     for (const entry of payload.definitions) {
       if (!entry || typeof entry.id !== 'string' || !entry.id || this.index.has(entry.id)) throw new Error('组件索引 ID 无效或重复');
       this.index.set(entry.id, { ...entry, detail: safeRelativePath(entry.detail), binding: safeRelativePath(entry.binding) });

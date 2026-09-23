@@ -6,17 +6,27 @@ import { createHash } from 'node:crypto';
 const root = process.cwd();
 const manifestFile = path.join(root, 'public', 'assets', 'manifests', 'mesh-manifest.json');
 const bindingsRoot = path.join(root, 'public', 'data', 'bindings');
+const indexFile = path.join(root, 'public', 'data', 'index.json');
 if (!fs.existsSync(manifestFile)) throw new Error('Missing public/assets/manifests/mesh-manifest.json');
+if (!fs.existsSync(indexFile)) throw new Error('Missing public/data/index.json');
 const manifest = JSON.parse(fs.readFileSync(manifestFile, 'utf8'));
+const index = JSON.parse(fs.readFileSync(indexFile, 'utf8'));
+if (index.format !== 'anymaker-component-index' || index.version !== 1 || index.schema !== 'anymaker-component-index/1' || !Array.isArray(index.definitions)) throw new Error('Invalid component index schema');
 if (manifest.format !== 'anymaker-mesh-manifest' || manifest.version !== 1) throw new Error('Unsupported Mesh manifest');
 const referenced = new Set();
+const errors = [];
 for (const file of fs.readdirSync(bindingsRoot)) {
   if (!file.endsWith('.json')) continue;
   const binding = JSON.parse(fs.readFileSync(path.join(bindingsRoot, file), 'utf8'));
   if (binding.staticMesh) referenced.add(binding.staticMesh);
   for (const item of binding.dynamicMeshes || []) if (item.path) referenced.add(item.path);
 }
-const errors = [];
+if (index.count !== index.definitions.length) errors.push('component index count does not match definitions');
+for (const definition of index.definitions) {
+  for (const relative of [definition.detail, definition.binding]) {
+    if (typeof relative !== 'string' || !relative.startsWith('data/') || !fs.existsSync(path.join(root, 'public', relative))) errors.push(`missing component data file: ${relative}`);
+  }
+}
 for (const source of referenced) {
   const entry = manifest.entries?.[source];
   if (!entry) { errors.push(`missing manifest entry: ${source}`); continue; }
