@@ -24,6 +24,10 @@
 
 编辑器空间晶格固定为 `1 格 = 8 cm = 0.08` 世界单位。`objects[].position`、`mirror.offset` 和 `topology.nodes[].position` 的每个世界 X/Y/Z 分量都必须是整数格；真正的非格点值会拒绝导入，只有 8 cm 倍数上的浮点残差会规范化。梁端点由节点引用，面板只引用节点，因此也保持整格。`scale` 是无量纲比例，不表示格数。
 
+`topology.edges[].color`、`topology.plates[].color_front` 和 `topology.plates[].color_back` 是可选的 `#RRGGBB` 编辑器 RGB 颜色，用于涂色工具和渲染；原生导入保留的 `col`、`col_front`、`col_back` 仍是可选的 0–255 编号，作为未验证的原生颜色数据。`topology.plates[].normalOffset` 是有限世界单位值。新建面板以 `0.04`（半格）偏离其节点面。这些字段均是编辑器工程字段；中间 XML 及当前试验性原生回写尚未编码它们，不能据此推断游戏兼容性。
+
+工程 JSON 的 `topology.links` 为编辑器连接模型：每项包含 `id`、六类之一的 `kind`、`from/to` 组件端点（可选 0–255 `port`）及最多 256 个整数格路径点。该模型用于可撤销编辑与诊断渲染，不等同于游戏端口兼容校验；原生 `p0/p1` 的完整语义仍待实际游戏验证。
+
 工程文件只引用稳定的组件定义 ID。Mesh、材质和 lazy-loaded 发布 URL 不写进工程 JSON，而由随站点发布的 component index、binding 和 asset manifest 解析；这保证工程可以在没有游戏本体的 GitHub Pages 环境中重建。
 
 当前实现上限为 2000 个组件，位置/旋转绝对值不超过 10000，缩放在 (0, 100]。这些是编辑器输入边界，不是已经验证的游戏建造限制。旋转为 Three.js XYZ 欧拉弧度；8 cm 编辑器晶格与游戏坐标/格点的映射尚未验证。
@@ -93,5 +97,5 @@ XML 属性和文本都必须转义。此格式没有原生载具的节点、梁�
 在这些问题完成前，UI 使用“中间格式 XML”名称，不提供“游戏兼容 XML”按钮。
 ## 当前只读原生适配状态
 
-`src/native/anymaker-data.js` 提供只读 `.data` JSON 到领域模型的解析，以及配套 `.meta` JSON 的保留。页面的“导入本地载具”与“选择配套 .data / .meta”入口只接受同名的一份 `.data` 和一份 `.meta`，单独选择、重复扩展名、不同基名、超限文件和非对象 `.meta` 都会拒绝；浏览器只在本地读取，确认后才替换场景。`.meta` 当前仅作为未知元数据保留，未参与未验证的坐标、bounds 或游戏语义推断。读取成功后可导出试验性 `anymaker-native.data`。导出仍会报告未映射实体，未经过游戏加载验证，因此不能替代原生存档导出。
+`src/native/anymaker-data.js` 提供只读 `.data` JSON 到领域模型的解析，以及配套 `.meta` JSON 的保留。页面的“导入本地载具”与“选择配套 .data / .meta”入口只接受同名的一份 `.data` 和一份 `.meta`，单独选择、重复扩展名、不同基名、超限文件和非对象 `.meta` 都会拒绝；浏览器只在本地读取，确认后才替换场景。`.meta` 当前仅作为未知元数据保留，未参与未验证的坐标、bounds 或游戏语义推断。无编辑导出会成对保留 `.data/.meta` 的完整 JSON 值，并执行字段级 round-trip 校验；它不是当前场景编辑后的回写，也未经过游戏加载验证，因此不能替代原生存档导出。
 中间 XML 当前额外保留 `component.grid` 和可选 `<mirror axis="x|y|z" offset="..."/>`，用于编辑器工程交换；这些字段仍然不是原生游戏 schema。

@@ -27,7 +27,7 @@ for (const definition of index.definitions) {
     if (typeof relative !== 'string' || !relative.startsWith('data/') || !fs.existsSync(path.join(root, 'public', relative))) errors.push(`missing component data file: ${relative}`);
   }
 }
-for (const source of referenced) {
+for (const source of Object.keys(manifest.entries || {})) {
   const entry = manifest.entries?.[source];
   if (!entry) { errors.push(`missing manifest entry: ${source}`); continue; }
   const file = path.join(root, 'public', entry.url);

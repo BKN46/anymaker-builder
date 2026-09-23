@@ -48,12 +48,18 @@ Anymaker/
 - `electric_links`、`mechanical_links`、`liquid_links`、`gas_links`、`belt_links`、`data_links`：不同网络的连接；
 
 `src/native/anymaker-data.js` 已将上述只读结构转换为独立领域模型：车辆级节点/梁/面板/连接只挂到第一个网格，避免因组件网格分组而重复拓扑；组件定义索引、旋转矩阵、颜色槽、状态和未知字段均保存在 `extras.native`，原始 JSON 保存在项目级 `extras.native.raw`。这一步只证明字段可被安全读取，不证明编辑后的模型可以直接写回游戏。
+
+已观察到梁使用 `edges[].col`，面板使用 `plates[].col_front`，部分面板另有 `col_back`；组件使用 `grids[].components[].colors` 色槽数组。编辑器涂色使用独立的 Hex RGB 工程字段 `color`、`color_front`、`color_back`；导入的原生编号仍保留并仅作后备诊断预览。完整原生色表、组件槽映射、`plate_paint` 和游戏着色器仍待验证。
 旋转矩阵会同时保留原始 3×3 数组，并在浏览器编辑投影中转换为 XYZ 弧度；矩阵约定仍需与游戏截图/回读样本做最终验证。
 - `buoyancy_fill`、`loot_locations`、`creature_locations`：运行时或场景附加数据。
 
 当前样本包含 1 个载具、112 个节点、181 条梁、27 个面板、2 个网格、39 个组件。`.meta` 保存同一载具的变换和 bounds 摘要。
 
 因此，载具模型不是“组件列表 + XYZ”这么简单。原生导入/导出必须同时处理矩阵、格点、结构梁、面板涂装和多种网络；在证据完成前，项目只输出中间工程 XML。
+
+## 编辑器连接投影
+
+原生的 `electric_links`、`mechanical_links`、`liquid_links`、`gas_links`、`belt_links`、`data_links` 已映射为工程 `topology.links`。编辑器端点使用 `{ componentId, port? }`，路径点使用世界格坐标；导入时原生 `p0/p1.comp` 映射到组件实例 ID，`pos` 保留为端口索引，`points` 按 0.08 世界单位换算。当前可视化与撤销操作已覆盖六类连接，但端口兼容矩阵、皮带/管线专用约束和游戏回写仍未由样本证实。
 
 ## Mesh v5 观察
 

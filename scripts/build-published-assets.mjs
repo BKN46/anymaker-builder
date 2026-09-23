@@ -31,11 +31,30 @@ const sha256 = bytes => createHash('sha256').update(bytes).digest('hex');
 const readJson = file => JSON.parse(fs.readFileSync(file, 'utf8'));
 
 const sources = new Set();
+const staticSources = new Set();
 for (const file of fs.readdirSync(bindingsRoot)) {
   if (!file.endsWith('.json')) continue;
   const binding = readJson(path.join(bindingsRoot, file));
-  if (binding.staticMesh) sources.add(safeSource(binding.staticMesh));
+  if (binding.staticMesh) {
+    const source = safeSource(binding.staticMesh);
+    sources.add(source); staticSources.add(source);
+  }
   for (const dynamic of binding.dynamicMeshes || []) if (dynamic.path) sources.add(safeSource(dynamic.path));
+}
+
+// Tileable native components select start/repeat/end siblings from their
+// static Mesh family using the saved `ext`. Include existing siblings in the
+// published bundle; runtime never reads the local ROM.
+for (const source of staticSources) {
+  const match = /^(.*)_0_0_0\.mesh$/.exec(source);
+  if (!match) continue;
+  const directory = path.dirname(source);
+  const base = path.basename(match[1]);
+  const inputDirectory = path.join(root, directory);
+  if (!fs.existsSync(inputDirectory)) continue;
+  const escaped = base.replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
+  const pattern = new RegExp(`^${escaped}_([012])_([012])_([012])\\.mesh$`);
+  for (const file of fs.readdirSync(inputDirectory)) if (pattern.test(file)) sources.add(safeSource(path.posix.join(directory, file)));
 }
 
 const entries = {};

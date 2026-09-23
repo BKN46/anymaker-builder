@@ -10,6 +10,7 @@
 | [03 XML 与原生格式](03_XML_AND_NATIVE_FORMAT.md) | 工程 JSON、中间 XML、原生 JSON 与字段映射 |
 | [04 Component / Mesh 拆分](04_COMPONENT_MESH_SPLIT.md) | 每组件详情与绑定、单 Mesh 文件、共享资源和按需加载 |
 | [05 镜像与子网格操作](05_BUILD_OPERATIONS.md) | 拆分、复制、移动、合并语义、边界策略和验收 |
+| [06 本地反编译分析](06_REVERSE_ENGINEERING.md) | 只读游戏输入、Ghidra 导出流程和证据边界 |
 | [资源研究记录](RESOURCE_ANALYSIS.md) | 扫描方法、Mesh 支持范围、Stormworks 方法参考 |
 | [审计报告](evidence/asset-audit.json) | ROM 计数、EXE/定义/Mesh SHA-256、解析成功和失败记录 |
 
