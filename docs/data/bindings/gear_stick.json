@@ -1,0 +1,1 @@
+{"id":"gear_stick","staticMesh":"meshes/components/gear_stick_a_base.mesh","dynamicMeshes":[{"index":0,"path":"meshes/components/gear_stick_a.mesh","position":[0,0,-0.07722755347712196],"previewRotation":null,"addComponentTool":false}]}

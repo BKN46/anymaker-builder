@@ -1,0 +1,1 @@
+{"id":"key_switch","staticMesh":"meshes/components/key_switch_a.mesh","dynamicMeshes":[{"index":0,"path":"meshes/components/key_switch_b.mesh","position":[0,-0.039,0],"previewRotation":null,"addComponentTool":false}]}

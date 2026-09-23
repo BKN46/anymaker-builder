@@ -1,0 +1,1 @@
+{"id":"beacon_light","staticMesh":"meshes/components/beacon_light_a.mesh","dynamicMeshes":[{"index":0,"path":"meshes/components/beacon_light_b.mesh","position":null,"previewRotation":null,"addComponentTool":false}]}

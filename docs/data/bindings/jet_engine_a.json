@@ -1,0 +1,1 @@
+{"id":"jet_engine_a","staticMesh":"meshes/components/jet_engine_a.mesh","dynamicMeshes":[{"index":0,"path":"meshes/components/jet_engine_a_fan.mesh","position":null,"previewRotation":null,"addComponentTool":false}]}

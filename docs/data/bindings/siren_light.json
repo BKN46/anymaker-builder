@@ -1,0 +1,1 @@
+{"id":"siren_light","staticMesh":"meshes/components/siren_light_a.mesh","dynamicMeshes":[{"index":0,"path":"meshes/components/siren_light_b.mesh","position":null,"previewRotation":null,"addComponentTool":false}]}

@@ -1,0 +1,1 @@
+{"id":"lever_switch_b","staticMesh":"meshes/components/lever_switch_b_a.mesh","dynamicMeshes":[{"index":0,"path":"meshes/components/lever_switch_b_b.mesh","position":[0,0,0.15],"previewRotation":null,"addComponentTool":false}]}

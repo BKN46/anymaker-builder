@@ -1,0 +1,1 @@
+{"id":"control_flap","staticMesh":"meshes/components/control_flap_base_a.mesh","dynamicMeshes":[{"index":0,"path":"meshes/components/control_flap_a.mesh","position":[0,0,-0.08],"previewRotation":null,"addComponentTool":false}]}

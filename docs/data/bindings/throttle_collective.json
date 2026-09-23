@@ -1,0 +1,1 @@
+{"id":"throttle_collective","staticMesh":"meshes/components/throttle_collective.mesh","dynamicMeshes":[{"index":0,"path":"meshes/components/throttle_collective_arm_a.mesh","position":[0,0.08,0.16],"previewRotation":null,"addComponentTool":false}]}

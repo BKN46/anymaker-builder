@@ -1,0 +1,1 @@
+{"id":"mechanical_handle","staticMesh":"meshes/components/valve_manual_a.mesh","dynamicMeshes":[{"index":0,"path":"meshes/components/valve_manual_a_handle.mesh","position":null,"previewRotation":null,"addComponentTool":false}]}

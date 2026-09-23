@@ -1,0 +1,1 @@
+{"id":"roller_wheel_fixed_e","staticMesh":"meshes/components/roller_wheel_fixed_base_c.mesh","dynamicMeshes":[{"index":0,"path":"meshes/components/roller_wheel_e.mesh","position":null,"previewRotation":null,"addComponentTool":false}]}
