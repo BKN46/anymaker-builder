@@ -1,5 +1,7 @@
 // Pure structural topology commands. They operate on model collections and
 // return new values, allowing the UI to preview and commit one transaction.
+import { AXES, assertGridVector, cellToWorld, cellsBetween, greatestCommonDivisor, worldToCell } from './grid.js';
+
 const EPSILON = 1e-6;
 const clone = value => structuredClone(value);
 const position = node => ({ x: Number(node.position?.x ?? 0), y: Number(node.position?.y ?? 0), z: Number(node.position?.z ?? 0) });
@@ -15,16 +17,20 @@ export function validateTopologyState(state = {}) {
   const edges = Array.isArray(state.edges) ? state.edges : [];
   const plates = Array.isArray(state.plates) ? state.plates : [];
   const nodeIds = new Set();
+  const points = new Map();
+  const normalizedNodes = [];
   for (const node of nodes) {
     if (!node || typeof node.id !== 'string' || !node.id || nodeIds.has(node.id)) throw new Error('节点 ID 无效或重复');
-    const point = position(node);
-    if (![point.x, point.y, point.z].every(Number.isFinite)) throw new Error('节点坐标无效');
+    const gridPosition = assertGridVector(node.position, '节点坐标');
     nodeIds.add(node.id);
+    points.set(node.id, gridPosition);
+    normalizedNodes.push({ ...clone(node), position: gridPosition });
   }
   const edgeIds = new Set();
   for (const edge of edges) {
     if (!edge || typeof edge.id !== 'string' || !edge.id || edgeIds.has(edge.id)) throw new Error('梁 ID 无效或重复');
     if (!nodeIds.has(edge.a) || !nodeIds.has(edge.b) || edge.a === edge.b) throw new Error('梁引用未知或相同节点');
+    if (same(points.get(edge.a), points.get(edge.b))) throw new Error('梁长度必须大于零');
     edgeIds.add(edge.id);
   }
   const plateIds = new Set();
@@ -33,7 +39,7 @@ export function validateTopologyState(state = {}) {
     validatePlate(plate.nodeIds, nodes);
     plateIds.add(plate.id);
   }
-  return { nodes: clone(nodes), edges: clone(edges), plates: clone(plates) };
+  return { nodes: normalizedNodes, edges: clone(edges), plates: clone(plates) };
 }
 
 function newId(values, prefix) {
@@ -44,9 +50,8 @@ function newId(values, prefix) {
 }
 
 export function createNode(nodes, value, prefix = 'node') {
-  const next = clone(nodes);
-  const point = { x: Number(value.x), y: Number(value.y), z: Number(value.z) };
-  if (![point.x, point.y, point.z].every(Number.isFinite)) throw new Error('节点坐标无效');
+  const next = validateTopologyState({ nodes, edges: [], plates: [] }).nodes;
+  const point = assertGridVector(value, '节点坐标');
   const existing = next.find(node => same(position(node), point));
   if (existing) return { nodes: next, node: existing, created: false };
   const node = { id: newId(next, prefix), position: point };
@@ -55,8 +60,7 @@ export function createNode(nodes, value, prefix = 'node') {
 }
 
 export function moveNode(nodes, nodeId, value) {
-  const point = { x: Number(value.x), y: Number(value.y), z: Number(value.z) };
-  if (![point.x, point.y, point.z].every(Number.isFinite)) throw new Error('节点坐标无效');
+  const point = assertGridVector(value, '节点坐标');
   let found = false;
   const next = clone(nodes).map(node => {
     if (node.id !== nodeId) return node;
@@ -65,6 +69,19 @@ export function moveNode(nodes, nodeId, value) {
   });
   if (!found) throw new Error('节点不存在：' + nodeId);
   return { nodes: next };
+}
+
+export function moveNodeAndMerge(state, nodeId, value) {
+  const next = validateTopologyState(state);
+  const point = assertGridVector(value, '节点坐标');
+  if (!next.nodes.some(node => node.id === nodeId)) throw new Error('节点不存在：' + nodeId);
+  const target = next.nodes.find(node => node.id !== nodeId && same(position(node), point));
+  if (target) {
+    const merged = mergeNodes(next.nodes, next.edges, next.plates, nodeId, target.id);
+    return { ...validateTopologyState(merged), merged: true, idMap: merged.idMap };
+  }
+  const moved = moveNode(next.nodes, nodeId, point);
+  return { ...validateTopologyState({ ...next, nodes: moved.nodes }), merged: false, idMap: {} };
 }
 
 export function mergeNodes(nodes, edges, plates, sourceId, targetId) {
@@ -87,6 +104,25 @@ export function mergeNodes(nodes, edges, plates, sourceId, targetId) {
   return { nodes: nodes.filter(node => node.id !== sourceId).map(clone), edges: nextEdges, plates: nextPlates, idMap: { [sourceId]: targetId } };
 }
 
+export function removeNode(state, nodeId) {
+  if (!state.nodes.some(node => node.id === nodeId)) throw new Error('节点不存在：' + nodeId);
+  return validateTopologyState({
+    nodes: state.nodes.filter(node => node.id !== nodeId),
+    edges: state.edges.filter(edge => edge.a !== nodeId && edge.b !== nodeId),
+    plates: state.plates.filter(plate => !plate.nodeIds.includes(nodeId)),
+  });
+}
+
+export function removeEdge(state, edgeId) {
+  if (!state.edges.some(edge => edge.id === edgeId)) throw new Error('梁不存在：' + edgeId);
+  return validateTopologyState({ ...state, edges: state.edges.filter(edge => edge.id !== edgeId) });
+}
+
+export function removePlate(state, plateId) {
+  if (!state.plates.some(plate => plate.id === plateId)) throw new Error('面板不存在：' + plateId);
+  return validateTopologyState({ ...state, plates: state.plates.filter(plate => plate.id !== plateId) });
+}
+
 export function createEdge(edges, a, b, properties = {}) {
   if (!a || !b || a === b) throw new Error('梁必须连接两个不同节点');
   if (edges.some(edge => edgeKey(edge.a, edge.b) === edgeKey(a, b))) throw new Error('梁已存在');
@@ -96,10 +132,48 @@ export function createEdge(edges, a, b, properties = {}) {
   return { edges: [...clone(edges), edge], edge };
 }
 
+export function createBeam(state, start, end) {
+  const next = validateTopologyState(state);
+  const a = createNode(next.nodes, start);
+  const b = createNode(a.nodes, end);
+  const result = createEdge(next.edges, a.node.id, b.node.id);
+  return validateTopologyState({ ...next, nodes: b.nodes, edges: result.edges });
+}
+
+export function edgeSplitPoints(nodes, edgeId, edges = []) {
+  const edge = (edges.length ? edges : []).find(value => value.id === edgeId);
+  if (!edge) throw new Error('梁不存在：' + edgeId);
+  const a = nodes.find(node => node.id === edge.a); const b = nodes.find(node => node.id === edge.b);
+  if (!a || !b) throw new Error('梁引用未知节点');
+  const start = assertGridVector(a.position, '梁起点');
+  const deltaCells = cellsBetween(start, b.position);
+  const segments = greatestCommonDivisor(AXES.map(axis => deltaCells[axis]));
+  if (segments <= 1) return [];
+  return Array.from({ length: segments - 1 }, (_, index) => Object.fromEntries(AXES.map(axis => [axis, cellToWorld(worldToCell(start[axis]) + deltaCells[axis] * (index + 1) / segments)])));
+}
+
 export function splitEdge(nodes, edges, edgeId, point) {
   const edge = edges.find(value => value.id === edgeId);
   if (!edge) throw new Error('梁不存在：' + edgeId);
-  const created = createNode(nodes, point, 'node');
+  const a = nodes.find(node => node.id === edge.a); const b = nodes.find(node => node.id === edge.b);
+  if (!a || !b) throw new Error('梁引用未知节点');
+  const start = assertGridVector(a.position, '梁起点');
+  const deltaCells = cellsBetween(start, b.position);
+  const segments = greatestCommonDivisor(AXES.map(axis => deltaCells[axis]));
+  if (segments <= 1) throw new Error('该梁没有可用整格分割点');
+  const candidate = assertGridVector(point, '分割点');
+  const candidateCells = cellsBetween(start, candidate);
+  let step = null;
+  for (const axis of AXES) {
+    const delta = deltaCells[axis]; const offset = candidateCells[axis];
+    if (delta === 0) { if (offset !== 0) throw new Error('分割点必须位于梁中心线内部'); continue; }
+    if (offset * delta <= 0 || Math.abs(offset) >= Math.abs(delta) || offset * segments % delta !== 0) throw new Error('分割点必须位于梁中心线内部');
+    const value = offset * segments / delta;
+    if (step !== null && step !== value) throw new Error('分割点必须位于梁中心线内部');
+    step = value;
+  }
+  if (!Number.isInteger(step) || step <= 0 || step >= segments) throw new Error('分割点必须位于梁中心线内部');
+  const created = createNode(nodes, candidate, 'node');
   const without = edges.filter(value => value.id !== edgeId);
   const first = createEdge(without, edge.a, created.node.id, edge).edges;
   const second = createEdge(first, created.node.id, edge.b, edge).edges;

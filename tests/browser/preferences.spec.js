@@ -1,0 +1,153 @@
+import { test, expect } from '@playwright/test';
+
+const settingsKey = 'anymaker:/anymaker-builder/:settings:v1';
+const projectKey = 'anymaker:/anymaker-builder/:autosave:v1';
+async function ready(page) {
+  await expect(page.locator('#catalog-count')).toHaveText('598 / 598');
+  await expect(page.locator('#viewport')).toHaveAttribute('data-ready', 'true');
+}
+
+test('English default, language switching, axis views, grid and panel preferences survive reload', async ({ page }) => {
+  await page.goto('./'); await ready(page);
+  await expect(page.locator('html')).toHaveAttribute('lang', 'en');
+  await expect(page.locator('#save-btn')).toHaveText('Save project');
+  await expect(page.locator('#language-select')).toHaveValue('en');
+  await expect(page.locator('.brand')).toHaveText('ANYMAKERbuilder by BKN');
+  await expect(page.locator('.notice')).toHaveCount(0);
+  expect(await page.locator('#tools').evaluate(element => !!element.closest('.topbar'))).toBe(false);
+  expect(await page.locator('.top-tool-section').evaluate(element => element.scrollWidth <= element.clientWidth)).toBe(true);
+  await expect(page.locator('#orientation-indicator [data-view]')).toHaveCount(7);
+  const handle = await page.locator('#left-sidebar-toggle').boundingBox();
+  expect(handle.height).toBeGreaterThan(handle.width * 3);
+  await page.locator('#language-select').selectOption('zh');
+  await expect(page.locator('#save-btn')).toHaveText('保存工程');
+  await expect(page.locator('#object-count')).toHaveText('0 个组件');
+  await page.locator('#language-select').selectOption('en');
+  await expect(page.locator('#object-count')).toHaveText('0 components');
+  await page.locator('#right-sidebar-toggle').click();
+  await page.locator('#grid-color').fill('#ff3366');
+  await page.locator('#grid-opacity').fill('0.25');
+  await page.locator('#grid-style').selectOption('dashed');
+  await page.locator('#node-color').fill('#22aa66');
+  await page.locator('#node-size').fill('0.12');
+  await page.locator('#node-opacity').fill('0.4');
+  await expect(page.locator('#node-size-value')).toHaveText('0.120');
+  await expect(page.locator('#grid-settings')).toContainText('1 cell = 8 cm');
+  await expect(page.locator('#axis-snap-btn')).toHaveText('Axis snap');
+  await expect(page.locator('#axis-snap-btn')).toHaveAttribute('aria-pressed', 'false');
+  await page.locator('#axis-snap-btn').click();
+  await page.locator('#nodes-btn').click();
+  await page.locator('#orientation-indicator [data-view="right"]').click();
+  await page.locator('#left-sidebar-resizer').focus(); await page.keyboard.press('End');
+  await page.locator('#left-sidebar-toggle').click();
+  await expect.poll(async () => JSON.parse(await page.evaluate(key => localStorage.getItem(key), settingsKey))?.leftCollapsed).toBe(true);
+  const before = JSON.parse(await page.evaluate(key => localStorage.getItem(key), settingsKey));
+  expect(before.gridColor).toBe('#ff3366'); expect(before.gridStyle).toBe('dashed'); expect(before.gridOpacity).toBe(.25);
+  expect(before.nodeColor).toBe('#22aa66'); expect(before.nodeSize).toBe(.12); expect(before.nodeOpacity).toBe(.4);
+  expect(before.camera.position[0]).toBeGreaterThan(before.camera.target[0]);
+  await page.reload(); await ready(page);
+  await expect(page.locator('#left-sidebar')).toBeHidden();
+  await expect(page.locator('#right-sidebar')).toBeVisible();
+  await expect(page.locator('#grid-color')).toHaveValue('#ff3366');
+  await expect(page.locator('#grid-opacity')).toHaveValue('0.25');
+  await expect(page.locator('#grid-style')).toHaveValue('dashed');
+  await expect(page.locator('#node-color')).toHaveValue('#22aa66');
+  await expect(page.locator('#node-size')).toHaveValue('0.12');
+  await expect(page.locator('#node-opacity')).toHaveValue('0.4');
+  await expect(page.locator('#grid-settings')).toContainText('1 cell = 8 cm');
+  await expect(page.locator('#axis-snap-btn')).toHaveAttribute('aria-pressed', 'true');
+  await expect(page.locator('#nodes-btn')).toHaveAttribute('aria-pressed', 'false');
+  await page.locator('#right-sidebar-toggle').click();
+  await expect(page.locator('#left-sidebar')).toBeHidden();
+  const layout = await page.locator('#viewport').boundingBox(); expect(layout.x).toBe(0);
+  await page.locator('#left-sidebar-toggle').click();
+  const left = await page.locator('#left-sidebar').boundingBox(); expect(left.width).toBe(before.leftWidth);
+  await page.screenshot({ path: 'test-results/preferences.png' });
+});
+
+test('60-second autosave recovers committed structures but not unfinished beam drafts', async ({ page }) => {
+  await page.clock.install();
+  await page.goto('./'); await ready(page);
+  const canvas = page.locator('canvas');
+  const component = { id: 'backup-engine', type: 'engine', position: { x: 0, y: 0, z: 0 }, rotation: { x: 0, y: 0, z: 0 }, scale: { x: 1, y: 1, z: 1 } };
+  await page.locator('#file-input').setInputFiles({ name: 'vehicle.json', mimeType: 'application/json', buffer: Buffer.from(JSON.stringify({ format: 'anymaker-web-project', version: 1, objects: [component] })) });
+  await expect(page.locator('#object-count')).toHaveText('1 components');
+  await page.locator('[data-tool="beam"]').click();
+  await canvas.click({ position: { x: 450, y: 400 } });
+  await canvas.click({ position: { x: 720, y: 330 } });
+  await expect(page.locator('#topology-count')).toHaveText('2 nodes · 1 beams · 0 plates');
+  await canvas.click({ position: { x: 800, y: 500 } });
+  await page.clock.fastForward(61000);
+  await expect(page.locator('#autosave-status')).toHaveAttribute('data-state', 'saved');
+  const record = JSON.parse(await page.evaluate(key => localStorage.getItem(key), projectKey));
+  expect(record.document.topology.nodes).toHaveLength(2);
+  expect(record.document.topology.edges).toHaveLength(1);
+  expect(record.document.objects).toEqual([component]);
+  expect(Object.keys(record.document).sort()).toEqual(['format', 'objects', 'topology', 'version']);
+  await page.reload(); await ready(page);
+  await expect(page.locator('#topology-count')).toHaveText('2 nodes · 1 beams · 0 plates');
+  await expect(page.locator('#autosave-status')).toHaveAttribute('data-state', 'restored');
+  await expect(page.locator('#object-count')).toHaveText('1 components');
+  await page.locator('#undo-btn').click();
+  await expect(page.locator('#topology-count')).toHaveText('0 nodes · 0 beams · 0 plates');
+  await page.clock.fastForward(61000);
+  expect(JSON.parse(await page.evaluate(key => localStorage.getItem(key), projectKey)).document.topology.edges).toEqual([]);
+});
+
+test('damaged local data does not crash the editor or get silently overwritten', async ({ page }) => {
+  await page.addInitScript(({ settingsKey, projectKey }) => {
+    localStorage.setItem(settingsKey, '{broken');
+    localStorage.setItem(projectKey, '{broken');
+  }, { settingsKey, projectKey });
+  await page.clock.install();
+  const errors = []; page.on('pageerror', error => errors.push(error.message));
+  await page.goto('./'); await ready(page);
+  await expect(page.locator('#language-select')).toHaveValue('en');
+  await expect(page.locator('#autosave-status')).toHaveAttribute('data-state', 'error');
+  await page.locator('[data-tool="node"]').click();
+  await page.locator('canvas').click({ position: { x: 450, y: 400 } });
+  await page.clock.fastForward(61000);
+  expect(await page.evaluate(key => localStorage.getItem(key), projectKey)).toBe('{broken');
+  await expect(page.locator('#topology-count')).toHaveText('1 nodes · 0 beams · 0 plates');
+  expect(errors).toEqual([]);
+});
+
+test('quota errors preserve the last saved vehicle and report a recoverable error', async ({ page }) => {
+  await page.clock.install(); await page.goto('./'); await ready(page);
+  await page.locator('[data-tool="node"]').click();
+  await page.locator('canvas').click({ position: { x: 450, y: 400 } });
+  await page.clock.fastForward(61000);
+  await expect(page.locator('#autosave-status')).toHaveAttribute('data-state', 'saved');
+  const saved = await page.evaluate(key => localStorage.getItem(key), projectKey);
+  await page.evaluate(() => {
+    const original = Storage.prototype.setItem;
+    Storage.prototype.setItem = function (key, value) {
+      if (key.includes(':autosave')) throw new DOMException('Quota exceeded', 'QuotaExceededError');
+      return original.call(this, key, value);
+    };
+  });
+  await page.locator('canvas').click({ position: { x: 680, y: 400 } });
+  await page.clock.fastForward(61000);
+  await expect(page.locator('#autosave-status')).toHaveAttribute('data-state', 'write-error');
+  expect(await page.evaluate(key => localStorage.getItem(key), projectKey)).toBe(saved);
+  await expect(page.locator('#topology-count')).toHaveText('2 nodes · 0 beams · 0 plates');
+});
+
+test('another tab saving pauses overwrites until the user explicitly resumes', async ({ page, context }) => {
+  await page.clock.install(); await page.goto('./'); await ready(page);
+  const other = await context.newPage();
+  await other.goto('./'); await ready(other);
+  const incoming = { version: 1, savedAt: Date.now(), document: { format: 'anymaker-web-project', version: 1, objects: [], topology: { nodes: [{ id: 'other-node', position: { x: 1, y: 2, z: 3 } }], edges: [], plates: [] } } };
+  await other.evaluate(({ key, value }) => localStorage.setItem(key, value), { key: projectKey, value: JSON.stringify(incoming) });
+  await expect(page.locator('#autosave-status')).toHaveAttribute('data-state', 'conflict');
+  await page.locator('[data-tool="node"]').click();
+  await page.locator('canvas').click({ position: { x: 450, y: 400 } });
+  await page.clock.fastForward(61000);
+  expect(JSON.parse(await page.evaluate(key => localStorage.getItem(key), projectKey))).toEqual(incoming);
+  page.once('dialog', dialog => dialog.accept());
+  await page.locator('#resume-autosave').click();
+  await expect(page.locator('#autosave-status')).toHaveAttribute('data-state', 'saved');
+  const saved = JSON.parse(await page.evaluate(key => localStorage.getItem(key), projectKey));
+  expect(saved.document.topology.nodes[0].id).toBe('node-1');
+  await other.close();
+});

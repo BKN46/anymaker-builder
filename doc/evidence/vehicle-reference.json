@@ -1,0 +1,28 @@
+{
+  "version": 1,
+  "id": "test-vehicle-default-render",
+  "status": "reference-registered-not-visually-matched",
+  "files": [
+    { "path": "test-vehicle/vehicle.data", "bytes": 63399, "sha256": "89844924ac0b99c714b90ee2055beae478f8e0f0ea10433ae4dc855975302210" },
+    { "path": "test-vehicle/vehicle.meta", "bytes": 1541, "sha256": "7a5978f3642cdbb9af9987d95a4fc458d4cfcb8c454677f9332dd871b6151f63" },
+    { "path": "test-vehicle/vehicle.png", "bytes": 105427, "sha256": "24c9c6e21de2d1b1befee81d82a2388ae2e5ff0b6e03f484132e0edc12089c20" }
+  ],
+  "definitions": 48,
+  "vehicles": [
+    { "id": 551, "grids": 3, "components": 5, "nodes": 11, "edges": 16, "plates": 7 },
+    { "id": 552, "grids": 3, "components": 5, "nodes": 9, "edges": 13, "plates": 5 },
+    { "id": 553, "grids": 2, "components": 143, "nodes": 223, "edges": 416, "plates": 115 },
+    { "id": 554, "grids": 1, "components": 6, "nodes": 28, "edges": 48, "plates": 11 }
+  ],
+  "renderReference": {
+    "width": 512,
+    "height": 512,
+    "camera": null,
+    "projection": null,
+    "lighting": null,
+    "exposure": null,
+    "gameVersion": null,
+    "comparison": ["body-silhouette", "vehicle-and-grid-transforms", "wheel-placement", "red-body-paint", "glass-transparency", "interior", "dynamic-parts"],
+    "pixelTolerance": null
+  }
+}

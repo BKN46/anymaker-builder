@@ -72,6 +72,14 @@ export function parseNativeData(input) {
   return model;
 }
 
+export function parseNativePair(dataInput, metaInput) {
+  const meta = typeof metaInput === 'string' ? JSON.parse(metaInput) : metaInput;
+  if (!meta || typeof meta !== 'object' || Array.isArray(meta)) throw new Error('Native .meta must be a JSON object');
+  const model = parseNativeData(dataInput);
+  model.extras.native.meta = structuredClone(meta);
+  return model;
+}
+
 export function nativeStats(model) {
   validateProject(model);
   return model.vehicles.map(vehicle => ({

@@ -1,5 +1,6 @@
 import { fromEditorDocument } from './model.js';
 import { validateTopologyState } from './topology.js';
+import { assertGridScalar, assertGridVector, CELL_SIZE_CM } from './grid.js';
 
 export const FORMAT = 'anymaker-web-project';
 export const VERSION = 1;
@@ -19,14 +20,14 @@ export function validateDocument(input, definitions) {
     if (o.gridId !== undefined && (typeof o.gridId !== 'string' || !/^[A-Za-z0-9_-]{1,80}$/.test(o.gridId))) throw new Error('Invalid grid ID at ' + index);
     if (o.gridId !== undefined) result.gridId = o.gridId;
     if (o.mirror !== undefined) {
-      if (!o.mirror || !['x', 'y', 'z'].includes(o.mirror.axis) || !Number.isFinite(o.mirror.offset) || Math.abs(o.mirror.offset) > 10000) throw new Error('Invalid mirror data at ' + index);
-      result.mirror = { axis: o.mirror.axis, offset: o.mirror.offset };
+      if (!o.mirror || !['x', 'y', 'z'].includes(o.mirror.axis)) throw new Error('Invalid mirror data at ' + index);
+      result.mirror = { axis: o.mirror.axis, offset: assertGridScalar(o.mirror.offset, '镜像偏移') };
     }
     for (const field of ['position', 'rotation', 'scale']) {
       const vector = o[field];
       if (!vector || !axes.every(a => own(vector, a) && typeof vector[a] === 'number' && Number.isFinite(vector[a]) && Math.abs(vector[a]) <= 10000)) throw new Error('Invalid transform at ' + index + '.' + field);
       if (field === 'scale' && axes.some(a => vector[a] <= 0 || vector[a] > 100)) throw new Error('Scale must be in (0, 100]');
-      result[field] = Object.fromEntries(axes.map(a => [a, vector[a]]));
+      result[field] = field === 'position' ? assertGridVector(vector, '组件位置') : Object.fromEntries(axes.map(a => [a, vector[a]]));
     }
     return result;
   });
@@ -65,6 +66,8 @@ export function escapeXml(value) {
 }
 
 export function toIntermediateXml(document) {
+  for (const object of document.objects || []) { assertGridVector(object.position, '组件位置'); if (object.mirror) assertGridScalar(object.mirror.offset, '镜像偏移'); }
+  validateTopologyState(document.topology);
   const vector = (name, v) => '<' + name + ' ' + axes.map(a => a + '="' + v[a].toFixed(6) + '"').join(' ') + '/>';
   const components = document.objects.map(o => {
     const grid = o.gridId ? ' grid="' + escapeXml(o.gridId) + '"' : '';
@@ -75,7 +78,7 @@ export function toIntermediateXml(document) {
   const nodes = topology.nodes.map(node => '  <node id="' + escapeXml(node.id) + '" x="' + node.position.x.toFixed(6) + '" y="' + node.position.y.toFixed(6) + '" z="' + node.position.z.toFixed(6) + '"/>');
   const edges = topology.edges.map(edge => '  <edge id="' + escapeXml(edge.id) + '" a="' + escapeXml(edge.a) + '" b="' + escapeXml(edge.b) + '"/>');
   const plates = topology.plates.map(plate => '  <plate id="' + escapeXml(plate.id) + '" nodes="' + plate.nodeIds.map(escapeXml).join(' ') + '"/>');
-  return ['<?xml version="1.0" encoding="UTF-8"?>', '<!-- EDITOR INTERCHANGE ONLY. Not a verified Anymaker vehicle save. -->', '<anymaker-web-project version="1" game-compatible="false">', '<topology>', ...nodes, ...edges, ...plates, '</topology>', ...components, '</anymaker-web-project>'].join(String.fromCharCode(10));
+  return ['<?xml version="1.0" encoding="UTF-8"?>', '<!-- EDITOR INTERCHANGE ONLY. Not a verified Anymaker vehicle save. -->', `<anymaker-web-project version="1" game-compatible="false" coordinate-unit="world" grid-cell-size-cm="${CELL_SIZE_CM}">`, '<topology>', ...nodes, ...edges, ...plates, '</topology>', ...components, '</anymaker-web-project>'].join(String.fromCharCode(10));
 }
 
 export class History {

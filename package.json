@@ -9,7 +9,11 @@
     "check:assets": "node scripts/check-published-assets.mjs",
     "preview": "vite preview",
     "test": "node --test tests/unit.test.js",
+    "check": "npm test && npm run build",
     "test:browser": "playwright test",
+    "test:browser:editor": "playwright test tests/browser/editor.spec.js",
+    "test:browser:preferences": "playwright test tests/browser/preferences.spec.js",
+    "check:full": "npm test && npm run check:assets && npm run test:browser && npm run build",
     "test:serve": "vite build --base=/anymaker-builder/ && vite preview --host 127.0.0.1 --port 4173 --strictPort --base=/anymaker-builder/"
   },
   "dependencies": {

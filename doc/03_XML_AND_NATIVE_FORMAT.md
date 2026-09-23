@@ -22,9 +22,11 @@
 
 导入时检查格式版本、组件 ID 唯一性、定义存在性、有限数值、变换范围和缩放正值。工程不保存本地绝对路径，不保存用户选择的文件对象。
 
+编辑器空间晶格固定为 `1 格 = 8 cm = 0.08` 世界单位。`objects[].position`、`mirror.offset` 和 `topology.nodes[].position` 的每个世界 X/Y/Z 分量都必须是整数格；真正的非格点值会拒绝导入，只有 8 cm 倍数上的浮点残差会规范化。梁端点由节点引用，面板只引用节点，因此也保持整格。`scale` 是无量纲比例，不表示格数。
+
 工程文件只引用稳定的组件定义 ID。Mesh、材质和 lazy-loaded 发布 URL 不写进工程 JSON，而由随站点发布的 component index、binding 和 asset manifest 解析；这保证工程可以在没有游戏本体的 GitHub Pages 环境中重建。
 
-当前实现上限为 2000 个组件，位置/旋转绝对值不超过 10000，缩放在 (0, 100]。这些是编辑器输入边界，不是已经验证的游戏建造限制。旋转为 Three.js XYZ 欧拉弧度；位置单位和游戏格点换算尚未验证。
+当前实现上限为 2000 个组件，位置/旋转绝对值不超过 10000，缩放在 (0, 100]。这些是编辑器输入边界，不是已经验证的游戏建造限制。旋转为 Three.js XYZ 欧拉弧度；8 cm 编辑器晶格与游戏坐标/格点的映射尚未验证。
 
 ## 当前中间 XML
 
@@ -33,7 +35,7 @@
 ```xml
 <?xml version="1.0" encoding="UTF-8"?>
 <!-- EDITOR INTERCHANGE ONLY. Not a verified Anymaker vehicle save. -->
-<anymaker-web-project version="1" game-compatible="false">
+<anymaker-web-project version="1" game-compatible="false" coordinate-unit="world" grid-cell-size-cm="8">
   <component instance="instance-uuid" definition="engine">
     <position x="0.000000" y="0.000000" z="0.000000"/>
     <rotation-radians-xyz x="0.000000" y="0.000000" z="0.000000"/>
@@ -48,9 +50,10 @@ XML 属性和文本都必须转义。此格式没有原生载具的节点、梁�
 | --- | --- | --- |
 | version | 工程 schema 版本 | 目前固定为 1 |
 | game-compatible | 固定 false | 不宣称游戏可读取 |
+| coordinate-unit / grid-cell-size-cm | 固定 `world` / `8` | 编辑器使用 8 cm 整数格，不声明游戏单位兼容 |
 | component.instance | objects[].id | 编辑器实例 ID，非原生整数 ID |
 | component.definition | objects[].type | 组件定义 ID，非原生 def 索引 |
-| position | objects[].position | 编辑器坐标，未映射 grid 局部格点 |
+| position | objects[].position | 编辑器世界坐标；每轴为 8 cm 整数格，未映射原生 grid 局部格点 |
 | rotation-radians-xyz | objects[].rotation | XYZ 欧拉角、弧度 |
 | scale | objects[].scale | 编辑器变换，不等于游戏 ext/stretch |
 
@@ -71,6 +74,10 @@ XML 属性和文本都必须转义。此格式没有原生载具的节点、梁�
 
 原生适配器应保留省略字段与未知字段。没有证据时不向原生文件强行填入编辑器 scale 或欧拉角。
 
+## 最终导出目标
+
+最终输出是游戏原本配套的 `.data` 和 `.meta`，不再以 XML 为最终格式。当前 XML 仅保留为开发交换工具。已有 `.data` 回写入口处理的是独立原生领域模型，不会自动同步当前场景编辑；不存在完整的 `.meta` 导出器，不能视为正式的载具导出。须完成单位/父级变换、ID 与连接引用、涂装/状态、未知字段和省略值保留、包围盒重算以及实际游戏加载验证后，才实现正式成对导出。
+
 ## 原生 Anymaker 文件待确认项
 
 目前本地证据指向 `.data/.meta` JSON，而不是 XML。正式兼容导出前必须取得游戏真实导出样本或通过受控实验确认：
@@ -86,5 +93,5 @@ XML 属性和文本都必须转义。此格式没有原生载具的节点、梁�
 在这些问题完成前，UI 使用“中间格式 XML”名称，不提供“游戏兼容 XML”按钮。
 ## 当前只读原生适配状态
 
-`src/native/anymaker-data.js` 提供只读 `.data` JSON 到领域模型的解析，以及保留原始字段的 JSON 回写试验。页面的“检查原生文件”按钮会执行领域模型校验；读取成功后可导出 `anymaker-native.data`。导出仍会报告未映射实体，未经过游戏加载验证，因此不能替代原生存档导出。
+`src/native/anymaker-data.js` 提供只读 `.data` JSON 到领域模型的解析，以及配套 `.meta` JSON 的保留。页面的“导入本地载具”与“选择配套 .data / .meta”入口只接受同名的一份 `.data` 和一份 `.meta`，单独选择、重复扩展名、不同基名、超限文件和非对象 `.meta` 都会拒绝；浏览器只在本地读取，确认后才替换场景。`.meta` 当前仅作为未知元数据保留，未参与未验证的坐标、bounds 或游戏语义推断。读取成功后可导出试验性 `anymaker-native.data`。导出仍会报告未映射实体，未经过游戏加载验证，因此不能替代原生存档导出。
 中间 XML 当前额外保留 `component.grid` 和可选 `<mirror axis="x|y|z" offset="..."/>`，用于编辑器工程交换；这些字段仍然不是原生游戏 schema。

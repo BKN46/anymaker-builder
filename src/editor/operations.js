@@ -1,7 +1,7 @@
 // Pure project operations. This module intentionally has no Three.js import:
 // IDs, grids and transforms remain portable between the editor, file format
 // and a future native Anymaker adapter.
-const AXES = ['x', 'y', 'z'];
+import { AXES, assertGridScalar, assertGridVector } from './grid.js';
 
 const clone = value => structuredClone(value);
 const vector = (value, fallback = 0) => Object.fromEntries(AXES.map(axis => [axis, Number(value?.[axis] ?? fallback)]));
@@ -21,6 +21,7 @@ export function allocateIds(objects, suffix = 'copy') {
 
 export function copyObjects(objects, ids, delta = { x: 0, y: 0, z: 0 }) {
   const selected = new Set(ids);
+  const shift = assertGridVector(vector(delta), '复制位移');
   const next = clone(objects);
   const allocate = allocateIds(next);
   const idMap = {};
@@ -28,7 +29,7 @@ export function copyObjects(objects, ids, delta = { x: 0, y: 0, z: 0 }) {
     if (!selected.has(object.id)) continue;
     const copy = clone(object);
     copy.id = allocate(object.id);
-    copy.position = add(vector(copy.position), vector(delta));
+    copy.position = assertGridVector(add(assertGridVector(vector(copy.position), '组件位置'), shift), '复制后的组件位置');
     idMap[object.id] = copy.id;
     next.push(copy);
   }
@@ -37,16 +38,23 @@ export function copyObjects(objects, ids, delta = { x: 0, y: 0, z: 0 }) {
 
 export function moveObjects(objects, ids, delta) {
   const selected = new Set(ids);
-  const shift = vector(delta);
+  const shift = assertGridVector(vector(delta), '移动位移');
   return {
     objects: clone(objects).map(object => selected.has(object.id)
-      ? { ...object, position: add(vector(object.position), shift) }
+      ? { ...object, position: assertGridVector(add(assertGridVector(vector(object.position), '组件位置'), shift), '移动后的组件位置') }
       : object),
   };
 }
 
+export function removeObjects(objects, ids) {
+  const selected = new Set(ids);
+  const removed = objects.filter(object => selected.has(object.id)).map(object => object.id);
+  return { objects: clone(objects).filter(object => !selected.has(object.id)), removed };
+}
+
 export function mirrorObjects(objects, ids, { axis = 'x', offset = 0 } = {}) {
-  if (!AXES.includes(axis) || !Number.isFinite(offset)) throw new Error('镜像平面无效');
+  if (!AXES.includes(axis)) throw new Error('镜像平面无效');
+  const gridOffset = assertGridScalar(offset, '镜像偏移');
   const selected = new Set(ids);
   const next = clone(objects);
   const allocate = allocateIds(next, 'mirror');
@@ -55,12 +63,13 @@ export function mirrorObjects(objects, ids, { axis = 'x', offset = 0 } = {}) {
     if (!selected.has(object.id)) continue;
     const copy = clone(object);
     copy.id = allocate(object.id);
-    copy.position = vector(copy.position);
-    copy.position[axis] = 2 * offset - copy.position[axis];
+    copy.position = assertGridVector(vector(copy.position), '组件位置');
+    copy.position[axis] = 2 * gridOffset - copy.position[axis];
+    copy.position = assertGridVector(copy.position, '镜像后的组件位置');
     // Reflection is not silently encoded as a negative scale. The renderer
     // consumes this explicit operation metadata and the native adapter can
     // later apply a handedness/component mapping where one exists.
-    copy.mirror = { axis, offset };
+    copy.mirror = { axis, offset: gridOffset };
     idMap[object.id] = copy.id;
     next.push(copy);
   }

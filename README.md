@@ -6,6 +6,16 @@
 
 最终交付要求是独立前端：GitHub Pages 必须自带完整解析入库后的组件 Mesh、材质、动态 Mesh 依赖和 manifest，首次使用不需要 Anymaker 游戏本体、`game.exe` 或本地 ROM。允许通过 Draco/Meshopt/KTX2 等方式压缩，运行时按组件 lazy loading；压缩、转换和完整性均需有可审计记录。
 
+## 本地工作区
+
+界面默认英文，左上角可切换中文。XYZ 方向指示器提供六向、等距和聚焦视角；右侧可设置网格颜色、透明度及实线/虚线。工具栏独立悬浮，左右侧栏中部把手用于折叠展开。
+
+全局空间单位固定为整数格：`1 格 = 8 cm = 0.08` 世界单位。组件原点、节点、梁端点、面板顶点、镜像偏移及复制/移动位移均必须对齐世界 XYZ 整数格；缩放仍为无量纲比例。梁的方形截面边长为一格：位于 XY、YZ 或 XZ 坐标平面的斜梁会保持一对长侧面与该平面平行，梁和面默认浅灰色。两击建梁时 XYZ 标尺仅显示整数格与厘米，视口“Axis snap / 轴向吸附”按钮或建梁时按 `A` 可切换单轴吸附；默认关闭，启用后自动选择世界轴，只保留该方向的整格位移，同轴已有节点优先。节点不显示内部 ID；右侧工作网格设置可保存节点颜色、大小和透明度。
+
+设置保存在当前站点的 `localStorage`；载具工程每分钟自动备份，重新打开同一地址时校验恢复。存储禁用、损坏、容量不足或多标签页覆盖冲突会显示提示。仅保存已提交编辑器数据，不保存本地 Mesh 文件；清理浏览器数据会清除备份，请定期下载工程 JSON。
+
+最终游戏导出目标为配套 `.data` / `.meta`，现有 XML 仅用于开发交换。`test-vehicle/vehicle.data`、`vehicle.meta`、`vehicle.png` 是后续渲染对照基准，尚未达到参考图效果，验收范围见 `TODO.md`。
+
 ## 当前安排
 
 按 [TODO.md](TODO.md) 先完成设计，再继续实现。镜像、子网格拆分/复制/移动/合并及组件 Mesh 分文件是核心工作。触屏、手机和平板适配暂缓。
@@ -22,17 +32,16 @@
 ```powershell
 npm ci
 npm run dev
-npm test
-npx playwright install chromium
-npm run test:browser
-npm run build
+npm run check
 ```
+
+日常默认只运行 `npm run check`（单元测试 + 构建）。仅改动编辑器交互时运行 `npm run test:browser:editor`，仅改动设置/恢复时运行 `npm run test:browser:preferences`；资源、manifest 或转换脚本改动才运行 `npm run check:assets`。发布前或跨模块重构再运行完整的 `npm run check:full`。首次浏览器检查前执行 `npx playwright install chromium`。
 
 生产输出在 dist/；默认相对 base 支持静态子路径。Pages workflow 已配置，但尚无实际线上发布验收记录。当前 workflow 仅构建部署，测试接入列在 TODO。
 
 ## 本地资源
 
-开发阶段页面可以选择“导入本地模型”，指定 Anymaker/rom/meshes 文件夹，也可选择单个 .mesh 文件。浏览器只读取用户选中的文件；该入口用于解析器验证，不是最终线上运行条件。正式发布后模型应来自 Pages 的 `public/assets`，缺失资源显示为构建错误而不是交给用户补文件。
+顶部“导入本地载具”必须同时选择同名配套的 `.data` 与 `.meta` JSON 文件（例如 `vehicle.data` / `vehicle.meta`）；浏览器仅在本地读取、校验并保留元数据，确认“导入 .data / .meta 到当前场景”后才替换当前场景。该流程是格式研究入口，不代表原生 round-trip 或游戏加载兼容。开发用 `.mesh` 文件仅在右侧资源面板选择，用于解析器与几何审计；正式发布模型仍来自 Pages 的 `public/assets`，不能要求用户提供游戏资源。
 
 当前解析器支持 Mesh v5 的三种静态布局；发布资产已覆盖组件引用的 794 个 Mesh，其中 793 个完成几何解析，1 个特殊 blurred 原生变体以完整 raw bytes 入库并标记 opaque。packed color、材质和动态装配仍需研究。数据来自 [审计报告](doc/evidence/asset-audit.json)，不是视觉一致性验收结果。
 
