@@ -26,6 +26,7 @@ export function applyGridStyle(grid, { gridColor, gridOpacity, gridStyle }) {
 }
 
 export function createOrientationIndicator(host, camera, onView, label) {
+  const getCamera = typeof camera === 'function' ? camera : () => camera;
   const root = document.createElement('section'); root.id = 'orientation-indicator';
   root.setAttribute('aria-label', label('orientation'));
   const sphere = document.createElement('div'); sphere.className = 'orientation-sphere';
@@ -50,7 +51,7 @@ export function createOrientationIndicator(host, camera, onView, label) {
   return {
     root, footer,
     update() {
-      inverse.copy(camera.quaternion).invert();
+      inverse.copy(getCamera().quaternion).invert();
       for (const { line, button, direction } of endpoints) {
         point.copy(direction).applyQuaternion(inverse);
         const x = 60 + point.x * 40; const y = 60 - point.y * 40;

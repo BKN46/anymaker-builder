@@ -30,7 +30,7 @@ export const operationMessages = {
   '已配对 {dataName} / {metaName}。{vehicles}。确认后才导入当前场景。': 'Paired {dataName} / {metaName}. {vehicles}. Confirm to import into the current scene.',
   '无法导入原生文件：{error}': 'Could not import native files: {error}', '正在导入配套原生载具': 'Importing paired native vehicle', '原生模型尚未加载': 'No native model loaded', '当前操作仍在进行': 'An operation is in progress',
   '已将配套 .data / .meta 的组件导入当前场景；节点、梁、面板和连接仍保留在领域模型中': 'Paired .data / .meta components imported. Original topology and connections remain in the domain model.',
-  '已导出 JSON，存在未映射字段诊断': 'JSON exported with unmapped-field diagnostics', '已导出原生 JSON 结构': 'Experimental native JSON exported', '原生导出失败：{error}': 'Native export failed: {error}',
+  '导出原生配套文件（未验证）': 'Export native pair (unverified)', '原生配套文件的无编辑 round-trip 校验失败': 'Unedited native-pair round-trip validation failed', '已导出原始 .data / .meta 配套文件；当前编辑器修改尚未完整回写，不能作为游戏兼容存档': 'Exported the original .data / .meta pair. Current editor changes are not fully written back, so this is not a game-compatible save.', '原生导出失败：{error}': 'Native export failed: {error}',
   '已取消当前拓扑操作': 'Topology operation cancelled', '组件目录加载失败：{error}': 'Component catalog failed: {error}',
   '节点坐标无效': 'Invalid node coordinates', '梁长度必须大于零': 'Beam length must be positive', '梁的端点必须是不同节点': 'Beam endpoints must be different nodes',
 };

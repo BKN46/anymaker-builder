@@ -1,7 +1,15 @@
+import { nativePaintColor } from './native-paint.js';
+
 const finite = (value, min, max, fallback) => Number.isFinite(value) && value >= min && value <= max ? value : fallback;
 const bool = (value, fallback) => typeof value === 'boolean' ? value : fallback;
 const text = (value, size, fallback = '') => typeof value === 'string' && value.length <= size ? value : fallback;
 const vector = value => Array.isArray(value) && value.length === 3 && value.every(n => Number.isFinite(n) && Math.abs(n) <= 10000);
+const hexColor = value => typeof value === 'string' && /^#[\da-f]{6}$/i.test(value) ? value.toLowerCase() : null;
+const paintColors = (value, fallback) => {
+  if (!Array.isArray(value) || value.length > 12) return fallback;
+  const colors = value.map(color => hexColor(color) || (Number.isInteger(color) && color >= 0 && color <= 255 ? nativePaintColor(color) : null));
+  return colors.every(Boolean) ? [...new Set(colors)] : fallback;
+};
 export const AUTOSAVE_INTERVAL = 60000;
 
 export function normalizeSettings(input = {}) {
@@ -14,7 +22,7 @@ export function normalizeSettings(input = {}) {
   return {
     version: 1,
     language: s.language === 'zh' ? 'zh' : 'en',
-    leftWidth: finite(s.leftWidth, 240, 480, 304),
+    leftWidth: finite(s.leftWidth, 240, 720, 304),
     leftCollapsed: bool(s.leftCollapsed, false),
     rightOpen: bool(s.rightOpen, false),
     gridColor: typeof s.gridColor === 'string' && /^#[\da-f]{6}$/i.test(s.gridColor) ? s.gridColor : '#8294a8',
@@ -26,9 +34,23 @@ export function normalizeSettings(input = {}) {
     nodeSize: finite(s.nodeSize, .02, .25, .055),
     nodeOpacity: finite(s.nodeOpacity, 0, 1, 1),
     beamAxisSnap: bool(s.beamAxisSnap, false),
+    beamLengthsVisible: bool(s.beamLengthsVisible, false),
+    backgroundColor: typeof s.backgroundColor === 'string' && /^#[\da-f]{6}$/i.test(s.backgroundColor) ? s.backgroundColor : '#ffffff',
+    lightAzimuth: finite(s.lightAzimuth, -180, 180, 35),
+    lightElevation: finite(s.lightElevation, 5, 90, 55),
+    lightIntensity: finite(s.lightIntensity, 0, 8, 3),
+    shadowStrength: finite(s.shadowStrength, 0, 1, .65),
+    lightSoftness: finite(s.lightSoftness, 0, 8, 2),
+    cameraLightEnabled: bool(s.cameraLightEnabled, true),
+    cameraLightIntensity: finite(s.cameraLightIntensity, 0, 8, 2),
+    // Older preferences kept diagnostic native palette indices. Convert them
+    // once on read so the visible palette and all newly saved colors are RGB.
+    paintQuickColors: paintColors(s.paintQuickColors, ['#bd2636', '#631a24', '#2b3440', '#20252c', '#a16a30']),
+    orthographic: bool(s.orthographic, false),
+    showBuildingFurniture: bool(s.showBuildingFurniture, false),
     query: text(s.query, 200), category: text(s.category, 80), selectedType: text(s.selectedType, 100, 'engine'),
-    tool: ['select', 'place', 'erase', 'translate', 'rotate', 'scale', 'node', 'beam', 'plate'].includes(s.tool) ? s.tool : 'select',
-    drawers: { catalog: bool(s.drawers?.catalog, true), inspector: bool(s.drawers?.inspector, false), resources: bool(s.drawers?.resources, false) },
+    tool: ['select', 'place', 'erase', 'translate', 'rotate', 'scale', 'node', 'beam', 'split', 'plate', 'glass', 'connect', 'paint'].includes(s.tool) ? s.tool : 'select',
+    drawers: { catalog: bool(s.drawers?.catalog, true), inspector: bool(s.drawers?.inspector, false), resources: bool(s.drawers?.resources, false), history: bool(s.drawers?.history, false) },
     camera,
   };
 }

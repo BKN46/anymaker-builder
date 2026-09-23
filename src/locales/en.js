@@ -2,6 +2,7 @@ import { operationMessages } from './operations-en.js';
 
 export const englishMessages = {
   ...operationMessages,
+  '\u955c\u5934\u8f85\u52a9\u706f': 'Camera fill light', '\u955c\u5934\u8f85\u52a9\u706f\u5f3a\u5ea6': 'Camera fill intensity',
   '界面语言': 'Interface language', '正在加载定义…': 'Loading definitions…', '编辑工具': 'Build tools',
   '导入本地载具': 'Import local vehicle', '新建': 'New', '撤销': 'Undo', '重做': 'Redo', '保存工程': 'Save project', '打开工程': 'Open project', '中间格式 XML': 'Debug XML',
   '收起方块库': 'Collapse library', '展开方块库': 'Expand library', '方块库': 'Component library',

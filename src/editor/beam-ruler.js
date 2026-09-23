@@ -1,3 +1,4 @@
+import * as THREE from 'three';
 import { beamMeasurements } from './construction-view.js';
 import { CELL_SIZE_CM, formatCells } from './grid.js';
 import { applyTranslations, setText } from '../i18n.js';
@@ -7,6 +8,7 @@ const svgNS = 'http://www.w3.org/2000/svg';
 const formatCm = cells => String(Math.abs(cells) * CELL_SIZE_CM);
 
 export function createBeamRuler(viewport, camera) {
+  const getCamera = typeof camera === 'function' ? camera : () => camera;
   const root = document.createElement('div'); root.id = 'beam-ruler'; root.hidden = true;
   const svg = document.createElementNS(svgNS, 'svg'); svg.setAttribute('aria-hidden', 'true');
   const panel = document.createElement('div'); panel.className = 'beam-measurements';
@@ -25,7 +27,7 @@ export function createBeamRuler(viewport, camera) {
   let measurements = [];
   function hide() { root.hidden = true; measurements = []; }
   function project(point, width, height) {
-    const p = point.clone().project(camera);
+    const p = point.clone().project(getCamera());
     if (p.z < -1 || p.z > 1 || ![p.x, p.y, p.z].every(Number.isFinite)) return null;
     return { x: (p.x + 1) * width / 2, y: (1 - p.y) * height / 2 };
   }
@@ -65,5 +67,46 @@ export function createBeamRuler(viewport, camera) {
     hide,
     relabel() { applyTranslations(root); },
     dispose() { hide(); root.remove(); },
+  };
+}
+
+export function createBeamLengthLabels(viewport, camera) {
+  const getCamera = typeof camera === 'function' ? camera : () => camera;
+  const root = document.createElement('div'); root.id = 'beam-length-labels'; root.hidden = true;
+  viewport.append(root);
+  let entries = [];
+  function project(point) {
+    const value = point.clone().project(getCamera());
+    if (value.z < -1 || value.z > 1 || ![value.x, value.y, value.z].every(Number.isFinite)) return null;
+    return { x: (value.x + 1) * viewport.clientWidth / 2, y: (1 - value.y) * viewport.clientHeight / 2 };
+  }
+  function update() {
+    if (root.hidden) return;
+    for (const { label, midpoint } of entries) {
+      const point = project(midpoint);
+      label.hidden = !point;
+      if (point) label.style.transform = `translate(${point.x}px, ${point.y}px) translate(-50%, -50%)`;
+    }
+  }
+  return {
+    setBeams(nodes, edges) {
+      const byId = new Map(nodes.map(node => [node.id, node.position]));
+      root.replaceChildren();
+      entries = edges.flatMap(edge => {
+        const a = byId.get(edge.a); const b = byId.get(edge.b);
+        if (!a || !b) return [];
+        const measurements = beamMeasurements(a, b);
+        if (!measurements.length) return [];
+        const label = document.createElement('output'); label.className = 'beam-length-label';
+        label.textContent = measurements.map(({ axis, cells }) => `${axis.toUpperCase()} ${formatCells(cells)}`).join(' · ');
+        label.title = measurements.map(({ axis, cells }) => `${axis.toUpperCase()} ${formatCells(cells)} cells / ${formatCm(cells)} cm`).join(' · ');
+        root.append(label);
+        return [{ label, midpoint: new THREE.Vector3(a.x, a.y, a.z).add(new THREE.Vector3(b.x, b.y, b.z)).multiplyScalar(.5) }];
+      });
+      update();
+    },
+    setVisible(value) { root.hidden = !value; if (value) update(); },
+    update,
+    dispose() { entries = []; root.remove(); },
   };
 }

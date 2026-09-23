@@ -23,6 +23,18 @@ export function validateDocument(input, definitions) {
       if (!o.mirror || !['x', 'y', 'z'].includes(o.mirror.axis)) throw new Error('Invalid mirror data at ' + index);
       result.mirror = { axis: o.mirror.axis, offset: assertGridScalar(o.mirror.offset, '镜像偏移') };
     }
+    if (o.colors !== undefined) {
+      if (!Array.isArray(o.colors) || o.colors.length > 10 || o.colors.some(color => !Number.isInteger(color) || color < 0 || color > 255)) throw new Error('Invalid component color slots at ' + index);
+      result.colors = [...o.colors];
+    }
+    if (o.hidden !== undefined) {
+      if (typeof o.hidden !== 'boolean') throw new Error('Invalid component visibility at ' + index);
+      if (o.hidden) result.hidden = true;
+    }
+    if (o.nativeExtension !== undefined) {
+      if (!Array.isArray(o.nativeExtension) || o.nativeExtension.length !== 3 || o.nativeExtension.some(value => !Number.isInteger(value) || Math.abs(value) > 10000)) throw new Error('Invalid native component extension at ' + index);
+      result.nativeExtension = [...o.nativeExtension];
+    }
     for (const field of ['position', 'rotation', 'scale']) {
       const vector = o[field];
       if (!vector || !axes.every(a => own(vector, a) && typeof vector[a] === 'number' && Number.isFinite(vector[a]) && Math.abs(vector[a]) <= 10000)) throw new Error('Invalid transform at ' + index + '.' + field);
@@ -32,7 +44,7 @@ export function validateDocument(input, definitions) {
     return result;
   });
   const result = { format: FORMAT, version: VERSION, objects };
-  if (input.topology !== undefined) result.topology = validateTopologyState(input.topology);
+  if (input.topology !== undefined) result.topology = validateTopologyState(input.topology, new Set(objects.map(object => object.id)));
   // Run the renderer-independent model adapter as a second boundary check.
   // This keeps future nodes/edges/plates/links additions out of Three.js.
   fromEditorDocument(result);
@@ -57,7 +69,7 @@ export function migrateDocument(input, definitions) {
 
 export function project(objects, topology) {
   const result = { format: FORMAT, version: VERSION, objects: structuredClone(objects) };
-  if (topology !== undefined) result.topology = validateTopologyState(topology);
+  if (topology !== undefined) result.topology = validateTopologyState(topology, new Set(objects.map(object => object.id)));
   return result;
 }
 
@@ -82,12 +94,14 @@ export function toIntermediateXml(document) {
 }
 
 export class History {
-  constructor(initial) { this.entries = [structuredClone(initial)]; this.cursor = 0; }
-  commit(value) {
+  constructor(initial, initialLabel = 'Initial state') { this.entries = [structuredClone(initial)]; this.labels = [initialLabel]; this.cursor = 0; }
+  commit(value, label = 'Edit') {
     if (JSON.stringify(value) === JSON.stringify(this.entries[this.cursor])) return;
     this.entries.splice(this.cursor + 1);
+    this.labels.splice(this.cursor + 1);
     this.entries.push(structuredClone(value));
-    if (this.entries.length > 60) this.entries.shift();
+    this.labels.push(label);
+    if (this.entries.length > 60) { this.entries.shift(); this.labels.shift(); }
     this.cursor = this.entries.length - 1;
   }
   peekUndo() { return this.cursor > 0 ? structuredClone(this.entries[this.cursor - 1]) : null; }

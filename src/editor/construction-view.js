@@ -5,6 +5,7 @@ export const GRID_SIZE = 20;
 export const GRID_DIVISIONS = GRID_SIZE / CELL_SIZE_WORLD;
 export const GRID_CELL_SIZE = CELL_SIZE_WORLD;
 export const BEAM_WIDTH = GRID_CELL_SIZE;
+export const BEAM_JOINT_SIZE = BEAM_WIDTH * 1.1;
 export const STRUCTURE_COLOR = 0xcccccc;
 const EPSILON = 1e-6;
 const vector = point => new THREE.Vector3(point.x, point.y, point.z);
@@ -25,6 +26,18 @@ export function projectBuildPoint(ray, frame) {
   if (!point) return null;
   const gridPoint = quantizeWorldVector(point);
   return gridPoint ? vector(gridPoint) : null;
+}
+
+// Structural coordinates identify cells, rather than their visible boundary
+// lines. Placement must follow the pointer: use its vehicle hit when present,
+// then its work-plane intersection as a fallback.
+export function resolvePlacementPoint(pointerRaycaster, targets, workPlane) {
+  const point = pointerRaycaster.intersectObjects(targets, true)[0]?.point;
+  const gridPoint = point && quantizeWorldVector(point);
+  if (gridPoint) return vector(gridPoint);
+  const planePoint = pointerRaycaster.ray.intersectPlane(workPlane, new THREE.Vector3());
+  const planeGridPoint = planePoint && quantizeWorldVector(planePoint);
+  return planeGridPoint ? vector(planeGridPoint) : null;
 }
 
 export function resolveBeamPoint(ray, frame, { axisSnap = false, node = null, viewNormal = frame.plane.normal } = {}) {
@@ -84,16 +97,62 @@ export function updateBeamMesh(mesh, start, end) {
   const reference = Math.abs(localY.z) < .999 ? new THREE.Vector3(0, 0, 1) : new THREE.Vector3(1, 0, 0);
   const localZ = reference.addScaledVector(localY, -reference.dot(localY)).normalize();
   const localX = new THREE.Vector3().crossVectors(localY, localZ).normalize();
+  // Node coordinates name cell centres. A solid beam occupies both endpoint
+  // cells, so its visual extent needs half a cell beyond each centreline end.
+  const visualLength = length + BEAM_WIDTH;
   mesh.position.copy(a).add(b).multiplyScalar(.5);
   mesh.quaternion.setFromRotationMatrix(new THREE.Matrix4().makeBasis(localX, localY, localZ));
-  mesh.scale.set(BEAM_WIDTH, length, BEAM_WIDTH);
+  mesh.scale.set(BEAM_WIDTH, visualLength, BEAM_WIDTH);
   mesh.visible = true;
   mesh.updateMatrixWorld(true);
   return true;
 }
 
 export function createBeamMesh(start, end, material) {
+  // This remains the editor's provisional rectangular projection. The game
+  // does not use an eight-sided cylinder: game.gcl's vehicle_edge_util emits
+  // grid-derived quads and triangles based on the non-zero endpoint axes.
+  // Do not mistake this fallback mesh for that native topology.
   const mesh = new THREE.Mesh(new THREE.BoxGeometry(1, 1, 1), material);
   updateBeamMesh(mesh, start, end);
   return mesh;
+}
+
+export function createBeamJointMesh(point, material, size = BEAM_JOINT_SIZE) {
+  const mesh = new THREE.Mesh(new THREE.BoxGeometry(1, 1, 1), material);
+  mesh.position.copy(vector(point));
+  mesh.scale.setScalar(size);
+  mesh.castShadow = true; mesh.receiveShadow = true;
+  return mesh;
+}
+
+function routeSegment(start, end, material, radius, radialSegments) {
+  const mesh = new THREE.Mesh(new THREE.CylinderGeometry(.5, .5, 1, radialSegments), material);
+  const direction = end.clone().sub(start);
+  const length = direction.length();
+  if (length <= EPSILON) { mesh.visible = false; return mesh; }
+  const localY = direction.multiplyScalar(1 / length);
+  const reference = Math.abs(localY.z) < .999 ? new THREE.Vector3(0, 0, 1) : new THREE.Vector3(1, 0, 0);
+  const localZ = reference.addScaledVector(localY, -reference.dot(localY)).normalize();
+  const localX = new THREE.Vector3().crossVectors(localY, localZ).normalize();
+  mesh.position.copy(start).add(end).multiplyScalar(.5);
+  mesh.quaternion.setFromRotationMatrix(new THREE.Matrix4().makeBasis(localX, localY, localZ));
+  mesh.scale.set(radius * 2, length, radius * 2);
+  mesh.castShadow = true; mesh.receiveShadow = true;
+  return mesh;
+}
+
+// Build each link as solid segments and blend every route corner with a small
+// sphere. This retains the save's exact routed points while avoiding the
+// disjoint dashed-line appearance and open corners of independent segments.
+export function createConnectionRoute(points, material, { radius = .015, radialSegments = 8 } = {}) {
+  const route = new THREE.Group();
+  const path = points.map(point => vector(point));
+  for (let index = 1; index < path.length; index++) route.add(routeSegment(path[index - 1], path[index], material, radius, radialSegments));
+  for (let index = 1; index < path.length - 1; index++) {
+    const joint = new THREE.Mesh(new THREE.SphereGeometry(radius, radialSegments, Math.max(4, Math.ceil(radialSegments / 2))), material);
+    joint.position.copy(path[index]); joint.castShadow = true; joint.receiveShadow = true;
+    route.add(joint);
+  }
+  return route;
 }

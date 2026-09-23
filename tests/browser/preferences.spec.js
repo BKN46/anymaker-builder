@@ -2,8 +2,8 @@ import { test, expect } from '@playwright/test';
 
 const settingsKey = 'anymaker:/anymaker-builder/:settings:v1';
 const projectKey = 'anymaker:/anymaker-builder/:autosave:v1';
-async function ready(page) {
-  await expect(page.locator('#catalog-count')).toHaveText('598 / 598');
+async function ready(page, catalogCount = '332 / 598') {
+  await expect(page.locator('#catalog-count')).toHaveText(catalogCount);
   await expect(page.locator('#viewport')).toHaveAttribute('data-ready', 'true');
 }
 
@@ -25,12 +25,25 @@ test('English default, language switching, axis views, grid and panel preference
   await page.locator('#language-select').selectOption('en');
   await expect(page.locator('#object-count')).toHaveText('0 components');
   await page.locator('#right-sidebar-toggle').click();
+  await expect(page.locator('label[for="camera-light-enabled"]')).toHaveText('Camera fill light');
+  await expect(page.locator('label[for="camera-light-intensity"]')).toHaveText('Camera fill intensity');
   await page.locator('#grid-color').fill('#ff3366');
   await page.locator('#grid-opacity').fill('0.25');
   await page.locator('#grid-style').selectOption('dashed');
   await page.locator('#node-color').fill('#22aa66');
   await page.locator('#node-size').fill('0.12');
   await page.locator('#node-opacity').fill('0.4');
+  await page.locator('#beam-lengths-visible').check();
+  await page.locator('#background-color').fill('#102030');
+  await page.locator('#light-azimuth').fill('80');
+  await page.locator('#light-elevation').fill('35');
+  await page.locator('#light-intensity').fill('4.2');
+  await page.locator('#shadow-strength').fill('0.8');
+  await page.locator('#light-softness').fill('3.5');
+  await page.locator('#camera-light-enabled').uncheck();
+  await page.locator('#camera-light-intensity').fill('5.5');
+  await page.locator('#show-building-furniture').check();
+  await page.locator('#orthographic-view').check();
   await expect(page.locator('#node-size-value')).toHaveText('0.120');
   await expect(page.locator('#grid-settings')).toContainText('1 cell = 8 cm');
   await expect(page.locator('#axis-snap-btn')).toHaveText('Axis snap');
@@ -44,8 +57,13 @@ test('English default, language switching, axis views, grid and panel preference
   const before = JSON.parse(await page.evaluate(key => localStorage.getItem(key), settingsKey));
   expect(before.gridColor).toBe('#ff3366'); expect(before.gridStyle).toBe('dashed'); expect(before.gridOpacity).toBe(.25);
   expect(before.nodeColor).toBe('#22aa66'); expect(before.nodeSize).toBe(.12); expect(before.nodeOpacity).toBe(.4);
+  expect(before.beamLengthsVisible).toBe(true);
+  expect(before.backgroundColor).toBe('#102030'); expect(before.lightAzimuth).toBe(80); expect(before.lightElevation).toBe(35);
+  expect(before.lightIntensity).toBe(4.2); expect(before.shadowStrength).toBe(.8); expect(before.lightSoftness).toBe(3.5); expect(before.orthographic).toBe(true);
+  expect(before.cameraLightEnabled).toBe(false); expect(before.cameraLightIntensity).toBe(5.5);
+  expect(before.showBuildingFurniture).toBe(true);
   expect(before.camera.position[0]).toBeGreaterThan(before.camera.target[0]);
-  await page.reload(); await ready(page);
+  await page.reload(); await ready(page, '598 / 598');
   await expect(page.locator('#left-sidebar')).toBeHidden();
   await expect(page.locator('#right-sidebar')).toBeVisible();
   await expect(page.locator('#grid-color')).toHaveValue('#ff3366');
@@ -54,6 +72,17 @@ test('English default, language switching, axis views, grid and panel preference
   await expect(page.locator('#node-color')).toHaveValue('#22aa66');
   await expect(page.locator('#node-size')).toHaveValue('0.12');
   await expect(page.locator('#node-opacity')).toHaveValue('0.4');
+  await expect(page.locator('#beam-lengths-visible')).toBeChecked();
+  await expect(page.locator('#background-color')).toHaveValue('#102030');
+  await expect(page.locator('#orthographic-view')).toBeChecked();
+  await expect(page.locator('#light-azimuth')).toHaveValue('80');
+  await expect(page.locator('#light-elevation')).toHaveValue('35');
+  await expect(page.locator('#light-intensity')).toHaveValue('4.2');
+  await expect(page.locator('#shadow-strength')).toHaveValue('0.8');
+  await expect(page.locator('#light-softness')).toHaveValue('3.5');
+  await expect(page.locator('#camera-light-enabled')).not.toBeChecked();
+  await expect(page.locator('#camera-light-intensity')).toHaveValue('5.5');
+  await expect(page.locator('#show-building-furniture')).toBeChecked();
   await expect(page.locator('#grid-settings')).toContainText('1 cell = 8 cm');
   await expect(page.locator('#axis-snap-btn')).toHaveAttribute('aria-pressed', 'true');
   await expect(page.locator('#nodes-btn')).toHaveAttribute('aria-pressed', 'false');

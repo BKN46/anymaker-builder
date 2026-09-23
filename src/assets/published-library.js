@@ -1,7 +1,62 @@
 import * as THREE from 'three';
 import { AssetLibrary, disposeObject } from './library.js';
+import { CELL_SIZE_WORLD } from '../editor/grid.js';
 
 const typed = (values, Type) => values == null ? null : new Type(values);
+
+export function applyMeshTransform(mesh, transform) {
+  if (transform?.position) mesh.position.set(...transform.position);
+  // `preview_rot` in the native binding is a row-major 3×3 rotation
+  // matrix, not an Euler triplet. Passing it to Euler#set consumed only the
+  // first three values and collapsed dynamic child meshes into one another.
+  const rotation = transform?.previewRotation;
+  if (Array.isArray(rotation) && rotation.length === 9 && rotation.every(Number.isFinite)) {
+    mesh.quaternion.setFromRotationMatrix(new THREE.Matrix4().set(
+      rotation[0], rotation[1], rotation[2], 0,
+      rotation[3], rotation[4], rotation[5], 0,
+      rotation[6], rotation[7], rotation[8], 0,
+      0, 0, 0, 1,
+    ));
+  }
+}
+
+const nativeExtension = value => Array.isArray(value) && value.length === 3 && value.every(Number.isInteger) ? value : null;
+const axisIndex = { x: 0, y: 1, z: 2 };
+
+function variantPath(staticMesh, axis, variant) {
+  const match = /^(.*)_0_0_0\.mesh$/.exec(staticMesh || '');
+  if (!match) return null;
+  const values = [0, 0, 0];
+  values[axisIndex[axis]] = variant;
+  return `${match[1]}_${values.join('_')}.mesh`;
+}
+
+function staticMeshParts(definition, binding, extension, manifest) {
+  const staticMesh = binding.staticMesh || definition.mesh_static?.mesh_path || definition.mesh || null;
+  if (!staticMesh) return [];
+  const parts = [{ path: staticMesh, transform: null }];
+  const ext = nativeExtension(extension);
+  if (!ext) return parts;
+  for (const axis of Object.keys(axisIndex)) {
+    if (definition[`mode_${axis}`] !== 'tile') continue;
+    const index = axisIndex[axis];
+    const interval = Number(definition.interval?.[index]);
+    const length = ext[index];
+    if (!Number.isInteger(interval) || interval <= 0 || length <= 0 || length % interval) continue;
+    const middle = variantPath(staticMesh, axis, 1);
+    const end = variantPath(staticMesh, axis, 2);
+    if (!middle || !end || !manifest.entries[middle] || !manifest.entries[end]) continue;
+    const tiles = length / interval;
+    for (let tile = 1; tile < tiles; tile++) {
+      const position = [0, 0, 0]; position[index] = tile * interval * CELL_SIZE_WORLD;
+      parts.push({ path: middle, transform: { position } });
+    }
+    const position = [0, 0, 0]; position[index] = length * CELL_SIZE_WORLD;
+    parts.push({ path: end, transform: { position } });
+    break;
+  }
+  return parts;
+}
 
 function parsedFromPublished(payload) {
   if (!payload || !['anymaker-published-mesh', 'anymaker-published-mesh-opaque'].includes(payload.format) || payload.version !== 1 || !Array.isArray(payload.parts)) {
@@ -70,12 +125,14 @@ export class PublishedAssetLibrary {
 
   register(files) { return this.fallback.register(files); }
 
-  async instantiate(definition) {
+  async instantiate(definition, { nativeExtension: extension } = {}) {
     try {
       const binding = definition.meshBinding || { staticMesh: definition.mesh_static?.mesh_path || definition.mesh || null, dynamicMeshes: [] };
-      const paths = [binding.staticMesh, ...(binding.dynamicMeshes || []).map(item => item.path)].filter(Boolean);
-      if (!paths.length) return this.fallback.instantiate(definition);
-      const parsed = await Promise.all(paths.map(path => this.parse(path)));
+      const manifest = await this.manifest();
+      const staticParts = staticMeshParts(definition, binding, extension, manifest);
+      const parts = [...staticParts, ...(binding.dynamicMeshes || []).filter(item => item.path).map(item => ({ path: item.path, transform: item }))];
+      if (!parts.length) return this.fallback.instantiate(definition, { nativeExtension: extension });
+      const parsed = await Promise.all(parts.map(part => this.parse(part.path)));
       const group = new THREE.Group();
       if (parsed.every(value => value.opaque || !value.parts.length)) {
         const marker = new THREE.Mesh(new THREE.BoxGeometry(.2, .2, .2), new THREE.MeshBasicMaterial({ color: '#d49b4a', wireframe: true }));
@@ -94,13 +151,11 @@ export class PublishedAssetLibrary {
           geometry.setAttribute('gameColorBytes', new THREE.BufferAttribute(part.colors, 4, true));
           const mesh = new THREE.Mesh(geometry, new THREE.MeshStandardMaterial({ color: '#b4c3ce', roughness: .7, metalness: .1, side: THREE.DoubleSide }));
           mesh.name = part.name; mesh.castShadow = mesh.receiveShadow = true;
-          if (transform?.position) mesh.position.set(...transform.position);
-          if (transform?.previewRotation) mesh.rotation.set(...transform.previewRotation);
+          applyMeshTransform(mesh, transform);
           group.add(mesh);
         }
       };
-      addParsed(parsed[0]);
-      (binding.dynamicMeshes || []).forEach((item, index) => addParsed(parsed[index + 1], item));
+      parsed.forEach((meshData, index) => addParsed(meshData, parts[index].transform));
       group.userData.visual = 'mesh';
       group.userData.reason = '独立发布 Mesh（完整解析，gzip 懒加载）';
       group.userData.vertices = parsed.flatMap(value => value.parts).reduce((n, part) => n + part.positions.length / 3, 0);
@@ -109,7 +164,7 @@ export class PublishedAssetLibrary {
     } catch (error) {
       // Local file selection remains a development/audit fallback. A missing
       // published asset is visible in the UI rather than silently guessed.
-      if (this.fallback.files.size) return this.fallback.instantiate(definition);
+      if (this.fallback.files.size) return this.fallback.instantiate(definition, { nativeExtension: extension });
       throw error;
     }
   }

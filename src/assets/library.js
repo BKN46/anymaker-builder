@@ -32,7 +32,7 @@ export class AssetLibrary {
     return parsed;
   }
 
-  async instantiate(definition) {
+  async instantiate(definition, _options = {}) {
     const path = definition.mesh_static?.mesh_path || definition.mesh;
     const parsed = path ? await this.parse(path) : null;
     const group = new THREE.Group();

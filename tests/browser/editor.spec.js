@@ -18,7 +18,7 @@ test('Mesh → placement → transforms → history → files on Pages subpath',
   const errors = []; page.on('pageerror', error => errors.push(error.message));
   await page.goto('./');
   await expect(page.locator('#viewport')).toHaveAttribute('data-ready', 'true');
-  await expect(page.locator('#catalog-count')).toContainText('598 / 598');
+  await expect(page.locator('#catalog-count')).toContainText('332 / 598');
   await page.locator('#mesh-input').setInputFiles({ name: 'engine_block_a_0_0_0.mesh', mimeType: 'application/octet-stream', buffer: meshFixture() });
   await expect(page.locator('#asset-status')).toContainText('1 个 Mesh');
   await expect(page.locator('#save-status')).toContainText('模型库已登记');
@@ -110,12 +110,84 @@ test('native JSON maps through the domain model and imports components', async (
   await expect(page.locator('#native-summary')).toContainText('已配对 vehicle.data / vehicle.meta');
   await expect(page.locator('#native-import-btn')).toBeEnabled();
   await openRightSidebar(page);
+  await page.locator('#native-export-btn').evaluate(element => { element.closest('details').open = true; });
+  const nativeDownloads = [];
+  page.on('download', download => nativeDownloads.push(download));
+  await page.locator('#native-export-btn').click();
+  await expect.poll(() => nativeDownloads.length).toBe(2);
+  expect((await Promise.all(nativeDownloads.map(download => download.suggestedFilename()))).sort()).toEqual(['vehicle.data', 'vehicle.meta']);
   await page.locator('#native-import-btn').evaluate(element => { element.closest('details').open = true; });
   await page.locator('#native-import-btn').click();
   await expect(page.locator('#object-count')).toHaveText('1 个组件', { timeout: 30000 });
   await page.locator('#native-input').setInputFiles({ name: 'other.data', mimeType: 'application/json', buffer: Buffer.from(JSON.stringify(native)) });
   await expect(page.locator('#native-import-btn')).toBeDisabled();
   await expect(page.locator('#native-summary')).toContainText('请同时选择一份 .data 和一份 .meta 文件');
+});
+
+test('history drawer restores a committed snapshot and viewport reports vehicle size', async ({ page }) => {
+  await page.goto('./');
+  await expect(page.locator('#viewport')).toHaveAttribute('data-ready', 'true');
+  await page.locator('#component-search').fill('engine');
+  await page.locator('[data-id="engine"]').click();
+  await page.locator('canvas').click({ position: { x: 440, y: 420 } });
+  await expect(page.locator('#vehicle-size')).toContainText('载具尺寸');
+  await expect(page.locator('#vehicle-size')).toContainText('cm');
+  await openRightSidebar(page);
+  await page.locator('#history-drawer > summary').click();
+  await expect(page.locator('#history-list .history-entry')).toHaveCount(2);
+  await page.locator('#history-list .history-entry').nth(1).click();
+  await expect(page.locator('#object-count')).toHaveText('0 个组件');
+  await expect(page.locator('#vehicle-size')).toContainText('空载具');
+});
+
+test('paint and connection context toolbars expose saved colors, network ports and selection highlighting', async ({ page }) => {
+  await page.goto('./');
+  await expect(page.locator('#viewport')).toHaveAttribute('data-ready', 'true');
+  const canvas = page.locator('canvas');
+  await page.locator('#component-search').fill('electric_port_straight');
+  await page.locator('[data-id="electric_port_straight"]').click();
+  await canvas.click({ position: { x: 420, y: 420 } });
+  await expect(page.locator('#viewport')).toHaveAttribute('data-interaction-highlight-count', '1');
+
+  await page.locator('[data-tool="paint"]').click();
+  await expect(page.locator('#paint-toolbar')).toBeVisible();
+  await page.locator('#paint-toolbar-hex').fill('#7c3aed');
+  await page.locator('#paint-toolbar-hex').press('Tab');
+  await page.locator('#save-paint-quick-color').click();
+  await expect(page.locator('#paint-quick-colors')).toContainText('#7c3aed');
+  await expect.poll(() => page.evaluate(() => JSON.parse(localStorage.getItem('anymaker:' + location.pathname + ':settings:v1'))?.paintQuickColors?.includes('#7c3aed') ?? false)).toBe(true);
+  await page.locator('#paint-quick-colors .quick-color-item', { hasText: '#7c3aed' }).locator('.quick-color-remove').click();
+  await expect(page.locator('#paint-quick-colors')).not.toContainText('#7c3aed');
+
+  await page.locator('[data-tool="connect"]').click();
+  await expect(page.locator('#connection-toolbar')).toBeVisible();
+  await expect(page.locator('#viewport')).toHaveAttribute('data-connection-port-count', '1');
+  await page.locator('#connection-kind-buttons [data-kind="liquid"]').click();
+  await expect(page.locator('#connection-kind-buttons [data-kind="liquid"]')).toHaveClass(/active/);
+  await expect(page.locator('#viewport')).toHaveAttribute('data-connection-port-count', '0');
+
+  await page.reload();
+  await expect(page.locator('#viewport')).toHaveAttribute('data-ready', 'true');
+  await page.locator('[data-tool="paint"]').click();
+  await expect(page.locator('#paint-quick-colors')).not.toContainText('#7c3aed');
+});
+
+test('registered reference vehicle imports every component and structural record', async ({ page }) => {
+  await page.goto('./');
+  await expect(page.locator('#viewport')).toHaveAttribute('data-ready', 'true');
+  await page.locator('#native-input').setInputFiles([
+    'test-vehicle/vehicle.data',
+    'test-vehicle/vehicle.meta',
+  ]);
+  await openRightSidebar(page);
+  await page.locator('#native-import-btn').evaluate(element => { element.closest('details').open = true; });
+  await page.locator('#native-import-btn').click();
+  await expect(page.locator('#native-vehicle-select')).toHaveValue('553');
+  await expect(page.locator('#object-count')).toHaveText('159 个组件', { timeout: 60000 });
+  await expect(page.locator('#topology-count')).toHaveText('271 节点 · 493 梁 · 138 面板 · 73 连接');
+  await expect(page.locator('#native-reference-preview-btn')).toHaveAttribute('aria-pressed', 'true');
+  await expect(page.locator('#orientation-indicator')).toBeHidden();
+  await page.locator('canvas').screenshot({ path: 'test-results/reference-vehicle-import.png' });
 });
 
 test('editor history atomically restores interleaved component and topology actions', async ({ page }) => {
@@ -161,6 +233,13 @@ test('topology tools create nodes and a beam in the viewport', async ({ page }) 
   await canvas.click({ position: { x: 500, y: 450 } });
   await canvas.click({ position: { x: 620, y: 450 } });
   await expect(page.locator('#topology-count')).toHaveText('2 节点 · 1 梁 · 0 面板');
+  await openRightSidebar(page);
+  await page.locator('#beam-lengths-visible').check();
+  await expect(page.locator('.beam-length-label')).toHaveCount(1);
+  await expect(page.locator('.beam-length-label')).toBeVisible();
+  await expect(page.locator('.beam-length-label')).toContainText('X');
+  await page.locator('#beam-lengths-visible').uncheck();
+  await expect(page.locator('#beam-length-labels')).toBeHidden();
   const save = page.waitForEvent('download');
   await page.locator('#save-btn').click();
   const stream = await (await save).createReadStream(); let content = '';
@@ -170,6 +249,41 @@ test('topology tools create nodes and a beam in the viewport', async ({ page }) 
   expect(saved.topology.edges).toHaveLength(1);
   await page.locator('#undo-btn').click();
   await expect(page.locator('#topology-count')).toHaveText('2 节点 · 0 梁 · 0 面板');
+});
+
+test('hide tool persists component and beam visibility and restores all hidden objects', async ({ page }) => {
+  await page.goto('./');
+  await expect(page.locator('#viewport')).toHaveAttribute('data-ready', 'true');
+  const canvas = page.locator('canvas');
+  await page.locator('[data-tool="node"]').click();
+  await canvas.click({ position: { x: 500, y: 450 } });
+  await canvas.click({ position: { x: 620, y: 450 } });
+  await page.locator('[data-tool="beam"]').click();
+  await canvas.click({ position: { x: 500, y: 450 } });
+  await canvas.click({ position: { x: 620, y: 450 } });
+  await page.locator('[data-tool="hide"]').click();
+  await canvas.click({ position: { x: 560, y: 450 } });
+  await expect(page.locator('#restore-transparency')).toBeVisible();
+  let saved = await saveProject(page);
+  expect(saved.topology.edges[0].hidden).toBe(true);
+  await page.locator('#restore-transparency').click();
+  await expect(page.locator('#restore-transparency')).toBeHidden();
+  saved = await saveProject(page);
+  expect(saved.topology.edges[0].hidden).toBeUndefined();
+
+  await page.locator('#component-search').fill('engine');
+  await page.locator('[data-id="engine"]').click();
+  await canvas.click({ position: { x: 740, y: 540 } });
+  await expect(page.locator('#object-count')).toHaveText('1 个组件');
+  await page.locator('[data-tool="hide"]').click();
+  await expect(page.locator('[data-tool="hide"]')).toHaveClass(/active/);
+  await canvas.click({ position: { x: 740, y: 540 } });
+  saved = await saveProject(page);
+  expect(saved.objects[0].hidden).toBe(true);
+  await expect(page.locator('#restore-transparency')).toBeVisible();
+  await page.locator('#restore-transparency').click();
+  saved = await saveProject(page);
+  expect(saved.objects[0].hidden).toBeUndefined();
 });
 
 test('node tool hides IDs, toggles helpers and merges without orphaned data', async ({ page }) => {
@@ -208,10 +322,18 @@ async function saveProject(page) {
 test('catalog uses compact square cards and category icons with accessible labels', async ({ page }) => {
   await page.goto('./');
   await expect(page.locator('#viewport')).toHaveAttribute('data-ready', 'true');
-  await expect(page.locator('#catalog-count')).toHaveText('598 / 598');
+  await expect(page.locator('#catalog-count')).toHaveText('332 / 598');
   const cards = page.locator('#component-list .component');
+  await expect(cards.locator('svg.category-icon')).toHaveCount(332);
+  expect(await cards.evaluateAll(elements => elements.every(element => !['building', 'furniture'].includes(element.dataset.category)))).toBe(true);
+  await page.locator('#show-building-furniture').check();
+  await expect(page.locator('#catalog-count')).toHaveText('598 / 598');
   await expect(cards.locator('svg.category-icon')).toHaveCount(598);
   const first = await cards.nth(0).boundingBox(); const second = await cards.nth(1).boundingBox();
+  const firstId = await cards.nth(0).getAttribute('data-id');
+  expect(firstId).toBeTruthy();
+  await cards.nth(0).hover();
+  await expect(page.locator('#component-id-tooltip')).toHaveText(firstId);
   expect(Math.abs(first.width - first.height)).toBeLessThan(1);
   expect(first.width).toBeLessThan(95); expect(second.y).toBe(first.y); expect(second.x).toBeGreaterThan(first.x);
   await page.locator('#category-filter').selectOption('wheel');
@@ -233,7 +355,7 @@ test('camera-plane beam creation previews, cancels and commits both endpoints at
   const errors = []; page.on('pageerror', error => errors.push(error.message));
   await page.goto('./');
   await expect(page.locator('#viewport')).toHaveAttribute('data-ready', 'true');
-  await expect(page.locator('#catalog-count')).toContainText('598 / 598');
+  await expect(page.locator('#catalog-count')).toContainText('332 / 598');
   const canvas = page.locator('canvas');
   await page.locator('[data-tool="beam"]').click();
   await canvas.click({ position: { x: 450, y: 400 } });
@@ -302,6 +424,36 @@ test('front-view solid beams are pickable off the centerline and split with hidd
   }
 });
 
+test('glass tool closes selected beams into an offset window panel and paint stores Hex RGB colors', async ({ page }) => {
+  await page.goto('./');
+  await expect(page.locator('#viewport')).toHaveAttribute('data-ready', 'true');
+  await page.locator('[data-view="front"]').click();
+  const canvas = page.locator('canvas');
+  const corners = [[430, 560], [730, 560], [730, 280], [430, 280]];
+  await page.locator('[data-tool="beam"]').click();
+  for (let index = 0; index < corners.length; index++) {
+    await canvas.click({ position: { x: corners[index][0], y: corners[index][1] } });
+    const next = corners[(index + 1) % corners.length];
+    await canvas.click({ position: { x: next[0], y: next[1] } });
+  }
+  await expect(page.locator('#topology-count')).toHaveText('4 节点 · 4 梁 · 0 面板');
+  await page.locator('[data-tool="glass"]').click();
+  for (const [x, y] of [[580, 560], [730, 420], [580, 280], [430, 420]]) await canvas.click({ position: { x, y } });
+  await page.keyboard.press('Enter');
+  await expect(page.locator('#topology-count')).toHaveText('4 节点 · 4 梁 · 1 面板');
+  let saved = await saveProject(page);
+  expect(saved.topology.plates[0].normalOffset).toBeCloseTo(.04, 8);
+  expect(saved.topology.plates[0].type).toBe('window');
+  await openRightSidebar(page);
+  await page.locator('[data-tool="paint"]').click();
+  await canvas.click({ position: { x: 580, y: 560 } });
+  saved = await saveProject(page);
+  expect(saved.topology.edges.some(edge => edge.color === '#bd2636')).toBe(true);
+  await canvas.click({ position: { x: 560, y: 400 } });
+  saved = await saveProject(page);
+  expect(saved.topology.plates[0].color_front).toBe('#bd2636');
+});
+
 test('XYZ rulers follow axis snapping, language, cancellation and committed endpoints', async ({ page }) => {
   const errors = []; page.on('pageerror', error => errors.push(error.message));
   await page.goto('./');
@@ -354,15 +506,27 @@ test('XYZ rulers follow axis snapping, language, cancellation and committed endp
   expect(errors).toEqual([]);
 });
 
+test('A toggles axis snapping from the viewport before beam creation', async ({ page }) => {
+  await page.goto('./');
+  await expect(page.locator('#viewport')).toHaveAttribute('data-ready', 'true');
+  await expect(page.locator('#axis-snap-btn')).toHaveAttribute('aria-pressed', 'false');
+  await page.locator('#viewport').focus();
+  await page.keyboard.press('a');
+  await expect(page.locator('#axis-snap-btn')).toHaveAttribute('aria-pressed', 'true');
+  await page.keyboard.press('a');
+  await expect(page.locator('#axis-snap-btn')).toHaveAttribute('aria-pressed', 'false');
+});
+
 test('sidebars resize, collapse with scoped Tab shortcut, and keep editor controls on the right', async ({ page }) => {
   await page.goto('./');
   await expect(page.locator('#viewport')).toHaveAttribute('data-ready', 'true');
-  await expect(page.locator('#catalog-count')).toContainText('598 / 598');
+  await expect(page.locator('#catalog-count')).toContainText('332 / 598');
   await expect(page.locator('#left-sidebar')).toBeVisible();
   await expect(page.locator('#right-sidebar')).toBeHidden();
   const catalogBounds = await page.locator('#catalog-drawer').boundingBox(); const sidebarBounds = await page.locator('#left-sidebar').boundingBox();
   expect(Math.abs(catalogBounds.height - sidebarBounds.height)).toBeLessThanOrEqual(1);
   await expect.poll(() => page.locator('#component-list').evaluate(element => element.scrollHeight > element.clientHeight)).toBe(true);
+  expect((await page.locator('#component-list').boundingBox()).height).toBeGreaterThan(sidebarBounds.height * .6);
   expect(await page.locator('#component-list').evaluate(element => { element.scrollTop = 120; return element.scrollTop > 0 && getComputedStyle(element).overflowY === 'scroll'; })).toBe(true);
   expect(await page.locator('#grid-settings').evaluate(element => element.closest('#right-sidebar')?.id)).toBe('right-sidebar');
   expect(await page.locator('#inspector-content').evaluate(element => element.closest('#right-sidebar')?.id)).toBe('right-sidebar');
@@ -372,7 +536,7 @@ test('sidebars resize, collapse with scoped Tab shortcut, and keep editor contro
   await page.mouse.move(separator.x + separator.width / 2, separator.y + 80);
   await page.mouse.down(); await page.mouse.move(separator.x + 108, separator.y + 80); await page.mouse.up();
   const widened = await left.boundingBox();
-  expect(widened.width).toBeGreaterThan(before.width + 80); expect(widened.width).toBeLessThanOrEqual(480);
+  expect(widened.width).toBeGreaterThan(before.width + 80); expect(widened.width).toBeLessThanOrEqual(720);
   await resizer.focus(); await page.keyboard.press('ArrowLeft');
   expect((await left.boundingBox()).width).toBeLessThan(widened.width);
 

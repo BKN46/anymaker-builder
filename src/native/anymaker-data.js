@@ -122,3 +122,55 @@ export function toNativeData(model, { strict = true } = {}) {
   if (strict && diagnostics.length) throw new Error('Native export blocked:\n' + diagnostics.join('\n'));
   return { value, diagnostics };
 }
+
+// Compare JSON-like native values without serialising them. This keeps a
+// round-trip audit independent of key formatting and points to the precise
+// value that changed.
+export function diffNativeValues(expected, actual, path = '$', differences = [], limit = 100) {
+  if (differences.length >= limit) return differences;
+  if (Object.is(expected, actual)) return differences;
+  const expectedArray = Array.isArray(expected);
+  const actualArray = Array.isArray(actual);
+  if (expectedArray || actualArray) {
+    if (!expectedArray || !actualArray || expected.length !== actual.length) {
+      differences.push({ path, expected, actual });
+      return differences;
+    }
+    for (let index = 0; index < expected.length && differences.length < limit; index++) diffNativeValues(expected[index], actual[index], `${path}[${index}]`, differences, limit);
+    return differences;
+  }
+  const expectedObject = expected && typeof expected === 'object';
+  const actualObject = actual && typeof actual === 'object';
+  if (!expectedObject || !actualObject) {
+    differences.push({ path, expected, actual });
+    return differences;
+  }
+  const keys = [...new Set([...Object.keys(expected), ...Object.keys(actual)])].sort();
+  for (const key of keys) {
+    if (!Object.hasOwn(expected, key) || !Object.hasOwn(actual, key)) differences.push({ path: `${path}.${key}`, expected: expected[key], actual: actual[key] });
+    else diffNativeValues(expected[key], actual[key], `${path}.${key}`, differences, limit);
+    if (differences.length >= limit) break;
+  }
+  return differences;
+}
+
+// A paired, untouched native import can be emitted byte-for-value-equivalent
+// at the JSON-value level. This is deliberately separate from editable game
+// export: the current editor projection cannot yet prove every native edit.
+export function toNativePair(model) {
+  validateProject(model);
+  const data = model.extras?.native?.raw;
+  const meta = model.extras?.native?.meta;
+  if (!data || !meta) throw new Error('Domain model has no paired native source files');
+  return { data: structuredClone(data), meta: structuredClone(meta) };
+}
+
+export function verifyNativePairRoundTrip(dataInput, metaInput) {
+  const data = typeof dataInput === 'string' ? JSON.parse(dataInput) : dataInput;
+  const meta = typeof metaInput === 'string' ? JSON.parse(metaInput) : metaInput;
+  const output = toNativePair(parseNativePair(data, meta));
+  return {
+    data: diffNativeValues(data, output.data),
+    meta: diffNativeValues(meta, output.meta),
+  };
+}
