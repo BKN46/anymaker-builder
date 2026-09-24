@@ -3,6 +3,14 @@ import { AssetLibrary, disposeObject } from './library.js';
 import { CELL_SIZE_WORLD } from '../editor/grid.js';
 
 const typed = (values, Type) => values == null ? null : new Type(values);
+export const WHEEL_TYRE_OUTBOARD_OFFSET = CELL_SIZE_WORLD;
+
+export function withWheelTyreOffset(transform, source) {
+  if (!/\/car_wheel(?:_b_1|_trims_a)?\.mesh$/.test(source || '')) return transform;
+  const position = Array.isArray(transform?.position) ? [...transform.position] : [0, 0, 0];
+  position[2] += WHEEL_TYRE_OUTBOARD_OFFSET;
+  return { ...transform, position };
+}
 
 export function applyMeshTransform(mesh, transform) {
   if (transform?.position) mesh.position.set(...transform.position);
@@ -130,7 +138,7 @@ export class PublishedAssetLibrary {
       const binding = definition.meshBinding || { staticMesh: definition.mesh_static?.mesh_path || definition.mesh || null, dynamicMeshes: [] };
       const manifest = await this.manifest();
       const staticParts = staticMeshParts(definition, binding, extension, manifest);
-      const parts = [...staticParts, ...(binding.dynamicMeshes || []).filter(item => item.path).map(item => ({ path: item.path, transform: item }))];
+      const parts = [...staticParts, ...(binding.dynamicMeshes || []).filter(item => item.path).map(item => ({ path: item.path, transform: withWheelTyreOffset(item, item.path) }))];
       if (!parts.length) return this.fallback.instantiate(definition, { nativeExtension: extension });
       const parsed = await Promise.all(parts.map(part => this.parse(part.path)));
       const group = new THREE.Group();

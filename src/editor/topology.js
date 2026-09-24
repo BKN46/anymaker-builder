@@ -35,10 +35,14 @@ export function validateTopologyState(state = {}, componentIds = null) {
   const normalizedNodes = [];
   for (const node of nodes) {
     if (!node || typeof node.id !== 'string' || !node.id || nodeIds.has(node.id)) throw new Error('节点 ID 无效或重复');
-    const gridPosition = assertGridVector(node.position, '节点坐标');
+    if (node.nativeProjected !== undefined && node.nativeProjected !== true) throw new Error('节点原生投影标记无效');
+    const nativeProjected = node.nativeProjected === true;
+    const gridPosition = nativeProjected ? node.position : assertGridVector(node.position, '节点坐标');
+    if (!gridPosition || AXES.some(axis => typeof gridPosition[axis] !== 'number')) throw new Error('节点坐标无效');
+    if (AXES.some(axis => !Number.isFinite(gridPosition[axis]) || Math.abs(gridPosition[axis]) > 10000)) throw new Error('节点坐标无效');
     nodeIds.add(node.id);
     points.set(node.id, gridPosition);
-    normalizedNodes.push({ ...clone(node), position: gridPosition });
+    normalizedNodes.push({ ...clone(node), ...(nativeProjected ? { nativeProjected: true } : {}), position: gridPosition });
   }
   const edgeIds = new Set();
   for (const edge of edges) {
@@ -154,7 +158,7 @@ export function createEdge(edges, a, b, properties = {}) {
   return { edges: [...clone(edges), edge], edge };
 }
 
-export function createBeam(state, start, end) {
+export function createEdgeFromPoints(state, start, end) {
   const next = validateTopologyState(state);
   const a = createNode(next.nodes, start);
   const b = createNode(a.nodes, end);
@@ -199,7 +203,7 @@ export function splitEdge(nodes, edges, edgeId, point, plates = []) {
   const without = edges.filter(value => value.id !== edgeId);
   const first = createEdge(without, edge.a, created.node.id, edge).edges;
   const second = createEdge(first, created.node.id, edge.b, edge).edges;
-  // A panel boundary is expressed as an ordered node loop. If the split beam
+  // A panel boundary is expressed as an ordered node loop. If the split edge
   // is one of its boundary segments, retain that boundary and insert the new
   // node between the matching endpoints. This keeps subsequent panel edits
   // topologically explicit instead of merely relying on coplanar rendering.
@@ -238,7 +242,7 @@ export function createPlate(plates, nodeIds, nodes, properties = {}) {
   return { plates: [...clone(plates), plate], plate };
 }
 
-// A panel follows a closed, non-branching loop of existing beams. The first
+// A panel follows a closed, non-branching loop of existing edges. The first
 // chosen edge establishes the winding, which in turn establishes its normal.
 export function createPlateFromEdges(plates, edgeIds, edges, nodes, properties = {}) {
   if (!Array.isArray(edgeIds) || edgeIds.length < 3) throw new Error('面板至少需要选择三根梁');
@@ -276,7 +280,7 @@ export function createPlateFromEdges(plates, edgeIds, edges, nodes, properties =
 }
 
 // Native samples identify glass surfaces as a window plate. They use the same
-// closed structural beam loop as ordinary panels; impact simulation remains a
+// closed structural edge loop as ordinary panels; impact simulation remains a
 // game-runtime concern and is not fabricated in the editor.
 export function createGlassPlateFromEdges(plates, edgeIds, edges, nodes, properties = {}) {
   return createPlateFromEdges(plates, edgeIds, edges, nodes, { ...properties, type: 'window' });

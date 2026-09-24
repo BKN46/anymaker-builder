@@ -9,11 +9,35 @@ export function addMessages(entries) {
 }
 export function getLocale() { return locale; }
 export function setLocale(value) { locale = value === 'zh' ? 'zh' : 'en'; }
+
+function templateMatch(source) {
+  for (const [key, template] of messages) {
+    if (!key.includes('{')) continue;
+    const names = [];
+    let cursor = 0;
+    let expression = '^';
+    for (const placeholder of key.matchAll(/\{([A-Za-z][\w]*)\}/g)) {
+      expression += key.slice(cursor, placeholder.index).replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
+      expression += '([\\s\\S]*?)';
+      names.push(placeholder[1]);
+      cursor = placeholder.index + placeholder[0].length;
+    }
+    expression += key.slice(cursor).replace(/[.*+?^${}()|[\]\\]/g, '\\$&') + '$';
+    const match = new RegExp(expression).exec(source);
+    if (match) return { template, values: Object.fromEntries(names.map((name, index) => [name, match[index + 1]])) };
+  }
+  return null;
+}
+
 export function t(key, params = {}) {
   const source = String(key ?? '');
-  const template = locale === 'zh' ? source : messages.get(source) ?? source;
   const values = typeof params === 'function' ? params() : params;
-  return template.replace(/\{([A-Za-z][\w]*)\}/g, (match, name) => Object.hasOwn(values || {}, name) ? String(values[name] ?? '') : match);
+  if (locale === 'zh') return source.replace(/\{([A-Za-z][\w]*)\}/g, (match, name) => Object.hasOwn(values || {}, name) ? String(values[name] ?? '') : match);
+  const exact = messages.get(source);
+  const matched = exact ? null : templateMatch(source);
+  const template = exact ?? matched?.template ?? source;
+  const resolved = { ...matched?.values, ...(values || {}) };
+  return template.replace(/\{([A-Za-z][\w]*)\}/g, (match, name) => Object.hasOwn(resolved, name) ? String(resolved[name] ?? '') : match);
 }
 export function setText(element, key, params = {}) {
   element.dataset.i18n = key;

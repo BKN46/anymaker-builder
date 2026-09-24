@@ -4,11 +4,11 @@ import { CELL_SIZE_WORLD, AXES, assertGridVector, quantizeWorldVector, worldToCe
 export const GRID_SIZE = 20;
 export const GRID_DIVISIONS = GRID_SIZE / CELL_SIZE_WORLD;
 export const GRID_CELL_SIZE = CELL_SIZE_WORLD;
-export const BEAM_WIDTH = GRID_CELL_SIZE;
-export const BEAM_JOINT_SIZE = BEAM_WIDTH * 1.1;
+export const EDGE_WIDTH = GRID_CELL_SIZE;
+export const EDGE_JOINT_SIZE = EDGE_WIDTH * 1.1;
 export const STRUCTURE_COLOR = 0xcccccc;
 const EPSILON = 1e-6;
-const BEAM_OUTLINE_NAME = 'beam-outline';
+const EDGE_OUTLINE_NAME = 'edge-outline';
 const vector = point => new THREE.Vector3(point.x, point.y, point.z);
 const validPoint = point => point && AXES.every(axis => Number.isFinite(point[axis]) && Math.abs(point[axis]) <= 10000);
 
@@ -41,7 +41,7 @@ export function resolvePlacementPoint(pointerRaycaster, targets, workPlane) {
   return planeGridPoint ? vector(planeGridPoint) : null;
 }
 
-export function resolveBeamPoint(ray, frame, { axisSnap = false, node = null, viewNormal = frame.plane.normal } = {}) {
+export function resolveEdgePoint(ray, frame, { axisSnap = false, node = null, viewNormal = frame.plane.normal } = {}) {
   const origin = quantizeWorldVector(frame.origin);
   if (!origin) return null;
   const start = vector(origin);
@@ -74,7 +74,7 @@ export function resolveBeamPoint(ray, frame, { axisSnap = false, node = null, vi
   return best ? { point: best.point, axis: best.axis } : null;
 }
 
-export function beamMeasurements(start, end) {
+export function edgeMeasurements(start, end) {
   if (!validPoint(start) || !validPoint(end)) return [];
   let gridStart; let gridEnd;
   try { gridStart = assertGridVector(start, '梁起点'); gridEnd = assertGridVector(end, '梁终点'); } catch { return []; }
@@ -86,14 +86,14 @@ export function beamMeasurements(start, end) {
   });
 }
 
-function refreshBeamOutline(mesh) {
-  const outline = mesh.getObjectByName(BEAM_OUTLINE_NAME);
+function refreshEdgeOutline(mesh) {
+  const outline = mesh.getObjectByName(EDGE_OUTLINE_NAME);
   if (!outline) return;
   outline.geometry.dispose();
   outline.geometry = new THREE.EdgesGeometry(mesh.geometry);
 }
 
-export function updateBeamMesh(mesh, start, end) {
+export function updateEdgeMesh(mesh, start, end) {
   const a = vector(start); const b = vector(end);
   const direction = b.clone().sub(a);
   const length = direction.length();
@@ -107,18 +107,18 @@ export function updateBeamMesh(mesh, start, end) {
   const localX = new THREE.Vector3().crossVectors(localY, localZ).normalize();
   // Endpoints denote cell centres. The support covers both endpoint cells,
   // extending half a cell past either end without expanding into a hull.
-  const visualLength = length + BEAM_WIDTH;
+  const visualLength = length + EDGE_WIDTH;
   mesh.position.copy(a).add(b).multiplyScalar(.5);
   mesh.quaternion.setFromRotationMatrix(new THREE.Matrix4().makeBasis(localX, localY, localZ));
-  mesh.scale.set(BEAM_WIDTH, visualLength, BEAM_WIDTH);
+  mesh.scale.set(EDGE_WIDTH, visualLength, EDGE_WIDTH);
   mesh.visible = true;
   mesh.updateMatrixWorld(true);
-  if (mesh.userData.beamOutlineRequested && !mesh.getObjectByName(BEAM_OUTLINE_NAME)) addBeamOutline(mesh);
-  else refreshBeamOutline(mesh);
+  if (mesh.userData.edgeOutlineRequested && !mesh.getObjectByName(EDGE_OUTLINE_NAME)) addEdgeOutline(mesh);
+  else refreshEdgeOutline(mesh);
   return true;
 }
 
-function addBeamOutline(mesh) {
+function addEdgeOutline(mesh) {
   // The persistent preview starts at zero length. Do not pass an empty
   // BufferGeometry to EdgesGeometry; create the outline on its first valid
   // update instead.
@@ -127,33 +127,33 @@ function addBeamOutline(mesh) {
     new THREE.EdgesGeometry(mesh.geometry),
     new THREE.LineBasicMaterial({ color: 0x17212b, depthTest: true, depthWrite: false }),
   );
-  outline.name = BEAM_OUTLINE_NAME;
+  outline.name = EDGE_OUTLINE_NAME;
   outline.renderOrder = 2;
   outline.userData.topologyOutline = true;
   mesh.add(outline);
   return true;
 }
 
-export function setBeamOutline(mesh, visible) {
-  mesh.userData.beamOutlineRequested = Boolean(visible);
-  let outline = mesh.getObjectByName(BEAM_OUTLINE_NAME);
+export function setEdgeOutline(mesh, visible) {
+  mesh.userData.edgeOutlineRequested = Boolean(visible);
+  let outline = mesh.getObjectByName(EDGE_OUTLINE_NAME);
   if (!outline && visible) {
-    addBeamOutline(mesh);
-    outline = mesh.getObjectByName(BEAM_OUTLINE_NAME);
+    addEdgeOutline(mesh);
+    outline = mesh.getObjectByName(EDGE_OUTLINE_NAME);
   }
   if (outline) outline.visible = Boolean(visible);
 }
 
-export function createBeamMesh(start, end, material, { outlined = false } = {}) {
+export function createEdgeMesh(start, end, material, { outlined = false } = {}) {
   const mesh = new THREE.Mesh(new THREE.BoxGeometry(1, 1, 1), material);
-  mesh.userData.beamOutlineRequested = Boolean(outlined);
-  updateBeamMesh(mesh, start, end);
+  mesh.userData.edgeOutlineRequested = Boolean(outlined);
+  updateEdgeMesh(mesh, start, end);
   return mesh;
 }
 
-export function createBeamJointMesh(point, material, size = BEAM_JOINT_SIZE, { outlined = false } = {}) {
+export function createEdgeJointMesh(point, material, size = EDGE_JOINT_SIZE, { outlined = false } = {}) {
   const mesh = new THREE.Mesh(new THREE.BoxGeometry(1, 1, 1), material);
-  if (outlined) addBeamOutline(mesh);
+  if (outlined) addEdgeOutline(mesh);
   mesh.position.copy(vector(point));
   mesh.scale.setScalar(size);
   mesh.castShadow = true; mesh.receiveShadow = true;

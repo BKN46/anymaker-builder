@@ -7,8 +7,44 @@ const NATIVE_CELL_WORLD = .08;
 
 const clone = value => structuredClone(value);
 const vector = (value, fallback = 0) => Object.fromEntries(AXES.map(axis => [axis, Number(value?.[axis] ?? fallback)]));
+const nativeVector = value => Array.isArray(value)
+  ? { x: Number(value[0] ?? 0), y: Number(value[1] ?? 0), z: Number(value[2] ?? 0) }
+  : vector(value);
 const identity = () => ({ position: vector(), rotation: vector(), scale: vector({ x: 1, y: 1, z: 1 }, 1) });
 const id = (value, fallback) => typeof value === 'string' && value ? value : fallback;
+const identityMatrix = () => [1, 0, 0, 0, 1, 0, 0, 0, 1];
+const dot = (a, b) => AXES.reduce((sum, axis) => sum + a[axis] * b[axis], 0);
+const cross = (a, b) => ({ x: a.y * b.z - a.z * b.y, y: a.z * b.x - a.x * b.z, z: a.x * b.y - a.y * b.x });
+const length = value => Math.hypot(...AXES.map(axis => value[axis]));
+const scale = (value, factor) => Object.fromEntries(AXES.map(axis => [axis, value[axis] * factor]));
+const subtract = (left, right) => Object.fromEntries(AXES.map(axis => [axis, left[axis] - right[axis]]));
+const normalize = value => scale(value, 1 / length(value));
+const multiplyMatrixVector = (matrix, value) => ({
+  x: matrix[0] * value.x + matrix[1] * value.y + matrix[2] * value.z,
+  y: matrix[3] * value.x + matrix[4] * value.y + matrix[5] * value.z,
+  z: matrix[6] * value.x + matrix[7] * value.y + matrix[8] * value.z,
+});
+const multiplyMatrices = (left, right) => Array.from({ length: 9 }, (_, index) => {
+  const row = Math.floor(index / 3); const column = index % 3;
+  return left[row * 3] * right[column] + left[row * 3 + 1] * right[column + 3] + left[row * 3 + 2] * right[column + 6];
+});
+const transposeMatrix = matrix => [matrix[0], matrix[3], matrix[6], matrix[1], matrix[4], matrix[7], matrix[2], matrix[5], matrix[8]];
+const add = (left, right) => Object.fromEntries(AXES.map(axis => [axis, left[axis] + right[axis]]));
+
+function matrixToEulerXYZ(matrix) {
+  const clamp = value => Math.max(-1, Math.min(1, value));
+  const y = Math.asin(clamp(matrix[2]));
+  if (Math.abs(matrix[2]) < .9999999) return { x: Math.atan2(-matrix[5], matrix[8]), y, z: Math.atan2(-matrix[1], matrix[0]) };
+  return { x: Math.atan2(matrix[7], matrix[4]), y, z: 0 };
+}
+
+function nativeComponentRotation(component) {
+  const raw = component.extras?.native?.rotationMatrix;
+  if (!Array.isArray(raw) || raw.length !== 9 || raw.some(value => !Number.isFinite(value))) return identityMatrix();
+  // Native component rotations are column-major; all matrix helpers here use
+  // row-major matrices which map local vectors into their parent frame.
+  return transposeMatrix(raw);
+}
 
 export class Component {
   constructor(data = {}) {
@@ -162,72 +198,80 @@ function selectedVehicles(model, vehicleIds) {
   return model.vehicles.filter(vehicle => ids.has(vehicle.id));
 }
 
-function nativeVehicleOffsets(vehicles, roots) {
+// The editor's native-grid projection treats `dir` as the plane normal and
+// retains a stable X direction by projecting world X onto that plane. The
+// resulting X/Y/Z basis is right-handed. Keep the frame in native cell units
+// so vehicle attachment offsets can be composed before the final 8 cm conversion.
+export function nativeGridFrame(grid) {
+  const origin = vector(grid?.origin);
+  const direction = vector(grid?.dir);
+  if ([...AXES.map(axis => origin[axis]), ...AXES.map(axis => direction[axis])].some(value => !Number.isFinite(value))) throw new Error('Native grid origin/dir must contain finite numbers');
+  if (length(direction) < 1e-9) return { origin, rotation: identityMatrix() };
+  const y = normalize(direction);
+  let reference = { x: 1, y: 0, z: 0 };
+  if (Math.abs(dot(reference, y)) > .999999) reference = { x: 0, y: 0, z: 1 };
+  const x = normalize(subtract(reference, scale(y, dot(reference, y))));
+  const z = cross(x, y);
+  return {
+    origin,
+    // Columns are the local axes expressed in the vehicle frame.
+    rotation: [x.x, y.x, z.x, x.y, y.y, z.y, x.z, y.z, z.z],
+  };
+}
+
+function nativeCellPosition(position, frame) {
+  return add(frame.origin, multiplyMatrixVector(frame.rotation, position));
+}
+
+function nativeFrames(vehicles) {
+  const frames = new Map();
+  for (const vehicle of vehicles) for (const grid of vehicle.grids) frames.set(`${vehicle.id}:${grid.id}`, nativeGridFrame(grid));
+  return frames;
+}
+
+function nativeVehicleOffsets(vehicles, roots, frames) {
   const byId = new Map(vehicles.map(vehicle => [vehicle.id, vehicle]));
-  const offsets = new Map(roots.filter(id => byId.has(id)).map(id => [id, { x: 0, y: 0, z: 0 }]));
-  const component = (vehicle, id) => vehicle.grids.flatMap(grid => grid.components).find(value => value.id === String(id));
+  const attached = new Set();
+  for (const vehicle of vehicles) for (const component of vehicle.grids.flatMap(grid => grid.components)) {
+    const childId = String(component.extras?.native?.state?.connected_vehicle ?? '');
+    if (byId.has(childId)) attached.add(childId);
+  }
+  const rootIds = roots.length ? roots.filter(id => byId.has(id)) : vehicles.map(vehicle => vehicle.id).filter(id => !attached.has(id));
+  const offsets = new Map(rootIds.map(id => [id, vector()]));
+  const component = (vehicle, componentId) => {
+    for (const grid of vehicle.grids) {
+      const value = grid.components.find(candidate => candidate.id === String(componentId));
+      if (value) return { component: value, grid };
+    }
+    return null;
+  };
   const pending = [...offsets.keys()];
   while (pending.length) {
     const vehicle = byId.get(pending.shift());
     const parentOffset = offsets.get(vehicle.id);
-    for (const parent of vehicle.grids.flatMap(grid => grid.components)) {
+    for (const grid of vehicle.grids) for (const parent of grid.components) {
       const childId = String(parent.extras?.native?.state?.connected_vehicle ?? '');
       const child = byId.get(childId);
       const target = child && component(child, parent.extras?.native?.state?.connected_component);
       if (!target || offsets.has(childId)) continue;
-      offsets.set(childId, AXES.reduce((value, axis) => ({ ...value, [axis]: parentOffset[axis] + parent.transform.position[axis] - target.transform.position[axis] }), {}));
+      const parentPosition = nativeCellPosition(parent.transform.position, frames.get(`${vehicle.id}:${grid.id}`));
+      const targetPosition = nativeCellPosition(target.component.transform.position, frames.get(`${child.id}:${target.grid.id}`));
+      offsets.set(childId, add(parentOffset, subtract(parentPosition, targetPosition)));
       pending.push(childId);
     }
   }
   return offsets;
 }
 
-function median(values) {
-  const sorted = [...values].sort((a, b) => a - b);
-  const middle = Math.floor(sorted.length / 2);
-  return sorted.length % 2 ? sorted[middle] : (sorted[middle - 1] + sorted[middle]) / 2;
+function nativePosition(position, vehicleOffset, frame) {
+  const cells = add(nativeCellPosition(position, frame), vehicleOffset);
+  return Object.fromEntries(AXES.map(axis => [axis, cells[axis] * NATIVE_CELL_WORLD]));
 }
 
-// Native component grids with origin/dir are local construction planes. Their
-// component coordinates are therefore not necessarily in the vehicle's main
-// grid coordinate space. The save's cross-grid links give us stable placement
-// anchors: project a framed grid as one rigid translation whose median offset
-// brings its linked components back to their counterparts in the main grid.
-// Keep this a display projection only; Grid.origin/dir and every raw native
-// value remain preserved by the native adapter for round-trip export.
-function nativeGridOffsets(vehicles) {
-  const offsets = new Map();
-  for (const vehicle of vehicles) {
-    const components = new Map();
-    for (const grid of vehicle.grids) {
-      for (const component of grid.components) components.set(String(component.id), { component, grid });
-    }
-    const links = vehicle.grids.flatMap(grid => grid.links);
-    for (const grid of vehicle.grids) {
-      const rawGrid = grid.extras?.native?.raw;
-      if (!rawGrid || (!Array.isArray(rawGrid.origin) && !Array.isArray(rawGrid.dir))) continue;
-      const members = new Set(grid.components.map(component => String(component.id)));
-      const anchors = [];
-      for (const link of links) {
-        const fromId = String(link.from?.comp ?? '');
-        const toId = String(link.to?.comp ?? '');
-        const fromIsMember = members.has(fromId);
-        const toIsMember = members.has(toId);
-        if (fromIsMember === toIsMember) continue;
-        const local = components.get(fromIsMember ? fromId : toId);
-        const counterpart = components.get(fromIsMember ? toId : fromId);
-        if (!local || !counterpart || counterpart.grid === grid) continue;
-        anchors.push(Object.fromEntries(AXES.map(axis => [axis, counterpart.component.transform.position[axis] - local.component.transform.position[axis]])));
-      }
-      if (!anchors.length) continue;
-      offsets.set(`${vehicle.id}:${grid.id}`, Object.fromEntries(AXES.map(axis => [axis, median(anchors.map(anchor => anchor[axis]))])));
-    }
-  }
-  return offsets;
-}
-
-function nativePosition(position, vehicleOffset, gridOffset = vector()) {
-  return Object.fromEntries(AXES.map(axis => [axis, (position[axis] + vehicleOffset[axis] + gridOffset[axis]) * NATIVE_CELL_WORLD]));
+export function nativeGridLocalDelta(grid, worldDelta) {
+  const frame = nativeGridFrame(grid);
+  const cells = scale(vector(worldDelta), 1 / NATIVE_CELL_WORLD);
+  return multiplyMatrixVector(transposeMatrix(frame.rotation), cells);
 }
 
 function nativeExtension(component) {
@@ -242,12 +286,12 @@ export function toEditorDocument(model, { vehicleIds = null } = {}) {
   if (!source.vehicles.length) throw new Error('No selected vehicle exists in the domain model');
   const objects = [];
   const nativeImport = !!source.extras?.native;
-  const offsets = nativeImport ? nativeVehicleOffsets(vehicles, vehicleIds || []) : new Map();
-  const gridOffsets = nativeImport ? nativeGridOffsets(vehicles) : new Map();
+  const frames = nativeImport ? nativeFrames(vehicles) : new Map();
+  const offsets = nativeImport ? nativeVehicleOffsets(vehicles, vehicleIds || [], frames) : new Map();
   for (const vehicle of source.vehicles) for (const grid of vehicle.grids) for (const component of grid.components) {
     const offset = offsets.get(vehicle.id) || vector();
-    const gridOffset = gridOffsets.get(`${vehicle.id}:${grid.id}`) || vector();
-    const position = nativeImport ? nativePosition(component.transform.position, offset, gridOffset) : clone(component.transform.position);
+    const frame = frames.get(`${vehicle.id}:${grid.id}`);
+    const position = nativeImport ? nativePosition(component.transform.position, offset, frame) : clone(component.transform.position);
     const sourceColors = component.colors || component.extras?.native?.colors;
     objects.push({
       id: nativeImport ? `${vehicle.id}:${grid.id}:${component.id}` : component.id,
@@ -257,8 +301,9 @@ export function toEditorDocument(model, { vehicleIds = null } = {}) {
       ...(Array.isArray(sourceColors) && sourceColors.length <= 10 && sourceColors.every(color => Number.isInteger(color) && color >= 0 && color <= 255) ? { colors: [...sourceColors] } : {}),
       ...(component.hidden ? { hidden: true } : {}),
       ...(nativeExtension(component) ? { nativeExtension: nativeExtension(component) } : {}),
+      ...(nativeImport ? { nativeProjected: true } : {}),
       position,
-      rotation: clone(component.transform.rotation),
+      rotation: nativeImport ? matrixToEulerXYZ(multiplyMatrices(frame.rotation, nativeComponentRotation(component))) : clone(component.transform.rotation),
       scale: clone(component.transform.scale),
     });
   }
@@ -294,12 +339,16 @@ export function toEditorTopology(model, { vehicleIds = null } = {}) {
   const plates = [];
   const links = [];
   const nativeImport = !!source.extras?.native;
-  const offsets = nativeImport ? nativeVehicleOffsets(vehicles, vehicleIds || []) : new Map();
+  const frames = nativeImport ? nativeFrames(vehicles) : new Map();
+  const offsets = nativeImport ? nativeVehicleOffsets(vehicles, vehicleIds || [], frames) : new Map();
   for (const vehicle of source.vehicles) {
     const componentIds = new Map(vehicle.grids.flatMap(grid => grid.components.map(component => [String(component.id), nativeImport ? `${vehicle.id}:${grid.id}:${component.id}` : component.id])));
     const offset = offsets.get(vehicle.id) || vector();
     for (const grid of vehicle.grids) {
-    nodes.push(...grid.nodes.map(node => ({ id: `${grid.id}:${node.id}`, position: nativeImport ? Object.fromEntries(AXES.map(axis => [axis, (node.position[axis] + offset[axis]) * NATIVE_CELL_WORLD])) : clone(node.position), gridId: grid.id })));
+    const frame = frames.get(`${vehicle.id}:${grid.id}`);
+    nodes.push(...grid.nodes.map(node => ({ id: `${grid.id}:${node.id}`, position: nativeImport ? nativePosition(node.position, offset, frame) : clone(node.position), gridId: grid.id,
+      ...(nativeImport ? { nativeProjected: true } : {}),
+    })));
     const prefix = id => `${grid.id}:${id}`;
     edges.push(...grid.edges.map(edge => ({ id: prefix(edge.id), a: prefix(edge.a), b: prefix(edge.b), gridId: grid.id,
       ...(Number.isInteger(edge.extras?.native?.col) && edge.extras.native.col >= 0 && edge.extras.native.col <= 255 ? { col: edge.extras.native.col } : {}),
@@ -317,7 +366,8 @@ export function toEditorTopology(model, { vehicleIds = null } = {}) {
       };
       return {
         id: prefix(link.id), kind: link.kind, from: endpoint(link.from, 'source'), to: endpoint(link.to, 'target'),
-        points: (link.points || []).map(point => nativeImport ? Object.fromEntries(AXES.map((axis, index) => [axis, (Number(point[index]) + offset[axis]) * NATIVE_CELL_WORLD])) : clone(point)),
+        points: (link.points || []).map(point => nativeImport ? nativePosition(nativeVector(point), offset, frame) : clone(point)),
+        ...(nativeImport ? { nativeProjected: true } : {}),
         ...(Number.isInteger(link.extras?.native?.color) && link.extras.native.color >= 0 && link.extras.native.color <= 255 ? { color: link.extras.native.color } : {}),
       };
     }));

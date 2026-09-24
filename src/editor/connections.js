@@ -18,6 +18,12 @@ export const LINK_COLORS = Object.freeze({
 
 const clone = value => structuredClone(value);
 const port = value => value === undefined ? 0 : value;
+const nativeProjectedPoint = point => point && ['x', 'y', 'z'].every(axis => typeof point[axis] === 'number' && Number.isFinite(point[axis]) && Math.abs(point[axis]) <= 10000);
+const routePoint = (point, nativeProjected) => {
+  if (!nativeProjected) return assertGridVector(point, 'Connection route point');
+  if (!nativeProjectedPoint(point)) throw new Error('Native connection route point is invalid');
+  return clone(point);
+};
 
 function endpoint(value, label, componentIds) {
   if (!value || typeof value.componentId !== 'string' || !value.componentId) throw new Error(`${label} endpoint must reference a component`);
@@ -37,8 +43,13 @@ export function validateLinks(links = [], componentIds = null) {
     if (from.componentId === to.componentId && port(from.port) === port(to.port)) throw new Error('A connection cannot use the same component port twice');
     if (!Array.isArray(link.points) || link.points.length > 256) throw new Error('Connection route must contain at most 256 points');
     if (link.color !== undefined && (!Number.isInteger(link.color) || link.color < 0 || link.color > 255)) throw new Error('Connection color must be an integer from 0 to 255');
+    if (link.nativeProjected !== undefined && link.nativeProjected !== true) throw new Error('Native connection projection is invalid');
     ids.add(link.id);
-    const normalized = { id: link.id, kind: link.kind, from, to, points: link.points.map(point => assertGridVector(point, 'Connection route point')) };
+    const normalized = {
+      id: link.id, kind: link.kind, from, to,
+      points: link.points.map(point => routePoint(point, link.nativeProjected === true)),
+      ...(link.nativeProjected ? { nativeProjected: true } : {}),
+    };
     if (Number.isInteger(link.color) && link.color >= 0 && link.color <= 255) normalized.color = link.color;
     return normalized;
   });

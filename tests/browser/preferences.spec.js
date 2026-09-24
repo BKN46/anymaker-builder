@@ -10,7 +10,7 @@ async function ready(page, catalogCount = '332 / 598') {
 test('English default, language switching, axis views, grid and panel preferences survive reload', async ({ page }) => {
   await page.goto('./'); await ready(page);
   await expect(page.locator('html')).toHaveAttribute('lang', 'en');
-  await expect(page.locator('#save-btn')).toHaveText('Save project');
+  await expect(page.locator('#save-btn')).toHaveText('Save vehicle');
   await expect(page.locator('#language-select')).toHaveValue('en');
   await expect(page.locator('.brand')).toHaveText('ANYMAKERbuilder by BKN');
   await expect(page.locator('.notice')).toHaveCount(0);
@@ -20,7 +20,7 @@ test('English default, language switching, axis views, grid and panel preference
   const handle = await page.locator('#left-sidebar-toggle').boundingBox();
   expect(handle.height).toBeGreaterThan(handle.width * 3);
   await page.locator('#language-select').selectOption('zh');
-  await expect(page.locator('#save-btn')).toHaveText('保存工程');
+  await expect(page.locator('#save-btn')).toHaveText('保存载具');
   await expect(page.locator('#object-count')).toHaveText('0 个组件');
   await page.locator('#language-select').selectOption('en');
   await expect(page.locator('#object-count')).toHaveText('0 components');
@@ -33,8 +33,8 @@ test('English default, language switching, axis views, grid and panel preference
   await page.locator('#node-color').fill('#22aa66');
   await page.locator('#node-size').fill('0.12');
   await page.locator('#node-opacity').fill('0.4');
-  await page.locator('#beam-lengths-visible').check();
-  await page.locator('#beam-outlines-visible').check();
+  await page.locator('#edge-lengths-visible').check();
+  await page.locator('#edge-outlines-visible').check();
   await page.locator('#background-color').fill('#102030');
   await page.locator('#light-azimuth').fill('80');
   await page.locator('#light-elevation').fill('35');
@@ -58,8 +58,8 @@ test('English default, language switching, axis views, grid and panel preference
   const before = JSON.parse(await page.evaluate(key => localStorage.getItem(key), settingsKey));
   expect(before.gridColor).toBe('#ff3366'); expect(before.gridStyle).toBe('dashed'); expect(before.gridOpacity).toBe(.25);
   expect(before.nodeColor).toBe('#22aa66'); expect(before.nodeSize).toBe(.12); expect(before.nodeOpacity).toBe(.4);
-  expect(before.beamLengthsVisible).toBe(true);
-  expect(before.beamOutlinesVisible).toBe(true);
+  expect(before.edgeLengthsVisible).toBe(true);
+  expect(before.edgeOutlinesVisible).toBe(true);
   expect(before.backgroundColor).toBe('#102030'); expect(before.lightAzimuth).toBe(80); expect(before.lightElevation).toBe(35);
   expect(before.lightIntensity).toBe(4.2); expect(before.shadowStrength).toBe(.8); expect(before.lightSoftness).toBe(3.5); expect(before.orthographic).toBe(true);
   expect(before.cameraLightEnabled).toBe(false); expect(before.cameraLightIntensity).toBe(5.5);
@@ -74,8 +74,8 @@ test('English default, language switching, axis views, grid and panel preference
   await expect(page.locator('#node-color')).toHaveValue('#22aa66');
   await expect(page.locator('#node-size')).toHaveValue('0.12');
   await expect(page.locator('#node-opacity')).toHaveValue('0.4');
-  await expect(page.locator('#beam-lengths-visible')).toBeChecked();
-  await expect(page.locator('#beam-outlines-visible')).toBeChecked();
+  await expect(page.locator('#edge-lengths-visible')).toBeChecked();
+  await expect(page.locator('#edge-outlines-visible')).toBeChecked();
   await expect(page.locator('#background-color')).toHaveValue('#102030');
   await expect(page.locator('#orthographic-view')).toBeChecked();
   await expect(page.locator('#light-azimuth')).toHaveValue('80');
@@ -97,17 +97,17 @@ test('English default, language switching, axis views, grid and panel preference
   await page.screenshot({ path: 'test-results/preferences.png' });
 });
 
-test('60-second autosave recovers committed structures but not unfinished beam drafts', async ({ page }) => {
+test('60-second autosave recovers committed structures but not unfinished edge drafts', async ({ page }) => {
   await page.clock.install();
   await page.goto('./'); await ready(page);
   const canvas = page.locator('canvas');
   const component = { id: 'backup-engine', type: 'engine', position: { x: 0, y: 0, z: 0 }, rotation: { x: 0, y: 0, z: 0 }, scale: { x: 1, y: 1, z: 1 } };
   await page.locator('#file-input').setInputFiles({ name: 'vehicle.json', mimeType: 'application/json', buffer: Buffer.from(JSON.stringify({ format: 'anymaker-web-project', version: 1, objects: [component] })) });
   await expect(page.locator('#object-count')).toHaveText('1 components');
-  await page.locator('[data-tool="beam"]').click();
+  await page.locator('[data-tool="edge"]').click();
   await canvas.click({ position: { x: 450, y: 400 } });
   await canvas.click({ position: { x: 720, y: 330 } });
-  await expect(page.locator('#topology-count')).toHaveText('2 nodes · 1 beams · 0 plates');
+  await expect(page.locator('#topology-count')).toHaveText('2 nodes · 1 edges · 0 plates');
   await canvas.click({ position: { x: 800, y: 500 } });
   await page.clock.fastForward(61000);
   await expect(page.locator('#autosave-status')).toHaveAttribute('data-state', 'saved');
@@ -117,11 +117,11 @@ test('60-second autosave recovers committed structures but not unfinished beam d
   expect(record.document.objects).toEqual([component]);
   expect(Object.keys(record.document).sort()).toEqual(['format', 'objects', 'topology', 'version']);
   await page.reload(); await ready(page);
-  await expect(page.locator('#topology-count')).toHaveText('2 nodes · 1 beams · 0 plates');
+  await expect(page.locator('#topology-count')).toHaveText('2 nodes · 1 edges · 0 plates');
   await expect(page.locator('#autosave-status')).toHaveAttribute('data-state', 'restored');
   await expect(page.locator('#object-count')).toHaveText('1 components');
   await page.locator('#undo-btn').click();
-  await expect(page.locator('#topology-count')).toHaveText('0 nodes · 0 beams · 0 plates');
+  await expect(page.locator('#topology-count')).toHaveText('0 nodes · 0 edges · 0 plates');
   await page.clock.fastForward(61000);
   expect(JSON.parse(await page.evaluate(key => localStorage.getItem(key), projectKey)).document.topology.edges).toEqual([]);
 });
@@ -140,7 +140,7 @@ test('damaged local data does not crash the editor or get silently overwritten',
   await page.locator('canvas').click({ position: { x: 450, y: 400 } });
   await page.clock.fastForward(61000);
   expect(await page.evaluate(key => localStorage.getItem(key), projectKey)).toBe('{broken');
-  await expect(page.locator('#topology-count')).toHaveText('1 nodes · 0 beams · 0 plates');
+  await expect(page.locator('#topology-count')).toHaveText('1 nodes · 0 edges · 0 plates');
   expect(errors).toEqual([]);
 });
 
@@ -162,7 +162,7 @@ test('quota errors preserve the last saved vehicle and report a recoverable erro
   await page.clock.fastForward(61000);
   await expect(page.locator('#autosave-status')).toHaveAttribute('data-state', 'write-error');
   expect(await page.evaluate(key => localStorage.getItem(key), projectKey)).toBe(saved);
-  await expect(page.locator('#topology-count')).toHaveText('2 nodes · 0 beams · 0 plates');
+  await expect(page.locator('#topology-count')).toHaveText('2 nodes · 0 edges · 0 plates');
 });
 
 test('another tab saving pauses overwrites until the user explicitly resumes', async ({ page, context }) => {

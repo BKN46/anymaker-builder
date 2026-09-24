@@ -45,6 +45,12 @@ button:focus-visible, input:focus-visible, select:focus-visible { outline: 2px s
 .context-toolbar input { width: 58px; padding: 5px; border: 1px solid #d0d5dd; border-radius: 5px; }
 .context-toolbar button { min-height: 28px; padding: 4px 7px; font-size: 11px; }
 .quick-colors, .connection-kind-buttons { display: flex; gap: 4px; align-items: center; }
+.transparency-group-save, .transparency-groups, .transparency-group { display: flex; gap: 4px; align-items: center; }
+#transparency-group-name { width: 104px; }
+.transparency-groups { max-width: min(430px, 45vw); overflow-x: auto; }
+.transparency-group { padding-left: 5px; border-left: 1px solid var(--line); white-space: nowrap; }
+.transparency-group span { max-width: 120px; overflow: hidden; text-overflow: ellipsis; color: var(--muted); font-size: 11px; }
+.transparency-group-remove { min-width: 22px; padding: 2px 5px !important; color: #b42318; }
 .quick-color-item { display: inline-flex; align-items: stretch; }
 .quick-color { min-width: 56px; color: #fff; border-color: #667085; text-shadow: 0 1px 2px #000; border-radius: 4px 0 0 4px; }
 .quick-color-remove { min-width: 20px; padding: 0 4px; border-left: 0; border-radius: 0 4px 4px 0; color: #f5c2c7; }
@@ -126,15 +132,15 @@ pre { font-size: 10px; max-height: 260px; overflow: auto; white-space: pre-wrap;
 details { font-size: 11px; }
 #viewport { min-width: 0; min-height: 0; position: relative; background: #fff; }
 #viewport canvas { display: block; width: 100%; height: 100%; }
-#beam-ruler { position: absolute; inset: 0; z-index: 2; pointer-events: none; overflow: hidden; }
-#beam-ruler[hidden] { display: none; }
-#beam-ruler svg { position: absolute; inset: 0; width: 100%; height: 100%; overflow: hidden; }
-#beam-length-labels { position: absolute; inset: 0; z-index: 1; pointer-events: none; overflow: hidden; }
-.beam-length-label { position: absolute; padding: 3px 5px; color: #344054; background: #fffffff0; border: 1px solid #b9c9de; border-radius: 4px; box-shadow: 0 1px 4px #20334520; font: 10px ui-monospace, monospace; white-space: nowrap; }
-.beam-dimension-line { fill: none; stroke: var(--axis-color); stroke-width: 1.5; stroke-dasharray: 5 3; }
-.beam-dimension-label { position: absolute; padding: 3px 5px; border: 1px solid currentColor; border-radius: 4px; color: var(--axis-color); background: #fffffff2; font: 11px ui-monospace, monospace; white-space: nowrap; }
-.beam-measurements { position: absolute; top: 132px; left: 14px; padding: 8px 10px; display: grid; gap: 5px; max-width: calc(100% - 180px); border: 1px solid var(--line); border-radius: 7px; background: #fffffff2; box-shadow: 0 2px 8px #20334512; font-size: 10px; color: var(--muted); }
-.beam-measurements output { color: var(--axis-color); font: 11px ui-monospace, monospace; }
+#edge-ruler { position: absolute; inset: 0; z-index: 2; pointer-events: none; overflow: hidden; }
+#edge-ruler[hidden] { display: none; }
+#edge-ruler svg { position: absolute; inset: 0; width: 100%; height: 100%; overflow: hidden; }
+#edge-length-labels { position: absolute; inset: 0; z-index: 1; pointer-events: none; overflow: hidden; }
+.edge-length-label { position: absolute; padding: 3px 5px; color: #344054; background: #fffffff0; border: 1px solid #b9c9de; border-radius: 4px; box-shadow: 0 1px 4px #20334520; font: 10px ui-monospace, monospace; white-space: nowrap; }
+.edge-dimension-line { fill: none; stroke: var(--axis-color); stroke-width: 1.5; stroke-dasharray: 5 3; }
+.edge-dimension-label { position: absolute; padding: 3px 5px; border: 1px solid currentColor; border-radius: 4px; color: var(--axis-color); background: #fffffff2; font: 11px ui-monospace, monospace; white-space: nowrap; }
+.edge-measurements { position: absolute; top: 132px; left: 14px; padding: 8px 10px; display: grid; gap: 5px; max-width: calc(100% - 180px); border: 1px solid var(--line); border-radius: 7px; background: #fffffff2; box-shadow: 0 2px 8px #20334512; font-size: 10px; color: var(--muted); }
+.edge-measurements output { color: var(--axis-color); font: 11px ui-monospace, monospace; }
 #axis-snap-btn[aria-pressed="true"] { color: var(--accent); border-color: #97bcef; background: var(--accent-soft); }
 .hud { position: absolute; left: 15px; bottom: 14px; display: flex; flex-wrap: wrap; gap: 5px; pointer-events: none; }
 .badge { padding: 5px 8px; color: #475467; background: rgba(255,255,255,.9); border: 1px solid #d0d5dd; border-radius: 5px; font: 11px ui-monospace, monospace; }

@@ -1,5 +1,5 @@
 import * as THREE from 'three';
-import { beamMeasurements } from './construction-view.js';
+import { edgeMeasurements } from './construction-view.js';
 import { CELL_SIZE_CM, formatCells } from './grid.js';
 import { applyTranslations, setText } from '../i18n.js';
 
@@ -7,17 +7,17 @@ const colors = { x: '#c94747', y: '#278452', z: '#326bc5' };
 const svgNS = 'http://www.w3.org/2000/svg';
 const formatCm = cells => String(Math.abs(cells) * CELL_SIZE_CM);
 
-export function createBeamRuler(viewport, camera) {
+export function createEdgeRuler(viewport, camera) {
   const getCamera = typeof camera === 'function' ? camera : () => camera;
-  const root = document.createElement('div'); root.id = 'beam-ruler'; root.hidden = true;
+  const root = document.createElement('div'); root.id = 'edge-ruler'; root.hidden = true;
   const svg = document.createElementNS(svgNS, 'svg'); svg.setAttribute('aria-hidden', 'true');
-  const panel = document.createElement('div'); panel.className = 'beam-measurements';
+  const panel = document.createElement('div'); panel.className = 'edge-measurements';
   const heading = document.createElement('strong'); setText(heading, 'XYZ 长度 · 整数格（1 格 = 8 cm）');
-  const mode = document.createElement('span'); mode.id = 'beam-ruler-mode';
+  const mode = document.createElement('span'); mode.id = 'edge-ruler-mode';
   panel.append(heading, mode); root.append(svg, panel); viewport.append(root);
   const entries = Object.entries(colors).map(([axis, color]) => {
-    const path = document.createElementNS(svgNS, 'path'); path.classList.add('beam-dimension-line');
-    const label = document.createElement('span'); label.className = 'beam-dimension-label'; label.setAttribute('aria-hidden', 'true');
+    const path = document.createElementNS(svgNS, 'path'); path.classList.add('edge-dimension-line');
+    const label = document.createElement('span'); label.className = 'edge-dimension-label'; label.setAttribute('aria-hidden', 'true');
     const output = document.createElement('output'); output.dataset.axis = axis;
     output.setAttribute('aria-live', 'off');
     for (const element of [path, label, output]) element.style.setProperty('--axis-color', color);
@@ -50,7 +50,7 @@ export function createBeamRuler(viewport, camera) {
   }
   return {
     show(start, end, axis = null) {
-      measurements = beamMeasurements(start, end);
+      measurements = edgeMeasurements(start, end);
       if (!measurements.length) { hide(); return; }
       root.hidden = false; root.dataset.axis = axis || '';
       setText(mode, axis ? '吸附 {axis} 轴' : '自由建梁', { axis: axis?.toUpperCase() });
@@ -70,9 +70,9 @@ export function createBeamRuler(viewport, camera) {
   };
 }
 
-export function createBeamLengthLabels(viewport, camera) {
+export function createEdgeLengthLabels(viewport, camera) {
   const getCamera = typeof camera === 'function' ? camera : () => camera;
-  const root = document.createElement('div'); root.id = 'beam-length-labels'; root.hidden = true;
+  const root = document.createElement('div'); root.id = 'edge-length-labels'; root.hidden = true;
   viewport.append(root);
   let entries = [];
   function project(point) {
@@ -89,15 +89,15 @@ export function createBeamLengthLabels(viewport, camera) {
     }
   }
   return {
-    setBeams(nodes, edges) {
+    setEdges(nodes, edges) {
       const byId = new Map(nodes.map(node => [node.id, node.position]));
       root.replaceChildren();
       entries = edges.flatMap(edge => {
         const a = byId.get(edge.a); const b = byId.get(edge.b);
         if (!a || !b) return [];
-        const measurements = beamMeasurements(a, b);
+        const measurements = edgeMeasurements(a, b);
         if (!measurements.length) return [];
-        const label = document.createElement('output'); label.className = 'beam-length-label';
+        const label = document.createElement('output'); label.className = 'edge-length-label';
         label.textContent = measurements.map(({ axis, cells }) => `${axis.toUpperCase()} ${formatCells(cells)}`).join(' · ');
         label.title = measurements.map(({ axis, cells }) => `${axis.toUpperCase()} ${formatCells(cells)} cells / ${formatCm(cells)} cm`).join(' · ');
         root.append(label);

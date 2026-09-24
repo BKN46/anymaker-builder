@@ -8,16 +8,17 @@ import { History, project, validateDocument, migrateDocument, toIntermediateXml 
 import { copyObjects, mirrorObjects, moveObjects, removeObjects, splitGrid, mergeGrids, gridIds } from '../src/editor/operations.js';
 import { Project, Vehicle, Grid, Component, Node, Edge, Plate, Link, fromEditorDocument, toEditorDocument, toEditorTopology, validateProject } from '../src/editor/model.js';
 import { parseNativePair, nativeStats, toNativeData, toNativePair, verifyNativePairRoundTrip } from '../src/native/anymaker-data.js';
-import { createNode, moveNode, moveNodeAndMerge, mergeNodes, removeNode, removeEdge, removePlate, createEdge, createBeam, splitEdge, createPlate, createPlateFromEdges, createGlassPlateFromEdges, triangulatePlate, validateTopologyState } from '../src/editor/topology.js';
+import { createNode, moveNode, moveNodeAndMerge, mergeNodes, removeNode, removeEdge, removePlate, createEdge, createEdgeFromPoints, splitEdge, createPlate, createPlateFromEdges, createGlassPlateFromEdges, triangulatePlate, validateTopologyState } from '../src/editor/topology.js';
 import { LINK_COLORS, LINK_KINDS, createLink, removeLink, validateLinks } from '../src/editor/connections.js';
 import * as THREE from 'three';
 import { reflectGeometry } from '../src/assets/geometry-ops.js';
-import { GRID_SIZE, GRID_DIVISIONS, cameraBuildFrame, projectBuildPoint, resolveBeamPoint, resolvePlacementPoint, beamMeasurements, createBeamMesh, createBeamJointMesh, createConnectionRoute, updateBeamMesh, setBeamOutline } from '../src/editor/construction-view.js';
+import { GRID_SIZE, GRID_DIVISIONS, cameraBuildFrame, projectBuildPoint, resolveEdgePoint, resolvePlacementPoint, edgeMeasurements, createEdgeMesh, createEdgeJointMesh, createConnectionRoute, updateEdgeMesh, setEdgeOutline } from '../src/editor/construction-view.js';
 import { CELL_SIZE_WORLD, CELL_SIZE_CM, assertGridVector, cellToWorld, quantizeWorldVector, worldToCell } from '../src/editor/grid.js';
 import { categoryInfo } from '../src/catalog/category-icons.js';
 import { normalizeSettings, createLocalStore, AUTOSAVE_INTERVAL } from '../src/editor/local-storage.js';
 import { applyGridStyle, orientCamera, VIEW_DIRECTIONS } from '../src/editor/view-settings.js';
-import { applyMeshTransform } from '../src/assets/published-library.js';
+import { applyMeshTransform, WHEEL_TYRE_OUTBOARD_OFFSET, withWheelTyreOffset } from '../src/assets/published-library.js';
+import { DEPTH_SUBLAYERS, LOG_DEPTH_LAYER_STEP, LOG_DEPTH_SUBLAYER_STEP, RENDER_DEPTH_LAYERS, assignOpaqueDepthOrder, configureOpaqueDepthLayer, depthBias, logDepthBias, stableDepthRank } from '../src/editor/render-depth.js';
 import { t, setLocale, addMessages } from '../src/i18n.js';
 
 test('reference vehicle input files match the registered rendering baseline', () => {
@@ -73,13 +74,16 @@ test('reference primary vehicle converts every renderable record into an editor 
   assert.ok(document.objects.some(object => object.id.startsWith('552:')));
   assert.ok(document.objects.some(object => object.id.startsWith('554:')));
   assert.deepEqual(document.topology.nodes.find(node => node.id === 'grid-551-1:1')?.position, { x: 6.72, y: 1.6, z: 19.6 });
-  // Grid 2 is a local dashboard construction plane. Its raw positions use a
-  // different coordinate frame (z = 129–131), but its data links anchor it to
-  // the primary vehicle grid. It must be projected into the reference vehicle
-  // bounds rather than rendered as a detached group.
+  // Grid 2 is a local dashboard construction plane. Its origin/dir frame
+  // rotates the z=129–131 local positions into the primary vehicle frame;
+  // this is intentionally independent of the data-link routing records.
   const dashboard = document.objects.filter(object => object.id.startsWith('553:grid-553-2:'));
   assert.equal(dashboard.length, 5);
-  assert.deepEqual(document.objects.find(object => object.id === '553:grid-553-2:180')?.position, { x: 5.04, y: 2, z: 19.44 });
+  const dashboardDisplay = document.objects.find(object => object.id === '553:grid-553-2:180');
+  assert.equal(dashboardDisplay?.nativeProjected, true);
+  assert.ok(Math.abs(dashboardDisplay.position.x - 5.28) < 1e-12);
+  assert.ok(Math.abs(dashboardDisplay.position.y - 2.173596961679118) < 1e-12);
+  assert.ok(Math.abs(dashboardDisplay.position.z - 19.32679848083956) < 1e-12);
   const primaryBounds = JSON.parse(meta).vehicles.vehicles.find(vehicle => vehicle.id === 553).bounds;
   assert.ok(dashboard.every(object => ['x', 'y', 'z'].every((axis, index) => object.position[axis] >= primaryBounds.min[index] && object.position[axis] <= primaryBounds.max[index])));
   assert.deepEqual(document.objects.find(object => object.id === '552:grid-552-1:1')?.position, document.objects.find(object => object.id === '553:grid-553-1:178')?.position);
@@ -90,13 +94,15 @@ test('reference primary vehicle converts every renderable record into an editor 
 
 test('translations interpolate values once and do not translate untrusted parameter text', () => {
   setLocale('en');
-  assert.equal(t('保存工程'), 'Save project');
+  assert.equal(t('保存载具'), 'Save vehicle');
   assert.equal(t('准备放置：{name}', { name: '<img src=x> {count}' }), 'Ready to place: <img src=x> {count}');
   assert.equal(t('__proto__'), '__proto__');
   setLocale('zh'); assert.equal(t('已复制 {count} 个组件', { count: 2 }), '已复制 2 个组件');
-  setLocale('unsupported'); assert.equal(t('保存工程'), 'Save project');
+  setLocale('unsupported'); assert.equal(t('保存载具'), 'Save vehicle');
   addMessages({ '测试词条 {value}': 'Test {value}' });
   assert.equal(t('测试词条 {value}', () => ({ value: 7 })), 'Test 7');
+  addMessages({ '组件 {id} 没有原生映射': 'Component {id} has no native mapping' });
+  assert.equal(t('组件 wheel-1 没有原生映射'), 'Component wheel-1 has no native mapping');
 });
 
 test('UI preferences default to English and reject unsafe or unsupported values', () => {
@@ -113,16 +119,16 @@ test('UI preferences default to English and reject unsafe or unsupported values'
     const normalized = normalizeSettings({ version: 1, ...invalid });
     assert.equal(normalized.nodeColor, defaults.nodeColor); assert.equal(normalized.nodeSize, defaults.nodeSize); assert.equal(normalized.nodeOpacity, defaults.nodeOpacity);
   }
-  assert.equal(defaults.beamAxisSnap, false);
+  assert.equal(defaults.edgeAxisSnap, false);
   assert.deepEqual(defaults.paintQuickColors, ['#bd2636', '#631a24', '#2b3440', '#20252c', '#a16a30']);
   assert.deepEqual(normalizeSettings({ version: 1, paintQuickColors: ['#7C3AED', 26] }).paintQuickColors, ['#7c3aed', '#bd2636']);
   assert.deepEqual(normalizeSettings({ version: 1, paintQuickColors: ['#7C3AED', '#bad'] }).paintQuickColors, defaults.paintQuickColors);
-  assert.equal(normalizeSettings({ version: 1, beamAxisSnap: true }).beamAxisSnap, true);
-  for (const invalid of ['true', 1, null, {}]) assert.equal(normalizeSettings({ version: 1, beamAxisSnap: invalid }).beamAxisSnap, false);
-  assert.equal(defaults.beamLengthsVisible, false);
-  assert.equal(normalizeSettings({ version: 1, beamLengthsVisible: true, leftWidth: 720 }).beamLengthsVisible, true);
-  assert.equal(defaults.beamOutlinesVisible, false);
-  assert.equal(normalizeSettings({ version: 1, beamOutlinesVisible: true }).beamOutlinesVisible, true);
+  assert.equal(normalizeSettings({ version: 1, edgeAxisSnap: true }).edgeAxisSnap, true);
+  for (const invalid of ['true', 1, null, {}]) assert.equal(normalizeSettings({ version: 1, edgeAxisSnap: invalid }).edgeAxisSnap, false);
+  assert.equal(defaults.edgeLengthsVisible, false);
+  assert.equal(normalizeSettings({ version: 1, edgeLengthsVisible: true, leftWidth: 720 }).edgeLengthsVisible, true);
+  assert.equal(defaults.edgeOutlinesVisible, false);
+  assert.equal(normalizeSettings({ version: 1, edgeOutlinesVisible: true }).edgeOutlinesVisible, true);
   assert.equal(normalizeSettings({ version: 1, leftWidth: 721 }).leftWidth, 304);
   const render = normalizeSettings({ version: 1, backgroundColor: '#102030', lightAzimuth: 80, lightElevation: 35, lightIntensity: 4.2, shadowStrength: .8, cameraLightEnabled: false, cameraLightIntensity: 5.5, orthographic: true });
   assert.deepEqual(Object.fromEntries(['backgroundColor', 'lightAzimuth', 'lightElevation', 'lightIntensity', 'shadowStrength', 'cameraLightEnabled', 'cameraLightIntensity', 'orthographic'].map(key => [key, render[key]])), { backgroundColor: '#102030', lightAzimuth: 80, lightElevation: 35, lightIntensity: 4.2, shadowStrength: .8, cameraLightEnabled: false, cameraLightIntensity: 5.5, orthographic: true });
@@ -136,13 +142,13 @@ test('local backup validates data, restores previous valid record and survives q
   const store = createLocalStore(() => storage, '/test/');
   const validate = value => migrateDocument(value, new Map());
   const empty = project([], { nodes: [], edges: [], plates: [] });
-  const beam = project([], createBeam({}, { x: 0, y: 0, z: 0 }, { x: cell(1), y: 0, z: 0 }));
+  const edge = project([], createEdgeFromPoints({}, { x: 0, y: 0, z: 0 }, { x: cell(1), y: 0, z: 0 }));
   assert.equal(store.saveProject(empty, validate, 10).ok, true);
-  assert.equal(store.saveProject(beam, validate, 20).ok, true);
-  assert.deepEqual(store.loadProject(validate).record.document, beam);
+  assert.equal(store.saveProject(edge, validate, 20).ok, true);
+  assert.deepEqual(store.loadProject(validate).record.document, edge);
   blocked = true;
   assert.equal(store.saveProject(empty, validate, 30).ok, false);
-  assert.deepEqual(store.loadProject(validate).record.document, beam);
+  assert.deepEqual(store.loadProject(validate).record.document, edge);
   blocked = false; records.set(store.keys.project, '{broken');
   const recovered = store.loadProject(validate);
   assert.equal(recovered.recoveredBackup, true); assert.deepEqual(recovered.record.document, empty);
@@ -228,6 +234,9 @@ test('project validation, finite domain and unique IDs', () => {
   const invalid = structuredClone(object); invalid.scale.z = -1;
   assert.throws(() => validateDocument(project([invalid]), definitions));
   assert.throws(() => validateDocument(project([{ ...object, type: 'unknown' }]), definitions));
+  const grouped = validateDocument(project([object], { nodes: [], edges: [], plates: [] }, [{ id: 'visibility-group-1', name: 'Cabin', components: ['1'], edges: [], plates: [] }]), definitions);
+  assert.deepEqual(grouped.visibilityGroups, [{ id: 'visibility-group-1', name: 'Cabin', components: ['1'], edges: [], plates: [] }]);
+  assert.throws(() => validateDocument(project([object], { nodes: [], edges: [], plates: [] }, [{ id: 'visibility-group-1', name: 'Bad', components: ['missing'], edges: [], plates: [] }]), definitions), /visibility group members/);
 });
 test('known legacy document schema migrates only integer grid coordinates', () => {
   const legacy = { format: 'anymaker-web-project', version: 0, components: [{ id: 'legacy-1', definition: 'engine', position: { x: cell(1), y: cell(2), z: cell(3) } }] };
@@ -351,6 +360,29 @@ test('native vehicle data maps global topology once and preserves raw fields', (
   model.vehicles[0].grids[0].components[0].transform.position.x = 9;
   assert.equal(toNativeData(model).value.vehicles.vehicles[0].grids[0].components[0].pos[0], 9);
 });
+test('native grid origin and dir form a complete position and rotation frame without links', () => {
+  const native = { definitions: { components: ['engine'] }, vehicles: { vehicles: [
+    { id: 1, grids: [{ origin: [10, 20, 30], dir: [0, 3, 4], components: [{ def: 0, id: 1, pos: [2, 5, 7], rot: [1, 0, 0, 0, 1, 0, 0, 0, 1], connected_vehicle: 2, connected_component: 2 }] }] },
+    { id: 2, grids: [{ components: [{ def: 0, id: 2, pos: [3, 4, 5], rot: [1, 0, 0, 0, 1, 0, 0, 0, 1] }] }] },
+  ] } };
+  const model = parseNativePair(native, {});
+  const document = toEditorDocument(model, { vehicleIds: ['1'] });
+  const parent = document.objects.find(object => object.id === '1:grid-1-1:1');
+  const childAnchor = document.objects.find(object => object.id === '2:grid-2-1:2');
+
+  // dir normalizes to local Y = (0, .6, .8). World X is the stable local X,
+  // and local Z is X × Y = (0, -.8, .6).
+  assert.equal(parent.nativeProjected, true);
+  assert.ok(Math.abs(parent.position.x - .96) < 1e-12);
+  assert.ok(Math.abs(parent.position.y - 1.392) < 1e-12);
+  assert.ok(Math.abs(parent.position.z - 3.056) < 1e-12);
+  assert.ok(Math.abs(parent.rotation.x - Math.atan2(.8, .6)) < 1e-12);
+  // Attachment offsets use the already transformed anchors, so a child
+  // vehicle's connector occupies exactly the parent's grid-frame position.
+  assert.deepEqual(childAnchor.position, parent.position);
+  const validated = validateDocument(document, new Map([['engine', {}]]));
+  assert.equal(validated.objects.length, 2);
+});
 test('topology commands create, split, merge and validate structure on the integer grid', () => {
   let nodes = [];
   nodes = createNode(nodes, { x: 0, y: 0, z: 0 }).nodes;
@@ -384,11 +416,52 @@ test('published dynamic Mesh preview rotations preserve the native row-major mat
   assert.ok(Math.abs(transformed.y + 0.3383666015020959) < 1e-8);
   assert.ok(Math.abs(transformed.z - 0.9410143691718643) < 1e-8);
 });
-test('beam splitting inserts the new node into every affected panel boundary', () => {
+test('opaque render layers use stable depth bias and a unique deterministic draw order', () => {
+  assert.equal(depthBias(RENDER_DEPTH_LAYERS.component), -(DEPTH_SUBLAYERS * 2));
+  assert.equal(depthBias(RENDER_DEPTH_LAYERS.edge), -(DEPTH_SUBLAYERS * 4));
+  assert.equal(depthBias(RENDER_DEPTH_LAYERS.plate), -(DEPTH_SUBLAYERS * 6));
+  assert.throws(() => depthBias(RENDER_DEPTH_LAYERS.plate + 1));
+  assert.equal(stableDepthRank('component:a'), stableDepthRank('component:a'));
+  assert.ok(stableDepthRank('component:a') >= 0 && stableDepthRank('component:a') < DEPTH_SUBLAYERS);
+  const opaque = new THREE.MeshBasicMaterial();
+  const transparent = new THREE.MeshBasicMaterial({ transparent: true, depthWrite: false });
+  const root = new THREE.Group();
+  const mesh = new THREE.Mesh(new THREE.BoxGeometry(), [opaque, transparent]); root.add(mesh);
+  const key = 'edge:stable'; const rank = stableDepthRank(key);
+  configureOpaqueDepthLayer(root, RENDER_DEPTH_LAYERS.edge, { key });
+  assert.equal(mesh.renderOrder, RENDER_DEPTH_LAYERS.edge * DEPTH_SUBLAYERS + rank);
+  assert.equal(opaque.polygonOffset, true); assert.equal(opaque.polygonOffsetFactor, 0); assert.equal(opaque.polygonOffsetUnits, depthBias(RENDER_DEPTH_LAYERS.edge, rank));
+  assert.equal(transparent.polygonOffset, false);
+  const shader = { fragmentShader: '#include <logdepthbuf_fragment>' };
+  opaque.onBeforeCompile(shader);
+  assert.match(shader.fragmentShader, /gl_FragDepth = clamp/);
+  assert.equal(logDepthBias(RENDER_DEPTH_LAYERS.edge, rank), -((RENDER_DEPTH_LAYERS.edge + 1) * LOG_DEPTH_LAYER_STEP + rank * LOG_DEPTH_SUBLAYER_STEP));
+  assert.match(shader.fragmentShader, new RegExp(logDepthBias(RENDER_DEPTH_LAYERS.edge, rank).toExponential()));
+  const collidingKey = Array.from({ length: 256 }, (_, index) => `edge:collision-${index}`).find(value => value !== key && stableDepthRank(value) === rank);
+  assert.ok(collidingKey);
+  const other = new THREE.Group();
+  other.add(new THREE.Mesh(new THREE.BoxGeometry(), new THREE.MeshBasicMaterial()));
+  assert.equal(assignOpaqueDepthOrder([
+    { object: root, layer: RENDER_DEPTH_LAYERS.edge, key },
+    { object: other, layer: RENDER_DEPTH_LAYERS.edge, key: collidingKey },
+  ]), 2);
+  assert.notEqual(mesh.renderOrder, other.children[0].renderOrder);
+  assert.deepEqual([mesh.renderOrder, other.children[0].renderOrder].sort((a, b) => a - b), [0, 1]);
+  other.children[0].geometry.dispose(); other.children[0].material.dispose();
+  mesh.geometry.dispose(); opaque.dispose(); transparent.dispose();
+});
+test('wheel tyre visual parts move one cell outward along the suspension local axis', () => {
+  const transform = { position: [0, .1, .29], previewRotation: [1, 0, 0, 0, 0, -1, 0, 1, 0] };
+  const adjusted = withWheelTyreOffset(transform, 'meshes/components/car_wheel.mesh');
+  assert.deepEqual(adjusted.position, [0, .1, .29 + WHEEL_TYRE_OUTBOARD_OFFSET]);
+  assert.equal(adjusted.previewRotation, transform.previewRotation);
+  assert.equal(withWheelTyreOffset(transform, 'meshes/components/wheel_hub_a_hub.mesh'), transform);
+});
+test('edge splitting inserts the new node into every affected panel boundary', () => {
   const a = { x: 0, y: 0, z: 0 }; const b = { x: cell(2), y: 0, z: 0 };
   const c = { x: cell(2), y: cell(2), z: 0 }; const d = { x: 0, y: cell(2), z: 0 };
-  let state = createBeam({}, a, b);
-  state = createBeam(state, b, c); state = createBeam(state, c, d); state = createBeam(state, d, a);
+  let state = createEdgeFromPoints({}, a, b);
+  state = createEdgeFromPoints(state, b, c); state = createEdgeFromPoints(state, c, d); state = createEdgeFromPoints(state, d, a);
   const plate = createPlateFromEdges([], state.edges.map(edge => edge.id), state.edges, state.nodes).plate;
   const split = splitEdge(state.nodes, state.edges, state.edges[0].id, { x: cell(1), y: 0, z: 0 }, [plate]);
   assert.equal(split.nodes.length, 5);
@@ -454,27 +527,27 @@ test('topology deletion commands remove dependent references and keep the state 
   assert.deepEqual(withoutNode, { nodes: [state.nodes[0], state.nodes[2]], edges: [], plates: [] });
   assert.deepEqual(validateTopologyState(withoutNode), withoutNode);
 });
-test('beam creation is atomic and reuses logical endpoints', () => {
+test('edge creation is atomic and reuses logical endpoints', () => {
   const empty = { nodes: [], edges: [], plates: [] };
   const a = { x: 0, y: cell(2), z: cell(1) }; const b = { x: cell(3), y: cell(2), z: cell(1) }; const c = { x: cell(3), y: cell(5), z: cell(1) };
-  const first = createBeam(empty, a, b);
+  const first = createEdgeFromPoints(empty, a, b);
   assert.deepEqual(empty, { nodes: [], edges: [], plates: [] });
   assert.equal(first.nodes.length, 2); assert.equal(first.edges.length, 1);
-  const second = createBeam(first, b, c);
+  const second = createEdgeFromPoints(first, b, c);
   assert.equal(second.nodes.length, 3); assert.equal(second.edges.length, 2);
   assert.equal(second.edges[0].b, second.edges[1].a);
   const before = structuredClone(first);
-  assert.throws(() => createBeam(first, b, a), /已存在/);
-  assert.throws(() => createBeam(first, c, c), /不同节点/);
-  assert.throws(() => createBeam(first, c, { x: Infinity, y: 0, z: 0 }), /坐标/);
+  assert.throws(() => createEdgeFromPoints(first, b, a), /已存在/);
+  assert.throws(() => createEdgeFromPoints(first, c, c), /不同节点/);
+  assert.throws(() => createEdgeFromPoints(first, c, { x: Infinity, y: 0, z: 0 }), /坐标/);
   assert.deepEqual(first, before);
   assert.deepEqual(validateDocument(project([], second), definitions).topology, second);
 });
-test('panels are created from one closed beam loop with a finite normal offset', () => {
+test('panels are created from one closed edge loop with a finite normal offset', () => {
   const a = { x: 0, y: 0, z: 0 }; const b = { x: cell(2), y: 0, z: 0 };
   const c = { x: cell(2), y: cell(2), z: 0 }; const d = { x: 0, y: cell(2), z: 0 };
-  let state = createBeam({}, a, b);
-  state = createBeam(state, b, c); state = createBeam(state, c, d); state = createBeam(state, d, a);
+  let state = createEdgeFromPoints({}, a, b);
+  state = createEdgeFromPoints(state, b, c); state = createEdgeFromPoints(state, c, d); state = createEdgeFromPoints(state, d, a);
   const edgeIds = state.edges.map(edge => edge.id);
   const result = createPlateFromEdges([], [edgeIds[0], edgeIds[3], edgeIds[2], edgeIds[1]], state.edges, state.nodes, { normalOffset: CELL_SIZE_WORLD / 2 });
   assert.equal(result.plate.nodeIds.length, 4);
@@ -484,11 +557,11 @@ test('panels are created from one closed beam loop with a finite normal offset',
   assert.throws(() => createPlate([], result.plate.nodeIds, state.nodes, { normalOffset: Infinity }), /法向偏移/);
   assert.throws(() => validateTopologyState({ ...state, edges: [{ ...state.edges[0], col: 256 }] }), /颜色编号/);
 });
-test('glass panels use the observed window type on the same closed beam loop', () => {
+test('glass panels use the observed window type on the same closed edge loop', () => {
   const a = { x: 0, y: 0, z: 0 }; const b = { x: cell(2), y: 0, z: 0 };
   const c = { x: cell(2), y: cell(2), z: 0 }; const d = { x: 0, y: cell(2), z: 0 };
-  let state = createBeam({}, a, b);
-  state = createBeam(state, b, c); state = createBeam(state, c, d); state = createBeam(state, d, a);
+  let state = createEdgeFromPoints({}, a, b);
+  state = createEdgeFromPoints(state, b, c); state = createEdgeFromPoints(state, c, d); state = createEdgeFromPoints(state, d, a);
   const result = createGlassPlateFromEdges([], state.edges.map(edge => edge.id), state.edges, state.nodes, { normalOffset: CELL_SIZE_WORLD / 2 });
   assert.equal(result.plate.type, 'window');
   assert.equal(result.plate.nodeIds.length, 4);
@@ -496,8 +569,8 @@ test('glass panels use the observed window type on the same closed beam loop', (
   assert.throws(() => createPlateFromEdges(result.plates, state.edges.map(edge => edge.id), state.edges, state.nodes), /已有面板或玻璃/);
   assert.throws(() => validateTopologyState({ ...state, plates: [{ ...result.plate, type: 'opaque' }] }), /类型/);
 });
-test('solid beams reject zero length and off-axis or endpoint splits', () => {
-  const state = createBeam({}, { x: 0, y: cell(2), z: 0 }, { x: cell(4), y: cell(2), z: 0 });
+test('solid edges reject zero length and off-axis or endpoint splits', () => {
+  const state = createEdgeFromPoints({}, { x: 0, y: cell(2), z: 0 }, { x: cell(4), y: cell(2), z: 0 });
   const id = state.edges[0].id;
   for (const point of [{ x: 0, y: cell(2), z: 0 }, { x: cell(5), y: cell(2), z: 0 }, { x: cell(2), y: cell(3), z: 0 }, { x: .1, y: 0, z: 0 }]) {
     assert.throws(() => splitEdge(state.nodes, state.edges, id, point), /中心线内部|整数格/);
@@ -511,52 +584,52 @@ test('solid beams reject zero length and off-axis or endpoint splits', () => {
   assert.throws(() => validateTopologyState(invalid), /坐标/);
   assert.equal(state.nodes.length, 2);
 });
-test('beam meshes use a rectangular profile and cover endpoint cells', () => {
+test('edge meshes use a rectangular profile and cover endpoint cells', () => {
   const material = new THREE.MeshBasicMaterial();
   const axisEnds = [new THREE.Vector3(4, 0, 0), new THREE.Vector3(-4, 0, 0), new THREE.Vector3(0, 4, 0), new THREE.Vector3(0, -4, 0), new THREE.Vector3(0, 0, 4), new THREE.Vector3(0, 0, -4)];
   const planar = new THREE.Vector3(4, 4, 0);
   for (const offset of [...axisEnds, planar, new THREE.Vector3(3, 4, 5)]) {
     const start = new THREE.Vector3(1, 2, 3); const end = offset.clone().add(start);
-    const beam = createBeamMesh(start, end, material);
-    assert.equal(beam.isMesh, true); assert.equal(beam.geometry.type, 'BoxGeometry');
-    assert.equal(beam.scale.x, GRID_SIZE / GRID_DIVISIONS); assert.equal(beam.scale.z, CELL_SIZE_WORLD);
-    assert.ok(Math.abs(beam.scale.y - start.distanceTo(end) - CELL_SIZE_WORLD) < 1e-9);
+    const edge = createEdgeMesh(start, end, material);
+    assert.equal(edge.isMesh, true); assert.equal(edge.geometry.type, 'BoxGeometry');
+    assert.equal(edge.scale.x, GRID_SIZE / GRID_DIVISIONS); assert.equal(edge.scale.z, CELL_SIZE_WORLD);
+    assert.ok(Math.abs(edge.scale.y - start.distanceTo(end) - CELL_SIZE_WORLD) < 1e-9);
     const direction = end.clone().sub(start).normalize();
-    assert.ok(beam.localToWorld(new THREE.Vector3(0, -.5, 0)).distanceTo(start.clone().addScaledVector(direction, -CELL_SIZE_WORLD / 2)) < 1e-9);
-    assert.ok(beam.localToWorld(new THREE.Vector3(0, .5, 0)).distanceTo(end.clone().addScaledVector(direction, CELL_SIZE_WORLD / 2)) < 1e-9);
+    assert.ok(edge.localToWorld(new THREE.Vector3(0, -.5, 0)).distanceTo(start.clone().addScaledVector(direction, -CELL_SIZE_WORLD / 2)) < 1e-9);
+    assert.ok(edge.localToWorld(new THREE.Vector3(0, .5, 0)).distanceTo(end.clone().addScaledVector(direction, CELL_SIZE_WORLD / 2)) < 1e-9);
     if (axisEnds.includes(offset)) {
       for (const basis of [new THREE.Vector3(1, 0, 0), new THREE.Vector3(0, 1, 0), new THREE.Vector3(0, 0, 1)]) {
-        const worldBasis = basis.applyQuaternion(beam.quaternion).toArray().map(Math.abs);
+        const worldBasis = basis.applyQuaternion(edge.quaternion).toArray().map(Math.abs);
         assert.equal(worldBasis.filter(value => Math.abs(value - 1) < 1e-9).length, 1);
         assert.equal(worldBasis.filter(value => value < 1e-9).length, 2);
       }
     }
-    beam.geometry.dispose();
+    edge.geometry.dispose();
   }
   material.dispose();
 });
-test('beam outlines are optional and preserve the beam geometry transform', () => {
+test('edge outlines are optional and preserve the edge geometry transform', () => {
   const material = new THREE.MeshBasicMaterial();
-  const beam = createBeamMesh(new THREE.Vector3(), new THREE.Vector3(CELL_SIZE_WORLD, 0, 0), material, { outlined: true });
-  const outline = beam.getObjectByName('beam-outline');
+  const edge = createEdgeMesh(new THREE.Vector3(), new THREE.Vector3(CELL_SIZE_WORLD, 0, 0), material, { outlined: true });
+  const outline = edge.getObjectByName('edge-outline');
   assert.ok(outline?.isLineSegments);
   assert.equal(outline.visible, true);
-  setBeamOutline(beam, false); assert.equal(outline.visible, false);
-  setBeamOutline(beam, true); assert.equal(outline.visible, true);
-  outline.geometry.dispose(); outline.material.dispose(); beam.geometry.dispose(); material.dispose();
-  const preview = createBeamMesh(new THREE.Vector3(), new THREE.Vector3(CELL_SIZE_WORLD, 0, 0), new THREE.MeshBasicMaterial());
-  setBeamOutline(preview, true);
-  assert.ok(preview.getObjectByName('beam-outline')?.visible);
+  setEdgeOutline(edge, false); assert.equal(outline.visible, false);
+  setEdgeOutline(edge, true); assert.equal(outline.visible, true);
+  outline.geometry.dispose(); outline.material.dispose(); edge.geometry.dispose(); material.dispose();
+  const preview = createEdgeMesh(new THREE.Vector3(), new THREE.Vector3(CELL_SIZE_WORLD, 0, 0), new THREE.MeshBasicMaterial());
+  setEdgeOutline(preview, true);
+  assert.ok(preview.getObjectByName('edge-outline')?.visible);
   preview.traverse(object => { object.geometry?.dispose(); object.material?.dispose(); });
-  const emptyPreview = createBeamMesh(new THREE.Vector3(), new THREE.Vector3(), new THREE.MeshBasicMaterial(), { outlined: true });
-  assert.equal(emptyPreview.getObjectByName('beam-outline'), undefined);
-  assert.equal(updateBeamMesh(emptyPreview, new THREE.Vector3(), new THREE.Vector3(CELL_SIZE_WORLD, 0, 0)), true);
-  assert.ok(emptyPreview.getObjectByName('beam-outline')?.visible);
+  const emptyPreview = createEdgeMesh(new THREE.Vector3(), new THREE.Vector3(), new THREE.MeshBasicMaterial(), { outlined: true });
+  assert.equal(emptyPreview.getObjectByName('edge-outline'), undefined);
+  assert.equal(updateEdgeMesh(emptyPreview, new THREE.Vector3(), new THREE.Vector3(CELL_SIZE_WORLD, 0, 0)), true);
+  assert.ok(emptyPreview.getObjectByName('edge-outline')?.visible);
   emptyPreview.traverse(object => { object.geometry?.dispose(); object.material?.dispose(); });
 });
-test('beam joints and connection routes cover shared nodes and route corners', () => {
+test('edge joints and connection routes cover shared nodes and route corners', () => {
   const material = new THREE.MeshBasicMaterial();
-  const joint = createBeamJointMesh({ x: cell(2), y: 0, z: cell(-1) }, material);
+  const joint = createEdgeJointMesh({ x: cell(2), y: 0, z: cell(-1) }, material);
   assert.equal(joint.geometry.type, 'BoxGeometry');
   assert.deepEqual(joint.position.toArray(), [cell(2), 0, cell(-1)]);
   const route = createConnectionRoute([
@@ -592,7 +665,7 @@ test('placement follows the pointer vehicle hit before its work-plane fallback',
   assert.deepEqual(resolvePlacementPoint(pointer, [], workPlane).toArray(), [cell(2), 0, cell(2)]);
   vehicle.geometry.dispose(); vehicle.material.dispose();
 });
-test('beam axis snapping selects every signed world axis on integer cells', () => {
+test('edge axis snapping selects every signed world axis on integer cells', () => {
   const camera = new THREE.PerspectiveCamera(45, 1, .01, 2000);
   const start = new THREE.Vector3(cell(2), cell(3), cell(-2));
   camera.position.copy(start).add(new THREE.Vector3(6, 8, 10)); camera.lookAt(start); camera.updateMatrixWorld(true);
@@ -600,35 +673,35 @@ test('beam axis snapping selects every signed world axis on integer cells', () =
   for (const axis of ['x', 'y', 'z']) for (const sign of [-1, 1]) {
     const end = start.clone(); end[axis] += sign * cell(14);
     const ray = new THREE.Ray(camera.position.clone(), end.clone().sub(camera.position).normalize());
-    const result = resolveBeamPoint(ray, frame, { axisSnap: true });
+    const result = resolveEdgePoint(ray, frame, { axisSnap: true });
     assert.equal(result.axis, axis); assertGridVector(result.point);
     for (const other of ['x', 'y', 'z']) assert.equal(worldToCell(result.point[other]) - worldToCell(start[other]), other === axis ? sign * 14 : 0);
   }
   assert.deepEqual(start.toArray(), [cell(2), cell(3), cell(-2)]);
 });
-test('beam axis snapping preserves aligned nodes and rejects invalid grid coordinates', () => {
+test('edge axis snapping preserves aligned nodes and rejects invalid grid coordinates', () => {
   const camera = new THREE.PerspectiveCamera(); camera.position.set(0, 0, 10); camera.lookAt(0, 0, 0); camera.updateMatrixWorld(true);
   const start = new THREE.Vector3(); const frame = cameraBuildFrame(camera, start);
   const ray = new THREE.Ray(camera.position.clone(), new THREE.Vector3(cell(20), cell(1), -10).normalize());
   const node = { x: cell(15), y: 0, z: 0 };
-  assert.deepEqual(resolveBeamPoint(ray, frame, { node, axisSnap: true }).point.toArray(), [cell(15), 0, 0]);
+  assert.deepEqual(resolveEdgePoint(ray, frame, { node, axisSnap: true }).point.toArray(), [cell(15), 0, 0]);
   const offAxis = { x: cell(20), y: cell(1), z: 0 };
-  const constrained = resolveBeamPoint(ray, frame, { node: offAxis, axisSnap: true });
+  const constrained = resolveEdgePoint(ray, frame, { node: offAxis, axisSnap: true });
   assert.equal(constrained.axis, 'x'); assert.equal(worldToCell(constrained.point.y), 0); assert.equal(worldToCell(constrained.point.z), 0);
-  assert.deepEqual(resolveBeamPoint(ray, frame).point.toArray(), projectBuildPoint(ray, frame).toArray());
-  assert.throws(() => resolveBeamPoint(ray, frame, { node: { x: .1, y: 0, z: 0 }, axisSnap: true }), /整数格/);
-  const far = resolveBeamPoint(new THREE.Ray(new THREE.Vector3(20000, 0, 10), new THREE.Vector3(0, 0, -1)), frame, { axisSnap: true });
+  assert.deepEqual(resolveEdgePoint(ray, frame).point.toArray(), projectBuildPoint(ray, frame).toArray());
+  assert.throws(() => resolveEdgePoint(ray, frame, { node: { x: .1, y: 0, z: 0 }, axisSnap: true }), /整数格/);
+  const far = resolveEdgePoint(new THREE.Ray(new THREE.Vector3(20000, 0, 10), new THREE.Vector3(0, 0, -1)), frame, { axisSnap: true });
   assert.ok(far); assertGridVector(far.point);
 });
-test('XYZ beam rulers measure integer grid components without mutating endpoints', () => {
+test('XYZ edge rulers measure integer grid components without mutating endpoints', () => {
   const start = new THREE.Vector3(cell(10), cell(20), cell(30)); const end = new THREE.Vector3(cell(-10), cell(20), cell(60));
-  const measurements = beamMeasurements(start, end);
+  const measurements = edgeMeasurements(start, end);
   assert.deepEqual(measurements.map(m => m.cells), [20, 0, 30]);
   assert.deepEqual(measurements.map(m => m.length), [cell(20), 0, cell(30)]);
   assert.ok(measurements[0].from.equals(start)); assert.ok(measurements[2].to.equals(end));
   assert.ok(measurements[0].to.equals(measurements[1].from));
-  assert.deepEqual(beamMeasurements(start, start).map(m => m.cells), [0, 0, 0]);
-  assert.deepEqual(beamMeasurements(start, { x: Infinity, y: 0, z: 0 }), []);
+  assert.deepEqual(edgeMeasurements(start, start).map(m => m.cells), [0, 0, 0]);
+  assert.deepEqual(edgeMeasurements(start, { x: Infinity, y: 0, z: 0 }), []);
   assert.deepEqual(start.toArray(), [cell(10), cell(20), cell(30)]); assert.deepEqual(end.toArray(), [cell(-10), cell(20), cell(60)]);
 });
 test('category icons cover known categories and safely fall back for unknown values', () => {
