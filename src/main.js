@@ -9,7 +9,7 @@ import { copyObjects, mirrorObjects, moveObjects, removeObjects, splitGrid, merg
 import { createNode, moveNodeAndMerge, mergeNodes, removeNode, removeEdge, removePlate, createBeam, edgeSplitPoints, splitEdge, createPlateFromEdges, createGlassPlateFromEdges } from './editor/topology.js';
 import { LINK_COLORS, createLink, removeLink } from './editor/connections.js';
 import { CELL_SIZE_WORLD, assertGridVector, cellToWorld, quantizeWorldVector, worldToCell } from './editor/grid.js';
-import { GRID_SIZE, GRID_DIVISIONS, STRUCTURE_COLOR, cameraBuildFrame, projectBuildPoint, resolveBeamPoint, resolvePlacementPoint, createBeamMesh, createBeamJointMesh, createConnectionRoute, updateBeamMesh } from './editor/construction-view.js';
+import { GRID_SIZE, GRID_DIVISIONS, STRUCTURE_COLOR, cameraBuildFrame, projectBuildPoint, resolveBeamPoint, resolvePlacementPoint, createBeamMesh, createBeamJointMesh, createConnectionRoute, updateBeamMesh, setBeamOutline } from './editor/construction-view.js';
 import { createBeamRuler, createBeamLengthLabels } from './editor/beam-ruler.js';
 import { parseNativePair, nativeStats, toNativePair, verifyNativePairRoundTrip } from './native/anymaker-data.js';
 import { toEditorDocument, toEditorTopology } from './editor/model.js';
@@ -339,7 +339,7 @@ const raycaster = new THREE.Raycaster();
 raycaster.params.Line.threshold = .06;
 const pointer = new THREE.Vector2();
 const plane = new THREE.Plane(new THREE.Vector3(0, 1, 0), 0);
-const beamPreview = createBeamMesh(new THREE.Vector3(), new THREE.Vector3(), new THREE.MeshStandardMaterial({ color: STRUCTURE_COLOR, transparent: true, opacity: .5, depthWrite: false }));
+const beamPreview = createBeamMesh(new THREE.Vector3(), new THREE.Vector3(), new THREE.MeshStandardMaterial({ color: STRUCTURE_COLOR, transparent: true, opacity: .5, depthWrite: false }), { outlined: settings.beamOutlinesVisible });
 const beamRuler = createBeamRuler(viewport, () => camera);
 const beamLengthLabels = createBeamLengthLabels(viewport, () => camera);
 let beamAxisSnap = settings.beamAxisSnap;
@@ -353,9 +353,9 @@ const buildStatus = document.createElement('span'); buildStatus.id = 'build-stat
 function nativeDiagnosticColor(index) {
   return new THREE.Color(nativePaintColor(index));
 }
-function structureMaterial(color, legacyIndex, fallback, side = THREE.DoubleSide) {
-  if (typeof color !== 'string' && !Number.isInteger(legacyIndex) && side === THREE.DoubleSide) return fallback;
-  const material = new THREE.MeshStandardMaterial({ color: typeof color === 'string' ? color : Number.isInteger(legacyIndex) ? nativeDiagnosticColor(legacyIndex) : fallback.color, metalness: .05, roughness: .85, side, depthTest: true, depthWrite: true, polygonOffset: side !== THREE.DoubleSide, polygonOffsetFactor: -1, polygonOffsetUnits: -1 });
+function structureMaterial(color, legacyIndex, fallback, side = THREE.DoubleSide, { depthWrite = true } = {}) {
+  if (typeof color !== 'string' && !Number.isInteger(legacyIndex) && side === THREE.DoubleSide && depthWrite) return fallback;
+  const material = new THREE.MeshStandardMaterial({ color: typeof color === 'string' ? color : Number.isInteger(legacyIndex) ? nativeDiagnosticColor(legacyIndex) : fallback.color, metalness: .05, roughness: .85, side, depthTest: true, depthWrite, polygonOffset: side !== THREE.DoubleSide, polygonOffsetFactor: -1, polygonOffsetUnits: -1 });
   material.userData.topologyPaint = true;
   return material;
 }
@@ -385,7 +385,7 @@ function clearTopologyVisual(layer = topologyLayer) {
   layer.traverse(object => {
     object.geometry?.dispose();
     for (const material of Array.isArray(object.material) ? object.material : [object.material]) {
-      if ((material?.userData?.topologyPaint || material?.userData?.topologyLink) && !disposedMaterials.has(material)) {
+      if ((material?.userData?.topologyPaint || material?.userData?.topologyLink || material?.userData?.topologyOutline) && !disposedMaterials.has(material)) {
         disposedMaterials.add(material); material.dispose();
       }
     }
@@ -396,7 +396,6 @@ function buildTopologyVisual(state, componentPositions = new Map()) {
   const layer = new THREE.Group();
   try {
     const byId = new Map(state.nodes.map(node => [node.id, node]));
-    const nodeEdges = new Map();
     for (const node of state.nodes) {
       const marker = new THREE.Mesh(new THREE.SphereGeometry(.055, 10, 8), topologyMaterials.node);
       marker.position.set(node.position.x, node.position.y, node.position.z);
@@ -405,27 +404,17 @@ function buildTopologyVisual(state, componentPositions = new Map()) {
       layer.add(marker);
     }
     for (const edge of state.edges) {
-      const mesh = createBeamMesh(byId.get(edge.a).position, byId.get(edge.b).position, structureMaterial(edge.color, edge.col, topologyMaterials.edge));
+      // Native edges are opaque narrow supports. They need to write depth so
+      // their filled faces remain visible in dense imported assemblies; the
+      // physically outward panel offset still wins where a plate covers one.
+      const mesh = createBeamMesh(byId.get(edge.a).position, byId.get(edge.b).position, structureMaterial(edge.color, edge.col, topologyMaterials.edge), { outlined: settings.beamOutlinesVisible });
       mesh.userData.topology = 'edge'; mesh.userData.edgeId = edge.id;
       mesh.castShadow = true; mesh.receiveShadow = true;
+      mesh.renderOrder = 1;
       mesh.visible = !edge.hidden;
       layer.add(mesh);
-      for (const nodeId of [edge.a, edge.b]) {
-        if (!nodeEdges.has(nodeId)) nodeEdges.set(nodeId, []);
-        nodeEdges.get(nodeId).push(edge);
-      }
     }
-    // One sleeve per shared node hides the non-manifold seam created when
-    // separate beam primitives meet at arbitrary angles.
-    for (const [nodeId, edges] of nodeEdges) {
-      if (edges.length < 2) continue;
-      const edge = edges.find(value => !value.hidden) || edges[0];
-      const joint = createBeamJointMesh(byId.get(nodeId).position, structureMaterial(edge.color, edge.col, topologyMaterials.edge));
-      joint.userData.topology = 'edge'; joint.userData.edgeId = edge.id; joint.userData.topologyJunction = true; joint.userData.nodeId = nodeId;
-      joint.visible = edges.some(value => !value.hidden);
-      layer.add(joint);
-    }
-    for (const plate of state.plates) {
+    for (const [plateIndex, plate] of state.plates.entries()) {
       const positions = new Map(state.nodes.map(node => [node.id, new THREE.Vector3(node.position.x, node.position.y, node.position.z)]));
       const offset = plate.normalOffset ?? CELL_SIZE_WORLD / 2;
       const vertices = plateVertices(plate.nodeIds, positions, offset);
@@ -440,20 +429,26 @@ function buildTopologyVisual(state, componentPositions = new Map()) {
       let material = painted ? [
         structureMaterial(plate.color_front, plate.col_front, topologyMaterials.plate, THREE.FrontSide),
         structureMaterial(plate.color_back, plate.col_back, topologyMaterials.plate, THREE.BackSide),
-      ] : topologyMaterials.plate;
+      ] : topologyMaterials.plate.clone();
+      // Native imports can contain deliberately adjacent and occasionally
+      // coincident construction faces. Give each opaque panel a stable depth
+      // bias so their rasterisation does not alternate between frames.
+      for (const item of Array.isArray(material) ? material : [material]) {
+        item.userData.topologyPaint = true;
+        item.polygonOffset = true;
+        item.polygonOffsetFactor = -1;
+        item.polygonOffsetUnits = -(plateIndex + 1);
+      }
       if (isGlassPlate(plate)) {
-        if (!Array.isArray(material)) {
-          material = material.clone();
-          material.userData.topologyPaint = true;
-        }
         for (const item of Array.isArray(material) ? material : [material]) {
-          item.transparent = true; item.opacity = .42; item.depthTest = true; item.depthWrite = true; item.polygonOffset = true; item.polygonOffsetFactor = -1; item.polygonOffsetUnits = -1;
+          item.transparent = true; item.opacity = .42; item.depthTest = true; item.depthWrite = false;
         }
       }
       const mesh = new THREE.Mesh(geometry, material);
       mesh.userData.topology = 'plate'; mesh.userData.plateId = plate.id;
       mesh.userData.nodeIds = [...plate.nodeIds]; mesh.userData.normalOffset = offset;
       mesh.visible = !plate.hidden;
+      mesh.renderOrder = isGlassPlate(plate) ? 4 : 2;
       layer.add(mesh);
     }
     for (const link of state.links || []) {
@@ -466,7 +461,7 @@ function buildTopologyVisual(state, componentPositions = new Map()) {
         liquid: { radius: .02, radialSegments: 10 }, gas: { radius: .018, radialSegments: 10 },
         belt: { radius: .028, radialSegments: 4 }, data: { radius: .01, radialSegments: 8 },
       }[link.kind];
-      const material = new THREE.MeshStandardMaterial({ color: LINK_COLORS[link.kind], metalness: .1, roughness: .6, transparent: true, opacity: .92, depthTest: true, depthWrite: true });
+      const material = new THREE.MeshStandardMaterial({ color: LINK_COLORS[link.kind], metalness: .1, roughness: .6, transparent: true, opacity: .92, depthTest: true, depthWrite: false });
       material.userData.topologyLink = true;
       const route = createConnectionRoute(points, material, style);
       route.renderOrder = 4; route.userData.topology = 'link'; route.userData.linkId = link.id;
@@ -783,6 +778,7 @@ async function createObject(data) {
   object.userData = { ...object.userData, id: data.id, type: data.type, gridId: data.gridId, mirror: data.mirror, colors: data.colors, nativeExtension: data.nativeExtension, hidden: data.hidden === true };
   if (Number.isInteger(data.colors?.[0])) object.traverse(child => {
     if (!child.isMesh) return;
+    if (child.userData.source?.includes('/car_wheel')) return;
     for (const material of Array.isArray(child.material) ? child.material : [child.material]) material.color.set(nativePaintColor(data.colors[0]));
   });
   for (const field of ['position', 'rotation', 'scale']) object[field].set(...axes.map(a => data[field][a]));
@@ -1462,7 +1458,9 @@ const orientation = createOrientationIndicator(viewport, () => camera, view => {
 orientation.footer.append($('#fit-btn'));
 function setReferencePreview(value) {
   referencePreview = Boolean(value);
-  scene.background.set(referencePreview ? 0x000000 : settings.backgroundColor);
+  // Reference preview only hides editor helpers. Keep the user's configured
+  // background so dark wheels, suspension and engine parts remain visible.
+  scene.background.set(settings.backgroundColor);
   grid.visible = !referencePreview && gridPreferenceVisible && topologyHelpersVisible;
   transform.getHelper().visible = !referencePreview;
   for (const object of topologyLayer.children) if (object.userData.topology === 'link') object.visible = !referencePreview;
@@ -1488,7 +1486,7 @@ nativeReferencePreviewButton.onclick = () => {
   status(referencePreview ? '已开启参考预览：编辑辅助已隐藏，可对照 vehicle.png；相机、光照和游戏材质尚未验证' : '已退出参考预览');
 };
 const gridFields = document.createElement('div');
-gridFields.innerHTML = '<div class="property"><label for="grid-color" data-i18n="网格颜色"></label><input id="grid-color" type="color"></div><div class="property"><label for="grid-opacity" data-i18n="网格透明度"></label><input id="grid-opacity" type="range" min="0" max="1" step="0.05"></div><div class="property"><label for="grid-style" data-i18n="网格线型"></label><select id="grid-style"><option value="solid" data-i18n="实线"></option><option value="dashed" data-i18n="虚线"></option></select></div><h2 data-i18n="节点显示"></h2><div class="property"><label for="node-color" data-i18n="节点颜色"></label><input id="node-color" type="color"></div><div class="property"><label for="node-size" data-i18n="节点大小"></label><input id="node-size" type="range" min="0.02" max="0.25" step="0.005"><output id="node-size-value"></output></div><div class="property"><label for="node-opacity" data-i18n="节点透明度"></label><input id="node-opacity" type="range" min="0" max="1" step="0.05"></div><h2 data-i18n="结构显示"></h2><div class="property"><label for="beam-lengths-visible" data-i18n="显示梁 XYZ 长度（格）"></label><input id="beam-lengths-visible" type="checkbox"></div><h2 data-i18n="涂色"></h2><div class="property"><label for="paint-color" data-i18n="颜色（Hex RGB）"></label><input id="paint-color" type="color" value="#bd2636"><input id="paint-color-hex" type="text" value="#bd2636" maxlength="7" spellcheck="false"><output id="paint-color-preview" class="paint-color-preview"></output></div><div class="property"><label for="paint-side" data-i18n="面板涂色面"></label><select id="paint-side"><option value="front" data-i18n="前面"></option><option value="back" data-i18n="背面"></option></select></div>';
+gridFields.innerHTML = '<div class="property"><label for="grid-color" data-i18n="网格颜色"></label><input id="grid-color" type="color"></div><div class="property"><label for="grid-opacity" data-i18n="网格透明度"></label><input id="grid-opacity" type="range" min="0" max="1" step="0.05"></div><div class="property"><label for="grid-style" data-i18n="网格线型"></label><select id="grid-style"><option value="solid" data-i18n="实线"></option><option value="dashed" data-i18n="虚线"></option></select></div><h2 data-i18n="节点显示"></h2><div class="property"><label for="node-color" data-i18n="节点颜色"></label><input id="node-color" type="color"></div><div class="property"><label for="node-size" data-i18n="节点大小"></label><input id="node-size" type="range" min="0.02" max="0.25" step="0.005"><output id="node-size-value"></output></div><div class="property"><label for="node-opacity" data-i18n="节点透明度"></label><input id="node-opacity" type="range" min="0" max="1" step="0.05"></div><h2 data-i18n="结构显示"></h2><div class="property"><label for="beam-lengths-visible" data-i18n="显示梁 XYZ 长度（格）"></label><input id="beam-lengths-visible" type="checkbox"></div><div class="property"><label for="beam-outlines-visible" data-i18n="显示梁描边"></label><input id="beam-outlines-visible" type="checkbox"></div><h2 data-i18n="涂色"></h2><div class="property"><label for="paint-color" data-i18n="颜色（Hex RGB）"></label><input id="paint-color" type="color" value="#bd2636"><input id="paint-color-hex" type="text" value="#bd2636" maxlength="7" spellcheck="false"><output id="paint-color-preview" class="paint-color-preview"></output></div><div class="property"><label for="paint-side" data-i18n="面板涂色面"></label><select id="paint-side"><option value="front" data-i18n="前面"></option><option value="back" data-i18n="背面"></option></select></div>';
 const renderSettingsFields = document.createElement('div');
 renderSettingsFields.innerHTML = '<h2 data-i18n="视图与光照"></h2><div class="property"><label for="background-color" data-i18n="背景颜色"></label><input id="background-color" type="color"></div><div class="property"><label for="orthographic-view" data-i18n="正交镜头"></label><input id="orthographic-view" type="checkbox"></div><div class="property"><label for="light-azimuth" data-i18n="光照方位角"></label><input id="light-azimuth" type="range" min="-180" max="180" step="1"><output id="light-azimuth-value"></output></div><div class="property"><label for="light-elevation" data-i18n="光照高度角"></label><input id="light-elevation" type="range" min="5" max="90" step="1"><output id="light-elevation-value"></output></div><div class="property"><label for="light-intensity" data-i18n="光照强度"></label><input id="light-intensity" type="range" min="0" max="8" step="0.1"><output id="light-intensity-value"></output></div><div class="property"><label for="shadow-strength" data-i18n="阴影强度"></label><input id="shadow-strength" type="range" min="0" max="1" step="0.05"><output id="shadow-strength-value"></output></div><div class="property"><label for="light-softness" data-i18n="光照柔和度"></label><input id="light-softness" type="range" min="0" max="8" step="0.25"><output id="light-softness-value"></output></div>';
 const cameraLightSettings = document.createElement('div');
@@ -1512,6 +1510,7 @@ $('#node-color').value = settings.nodeColor;
 $('#node-size').value = settings.nodeSize;
 $('#node-opacity').value = settings.nodeOpacity;
 $('#beam-lengths-visible').checked = settings.beamLengthsVisible;
+$('#beam-outlines-visible').checked = settings.beamOutlinesVisible;
 $('#background-color').value = settings.backgroundColor;
 $('#orthographic-view').checked = settings.orthographic;
 $('#camera-light-enabled').checked = settings.cameraLightEnabled;
@@ -1550,7 +1549,7 @@ function updateRenderSettings() {
     orthographic: $('#orthographic-view').checked,
   });
   Object.assign(settings, { backgroundColor: style.backgroundColor, lightAzimuth: style.lightAzimuth, lightElevation: style.lightElevation, lightIntensity: style.lightIntensity, shadowStrength: style.shadowStrength, lightSoftness: style.lightSoftness, cameraLightEnabled: style.cameraLightEnabled, cameraLightIntensity: style.cameraLightIntensity, orthographic: style.orthographic });
-  if (!referencePreview) scene.background.set(settings.backgroundColor);
+  scene.background.set(settings.backgroundColor);
   updateLighting(); setProjectionMode(settings.orthographic);
   $('#light-azimuth-value').textContent = style.lightAzimuth.toFixed(0) + '°';
   $('#light-elevation-value').textContent = style.lightElevation.toFixed(0) + '°';
@@ -1569,6 +1568,13 @@ function updateBeamLengthVisibility() {
   scheduleSettings();
 }
 $('#beam-lengths-visible').addEventListener('change', updateBeamLengthVisibility);
+function updateBeamOutlineVisibility() {
+  settings.beamOutlinesVisible = normalizeSettings({ version: 1, beamOutlinesVisible: $('#beam-outlines-visible').checked }).beamOutlinesVisible;
+  setBeamOutline(beamPreview, settings.beamOutlinesVisible);
+  replaceTopologyVisual(buildTopologyVisual(topology, new Map(snapshot().map(object => [object.id, object.position]))));
+  scheduleSettings();
+}
+$('#beam-outlines-visible').addEventListener('change', updateBeamOutlineVisibility);
 function paintColorValue(value = $('#paint-color-hex').value) {
   return typeof value === 'string' && /^#[\da-f]{6}$/i.test(value) ? value.toLowerCase() : null;
 }
@@ -1828,7 +1834,7 @@ function collectSettings() {
   return {
     version: 1, language: getLocale(), leftWidth: leftSidebarWidth, leftCollapsed: leftSidebar.hidden, rightOpen: !rightSidebar.hidden,
     gridColor: $('#grid-color').value, gridOpacity: Number($('#grid-opacity').value), gridStyle: $('#grid-style').value, gridVisible: gridPreferenceVisible,
-    nodesVisible: showNodes, nodeColor: $('#node-color').value, nodeSize: Number($('#node-size').value), nodeOpacity: Number($('#node-opacity').value), beamAxisSnap, beamLengthsVisible: settings.beamLengthsVisible, tool, selectedType,
+    nodesVisible: showNodes, nodeColor: $('#node-color').value, nodeSize: Number($('#node-size').value), nodeOpacity: Number($('#node-opacity').value), beamAxisSnap, beamLengthsVisible: settings.beamLengthsVisible, beamOutlinesVisible: settings.beamOutlinesVisible, tool, selectedType,
     backgroundColor: settings.backgroundColor, lightAzimuth: settings.lightAzimuth, lightElevation: settings.lightElevation, lightIntensity: settings.lightIntensity, shadowStrength: settings.shadowStrength, lightSoftness: settings.lightSoftness, cameraLightEnabled: settings.cameraLightEnabled, cameraLightIntensity: settings.cameraLightIntensity, paintQuickColors: settings.paintQuickColors, orthographic: settings.orthographic,
     showBuildingFurniture: $('#show-building-furniture').checked, query: $('#component-search').value, category: $('#category-filter').value,
     drawers: { catalog: $('#catalog-drawer').open, inspector: $('.inspector-drawer').open, resources: $('#resource-drawer').open, history: historyDrawer.open },

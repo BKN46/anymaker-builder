@@ -34,6 +34,7 @@ test('English default, language switching, axis views, grid and panel preference
   await page.locator('#node-size').fill('0.12');
   await page.locator('#node-opacity').fill('0.4');
   await page.locator('#beam-lengths-visible').check();
+  await page.locator('#beam-outlines-visible').check();
   await page.locator('#background-color').fill('#102030');
   await page.locator('#light-azimuth').fill('80');
   await page.locator('#light-elevation').fill('35');
@@ -58,6 +59,7 @@ test('English default, language switching, axis views, grid and panel preference
   expect(before.gridColor).toBe('#ff3366'); expect(before.gridStyle).toBe('dashed'); expect(before.gridOpacity).toBe(.25);
   expect(before.nodeColor).toBe('#22aa66'); expect(before.nodeSize).toBe(.12); expect(before.nodeOpacity).toBe(.4);
   expect(before.beamLengthsVisible).toBe(true);
+  expect(before.beamOutlinesVisible).toBe(true);
   expect(before.backgroundColor).toBe('#102030'); expect(before.lightAzimuth).toBe(80); expect(before.lightElevation).toBe(35);
   expect(before.lightIntensity).toBe(4.2); expect(before.shadowStrength).toBe(.8); expect(before.lightSoftness).toBe(3.5); expect(before.orthographic).toBe(true);
   expect(before.cameraLightEnabled).toBe(false); expect(before.cameraLightIntensity).toBe(5.5);
@@ -73,6 +75,7 @@ test('English default, language switching, axis views, grid and panel preference
   await expect(page.locator('#node-size')).toHaveValue('0.12');
   await expect(page.locator('#node-opacity')).toHaveValue('0.4');
   await expect(page.locator('#beam-lengths-visible')).toBeChecked();
+  await expect(page.locator('#beam-outlines-visible')).toBeChecked();
   await expect(page.locator('#background-color')).toHaveValue('#102030');
   await expect(page.locator('#orthographic-view')).toBeChecked();
   await expect(page.locator('#light-azimuth')).toHaveValue('80');

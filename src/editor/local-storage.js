@@ -35,6 +35,7 @@ export function normalizeSettings(input = {}) {
     nodeOpacity: finite(s.nodeOpacity, 0, 1, 1),
     beamAxisSnap: bool(s.beamAxisSnap, false),
     beamLengthsVisible: bool(s.beamLengthsVisible, false),
+    beamOutlinesVisible: bool(s.beamOutlinesVisible, false),
     backgroundColor: typeof s.backgroundColor === 'string' && /^#[\da-f]{6}$/i.test(s.backgroundColor) ? s.backgroundColor : '#ffffff',
     lightAzimuth: finite(s.lightAzimuth, -180, 180, 35),
     lightElevation: finite(s.lightElevation, 5, 90, 55),

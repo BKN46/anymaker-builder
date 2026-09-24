@@ -12,7 +12,7 @@ import { createNode, moveNode, moveNodeAndMerge, mergeNodes, removeNode, removeE
 import { LINK_COLORS, LINK_KINDS, createLink, removeLink, validateLinks } from '../src/editor/connections.js';
 import * as THREE from 'three';
 import { reflectGeometry } from '../src/assets/geometry-ops.js';
-import { GRID_SIZE, GRID_DIVISIONS, cameraBuildFrame, projectBuildPoint, resolveBeamPoint, resolvePlacementPoint, beamMeasurements, createBeamMesh, createBeamJointMesh, createConnectionRoute } from '../src/editor/construction-view.js';
+import { GRID_SIZE, GRID_DIVISIONS, cameraBuildFrame, projectBuildPoint, resolveBeamPoint, resolvePlacementPoint, beamMeasurements, createBeamMesh, createBeamJointMesh, createConnectionRoute, updateBeamMesh, setBeamOutline } from '../src/editor/construction-view.js';
 import { CELL_SIZE_WORLD, CELL_SIZE_CM, assertGridVector, cellToWorld, quantizeWorldVector, worldToCell } from '../src/editor/grid.js';
 import { categoryInfo } from '../src/catalog/category-icons.js';
 import { normalizeSettings, createLocalStore, AUTOSAVE_INTERVAL } from '../src/editor/local-storage.js';
@@ -62,6 +62,10 @@ test('reference primary vehicle converts every renderable record into an editor 
   assert.deepEqual(Object.fromEntries(['x', 'y', 'z'].map(axis => [axis, worldToCell(node69[axis])])), { x: 69, y: 17, z: 247 });
   assert.deepEqual(document.objects.find(object => object.id === '553:grid-553-1:12')?.colors, [79, 79, 79, 79, 79, 79, 79, 79, 79, 79]);
   assert.deepEqual(document.objects.find(object => object.id === '553:grid-553-1:12')?.nativeExtension, [0, 0, 6]);
+  // Wheel hub meshes have an outboard local tyre offset. Native component
+  // rotations must therefore put the left and right hubs on opposite sides.
+  assert.ok(Math.abs(document.objects.find(object => object.id === '553:grid-553-1:71')?.rotation.y + Math.PI / 2) < 1e-6);
+  assert.ok(Math.abs(document.objects.find(object => object.id === '553:grid-553-1:73')?.rotation.y - Math.PI / 2) < 1e-6);
   assert.equal(document.topology.edges.find(edge => edge.id === 'grid-553-1:grid-553-1-edge-1')?.col, 49);
   assert.equal(document.topology.plates.find(plate => plate.id === 'grid-553-1:1')?.col_front, 26);
   assert.equal(document.topology.plates.some(plate => plate.type === 'window'), true);
@@ -117,6 +121,8 @@ test('UI preferences default to English and reject unsafe or unsupported values'
   for (const invalid of ['true', 1, null, {}]) assert.equal(normalizeSettings({ version: 1, beamAxisSnap: invalid }).beamAxisSnap, false);
   assert.equal(defaults.beamLengthsVisible, false);
   assert.equal(normalizeSettings({ version: 1, beamLengthsVisible: true, leftWidth: 720 }).beamLengthsVisible, true);
+  assert.equal(defaults.beamOutlinesVisible, false);
+  assert.equal(normalizeSettings({ version: 1, beamOutlinesVisible: true }).beamOutlinesVisible, true);
   assert.equal(normalizeSettings({ version: 1, leftWidth: 721 }).leftWidth, 304);
   const render = normalizeSettings({ version: 1, backgroundColor: '#102030', lightAzimuth: 80, lightElevation: 35, lightIntensity: 4.2, shadowStrength: .8, cameraLightEnabled: false, cameraLightIntensity: 5.5, orthographic: true });
   assert.deepEqual(Object.fromEntries(['backgroundColor', 'lightAzimuth', 'lightElevation', 'lightIntensity', 'shadowStrength', 'cameraLightEnabled', 'cameraLightIntensity', 'orthographic'].map(key => [key, render[key]])), { backgroundColor: '#102030', lightAzimuth: 80, lightElevation: 35, lightIntensity: 4.2, shadowStrength: .8, cameraLightEnabled: false, cameraLightIntensity: 5.5, orthographic: true });
@@ -335,7 +341,7 @@ test('native vehicle data maps global topology once and preserves raw fields', (
   meta.bounds.min[0] = 99; assert.equal(model.extras.native.meta.bounds.min[0], -1);
   assert.throws(() => parseNativePair(native, []), /meta/);
   assert.deepEqual(model.vehicles[0].grids[0].components[0].extras.native.definitionIndex, 0);
-  assert.ok(Math.abs(model.vehicles[0].grids[0].components[0].transform.rotation.y - Math.PI / 2) < 1e-6);
+  assert.ok(Math.abs(model.vehicles[0].grids[0].components[0].transform.rotation.y + Math.PI / 2) < 1e-6);
   assert.deepEqual(model.extras.native.raw, native);
   const importedTopology = toEditorTopology(model);
   assert.equal(importedTopology.edges[0].col, 49);
@@ -528,6 +534,25 @@ test('beam meshes use a rectangular profile and cover endpoint cells', () => {
     beam.geometry.dispose();
   }
   material.dispose();
+});
+test('beam outlines are optional and preserve the beam geometry transform', () => {
+  const material = new THREE.MeshBasicMaterial();
+  const beam = createBeamMesh(new THREE.Vector3(), new THREE.Vector3(CELL_SIZE_WORLD, 0, 0), material, { outlined: true });
+  const outline = beam.getObjectByName('beam-outline');
+  assert.ok(outline?.isLineSegments);
+  assert.equal(outline.visible, true);
+  setBeamOutline(beam, false); assert.equal(outline.visible, false);
+  setBeamOutline(beam, true); assert.equal(outline.visible, true);
+  outline.geometry.dispose(); outline.material.dispose(); beam.geometry.dispose(); material.dispose();
+  const preview = createBeamMesh(new THREE.Vector3(), new THREE.Vector3(CELL_SIZE_WORLD, 0, 0), new THREE.MeshBasicMaterial());
+  setBeamOutline(preview, true);
+  assert.ok(preview.getObjectByName('beam-outline')?.visible);
+  preview.traverse(object => { object.geometry?.dispose(); object.material?.dispose(); });
+  const emptyPreview = createBeamMesh(new THREE.Vector3(), new THREE.Vector3(), new THREE.MeshBasicMaterial(), { outlined: true });
+  assert.equal(emptyPreview.getObjectByName('beam-outline'), undefined);
+  assert.equal(updateBeamMesh(emptyPreview, new THREE.Vector3(), new THREE.Vector3(CELL_SIZE_WORLD, 0, 0)), true);
+  assert.ok(emptyPreview.getObjectByName('beam-outline')?.visible);
+  emptyPreview.traverse(object => { object.geometry?.dispose(); object.material?.dispose(); });
 });
 test('beam joints and connection routes cover shared nodes and route corners', () => {
   const material = new THREE.MeshBasicMaterial();

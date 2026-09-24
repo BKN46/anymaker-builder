@@ -76,7 +76,7 @@ export const editorMessages = {
   '右视图 +X': 'Right view +X', '左视图 −X': 'Left view −X',
   '顶视图 +Y': 'Top view +Y', '底视图 −Y': 'Bottom view −Y',
   '前视图 +Z': 'Front view +Z', '后视图 −Z': 'Back view −Z',
-  '网格颜色': 'Grid color', '网格透明度': 'Grid opacity', '网格线型': 'Grid lines', '结构显示': 'Structure display', '显示梁 XYZ 长度（格）': 'Show beam XYZ lengths (cells)',
+  '网格颜色': 'Grid color', '网格透明度': 'Grid opacity', '网格线型': 'Grid lines', '结构显示': 'Structure display', '显示梁 XYZ 长度（格）': 'Show beam XYZ lengths (cells)', '显示梁描边': 'Show beam outlines',
   '节点显示': 'Node display', '节点颜色': 'Node color', '节点大小': 'Node size', '节点透明度': 'Node opacity',
   '固定单位网格：1 格 = 8 cm；所有位置均为整数格。': 'Fixed unit grid: 1 cell = 8 cm; every position uses integer cells.',
   '实线': 'Solid', '虚线': 'Dashed',

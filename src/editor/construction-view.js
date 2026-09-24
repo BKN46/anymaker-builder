@@ -8,6 +8,7 @@ export const BEAM_WIDTH = GRID_CELL_SIZE;
 export const BEAM_JOINT_SIZE = BEAM_WIDTH * 1.1;
 export const STRUCTURE_COLOR = 0xcccccc;
 const EPSILON = 1e-6;
+const BEAM_OUTLINE_NAME = 'beam-outline';
 const vector = point => new THREE.Vector3(point.x, point.y, point.z);
 const validPoint = point => point && AXES.every(axis => Number.isFinite(point[axis]) && Math.abs(point[axis]) <= 10000);
 
@@ -85,6 +86,13 @@ export function beamMeasurements(start, end) {
   });
 }
 
+function refreshBeamOutline(mesh) {
+  const outline = mesh.getObjectByName(BEAM_OUTLINE_NAME);
+  if (!outline) return;
+  outline.geometry.dispose();
+  outline.geometry = new THREE.EdgesGeometry(mesh.geometry);
+}
+
 export function updateBeamMesh(mesh, start, end) {
   const a = vector(start); const b = vector(end);
   const direction = b.clone().sub(a);
@@ -97,29 +105,55 @@ export function updateBeamMesh(mesh, start, end) {
   const reference = Math.abs(localY.z) < .999 ? new THREE.Vector3(0, 0, 1) : new THREE.Vector3(1, 0, 0);
   const localZ = reference.addScaledVector(localY, -reference.dot(localY)).normalize();
   const localX = new THREE.Vector3().crossVectors(localY, localZ).normalize();
-  // Node coordinates name cell centres. A solid beam occupies both endpoint
-  // cells, so its visual extent needs half a cell beyond each centreline end.
+  // Endpoints denote cell centres. The support covers both endpoint cells,
+  // extending half a cell past either end without expanding into a hull.
   const visualLength = length + BEAM_WIDTH;
   mesh.position.copy(a).add(b).multiplyScalar(.5);
   mesh.quaternion.setFromRotationMatrix(new THREE.Matrix4().makeBasis(localX, localY, localZ));
   mesh.scale.set(BEAM_WIDTH, visualLength, BEAM_WIDTH);
   mesh.visible = true;
   mesh.updateMatrixWorld(true);
+  if (mesh.userData.beamOutlineRequested && !mesh.getObjectByName(BEAM_OUTLINE_NAME)) addBeamOutline(mesh);
+  else refreshBeamOutline(mesh);
   return true;
 }
 
-export function createBeamMesh(start, end, material) {
-  // This remains the editor's provisional rectangular projection. The game
-  // does not use an eight-sided cylinder: game.gcl's vehicle_edge_util emits
-  // grid-derived quads and triangles based on the non-zero endpoint axes.
-  // Do not mistake this fallback mesh for that native topology.
+function addBeamOutline(mesh) {
+  // The persistent preview starts at zero length. Do not pass an empty
+  // BufferGeometry to EdgesGeometry; create the outline on its first valid
+  // update instead.
+  if (!mesh.geometry?.getAttribute('position')) return false;
+  const outline = new THREE.LineSegments(
+    new THREE.EdgesGeometry(mesh.geometry),
+    new THREE.LineBasicMaterial({ color: 0x17212b, depthTest: true, depthWrite: false }),
+  );
+  outline.name = BEAM_OUTLINE_NAME;
+  outline.renderOrder = 2;
+  outline.userData.topologyOutline = true;
+  mesh.add(outline);
+  return true;
+}
+
+export function setBeamOutline(mesh, visible) {
+  mesh.userData.beamOutlineRequested = Boolean(visible);
+  let outline = mesh.getObjectByName(BEAM_OUTLINE_NAME);
+  if (!outline && visible) {
+    addBeamOutline(mesh);
+    outline = mesh.getObjectByName(BEAM_OUTLINE_NAME);
+  }
+  if (outline) outline.visible = Boolean(visible);
+}
+
+export function createBeamMesh(start, end, material, { outlined = false } = {}) {
   const mesh = new THREE.Mesh(new THREE.BoxGeometry(1, 1, 1), material);
+  mesh.userData.beamOutlineRequested = Boolean(outlined);
   updateBeamMesh(mesh, start, end);
   return mesh;
 }
 
-export function createBeamJointMesh(point, material, size = BEAM_JOINT_SIZE) {
+export function createBeamJointMesh(point, material, size = BEAM_JOINT_SIZE, { outlined = false } = {}) {
   const mesh = new THREE.Mesh(new THREE.BoxGeometry(1, 1, 1), material);
+  if (outlined) addBeamOutline(mesh);
   mesh.position.copy(vector(point));
   mesh.scale.setScalar(size);
   mesh.castShadow = true; mesh.receiveShadow = true;

@@ -6,6 +6,11 @@ const finiteArray = (value, length) => Array.isArray(value) && value.length === 
 
 function matrixToEulerXYZ(value) {
   if (!value) return { x: 0, y: 0, z: 0 };
+  // Native rotation arrays are stored column-major. Three.js' Euler
+  // extraction below reads row-major entries, so transpose before extracting.
+  // In particular this puts the wheel hub's local tyre offset on the outside
+  // of the vehicle instead of folding it into the chassis.
+  value = [value[0], value[3], value[6], value[1], value[4], value[7], value[2], value[5], value[8]];
   const clamp = number => Math.max(-1, Math.min(1, number));
   const y = Math.asin(clamp(value[2]));
   if (Math.abs(value[2]) < 0.9999999) return { x: Math.atan2(-value[5], value[8]), y, z: Math.atan2(-value[1], value[0]) };

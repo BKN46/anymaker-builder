@@ -1,11 +1,11 @@
 {
   "format": "anymaker-mesh-manifest",
   "version": 1,
-  "generatedAt": "2026-09-23T16:03:53.532Z",
+  "generatedAt": "2026-09-23T17:03:35.677Z",
   "sourceRoot": "Anymaker/rom",
   "parser": "src/assets/mesh.js",
   "compression": "gzip",
-  "count": 834,
+  "count": 837,
   "opaque": 1,
   "entries": {
     "meshes/blade_blurred/blade.mesh": {
@@ -1370,6 +1370,45 @@
       "parts": 1,
       "vertices": 136,
       "triangles": 68,
+      "compression": "gzip",
+      "format": "anymaker-published-mesh/1",
+      "parsed": true
+    },
+    "meshes/components/car_wheel.mesh": {
+      "url": "assets/meshes/4c91a803358199ef.json.gz",
+      "sourceSha256": "79f7d0b6a9a3e7bab18552cf2f701ba9229ed5b7dd34c919866dbb33f8a1fa4e",
+      "outputSha256": "a5596454a98ddbffc323571ad0df0fead8ea4d8a98d79ae12a5297285e3bdf05",
+      "bytes": 123249,
+      "uncompressedBytes": 551257,
+      "parts": 1,
+      "vertices": 3788,
+      "triangles": 2324,
+      "compression": "gzip",
+      "format": "anymaker-published-mesh/1",
+      "parsed": true
+    },
+    "meshes/components/car_wheel_b_1.mesh": {
+      "url": "assets/meshes/e452b2e648c22895.json.gz",
+      "sourceSha256": "7b72d2203a54068af82ee93f25f99664a74e1e719a751cab56efa311b507c976",
+      "outputSha256": "ee1045fba8644890b5d1989debdcb0a768afc3fb68fe403193ef8d36caa76eaa",
+      "bytes": 20546,
+      "uncompressedBytes": 87901,
+      "parts": 1,
+      "vertices": 610,
+      "triangles": 350,
+      "compression": "gzip",
+      "format": "anymaker-published-mesh/1",
+      "parsed": true
+    },
+    "meshes/components/car_wheel_trims_a.mesh": {
+      "url": "assets/meshes/88d18c841c06c6e2.json.gz",
+      "sourceSha256": "f4909b8b678190538c4e8b25ea5b45e1c1b717e22f5f67cc638a3c89db26dac5",
+      "outputSha256": "e5e07264b2fd9cd966429b069a78317bec65aea766191e1387d36b3f8e6da7f6",
+      "bytes": 103441,
+      "uncompressedBytes": 454055,
+      "parts": 1,
+      "vertices": 3114,
+      "triangles": 1964,
       "compression": "gzip",
       "format": "anymaker-published-mesh/1",
       "parsed": true

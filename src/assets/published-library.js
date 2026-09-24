@@ -141,7 +141,7 @@ export class PublishedAssetLibrary {
         group.userData.reason = '已入库但使用未解码的原生 Mesh 变体';
         return group;
       }
-      const addParsed = (meshData, transform = null) => {
+      const addParsed = (meshData, transform = null, source = '') => {
         for (const part of meshData.parts) {
           const geometry = new THREE.BufferGeometry();
           geometry.setAttribute('position', new THREE.BufferAttribute(part.positions, 3));
@@ -149,13 +149,21 @@ export class PublishedAssetLibrary {
           if (part.normals) geometry.setAttribute('normal', new THREE.BufferAttribute(part.normals, 3)); else geometry.computeVertexNormals();
           if (part.uv) geometry.setAttribute('uv', new THREE.BufferAttribute(part.uv, 2));
           geometry.setAttribute('gameColorBytes', new THREE.BufferAttribute(part.colors, 4, true));
-          const mesh = new THREE.Mesh(geometry, new THREE.MeshStandardMaterial({ color: '#b4c3ce', roughness: .7, metalness: .1, side: THREE.DoubleSide }));
-          mesh.name = part.name; mesh.castShadow = mesh.receiveShadow = true;
+          // The wheel hub definition only references the suspension meshes.
+          // Its tyre/rim children are added explicitly by the published wheel
+          // binding, and retain their diagnostic tyre/rim contrast instead of
+          // being painted as one opaque component-color slot.
+          const wheelVisual = source.includes('/car_wheel');
+          const color = source.endsWith('car_wheel.mesh') ? '#1b2027'
+            : source.endsWith('car_wheel_b_1.mesh') ? '#667380'
+              : source.endsWith('car_wheel_trims_a.mesh') ? '#aebbc5' : '#b4c3ce';
+          const mesh = new THREE.Mesh(geometry, new THREE.MeshStandardMaterial({ color, roughness: wheelVisual ? .52 : .7, metalness: wheelVisual ? .35 : .1, side: THREE.DoubleSide }));
+          mesh.name = part.name; mesh.userData.source = source; mesh.castShadow = mesh.receiveShadow = true;
           applyMeshTransform(mesh, transform);
           group.add(mesh);
         }
       };
-      parsed.forEach((meshData, index) => addParsed(meshData, parts[index].transform));
+      parsed.forEach((meshData, index) => addParsed(meshData, parts[index].transform, parts[index].path));
       group.userData.visual = 'mesh';
       group.userData.reason = '独立发布 Mesh（完整解析，gzip 懒加载）';
       group.userData.vertices = parsed.flatMap(value => value.parts).reduce((n, part) => n + part.positions.length / 3, 0);
