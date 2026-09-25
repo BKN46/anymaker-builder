@@ -15,6 +15,28 @@ async function openRightSidebar(page) {
   await expect(page.locator('#right-sidebar')).toBeVisible();
 }
 
+test('GitHub build time selects a successful Pages deployment over a newer failure', async ({ page }) => {
+  await page.route(/api\.github\.com\/repos\/BKN46\/anymaker-builder\/actions\/runs/, route => route.fulfill({
+    contentType: 'application/json',
+    body: JSON.stringify({ workflow_runs: [
+      { path: 'dynamic/pages/pages-build-deployment', status: 'completed', conclusion: 'failure', updated_at: '2026-09-24T10:00:00Z' },
+      { path: 'dynamic/pages/pages-build-deployment', status: 'completed', conclusion: 'success', updated_at: '2026-09-23T09:00:00Z' },
+    ] }),
+  }));
+  await page.goto('./');
+  await expect(page.locator('#viewport')).toHaveAttribute('data-ready', 'true');
+  await expect(page.locator('#github-build-time')).toHaveAttribute('title', '2026-09-23T09:00:00.000Z');
+});
+
+test('GitHub build status remains visible when no Pages run succeeds', async ({ page }) => {
+  await page.route(/api\.github\.com\/repos\/BKN46\/anymaker-builder\/actions\/runs/, route => route.fulfill({
+    contentType: 'application/json', body: JSON.stringify({ workflow_runs: [] }),
+  }));
+  await page.goto('./');
+  await expect(page.locator('#viewport')).toHaveAttribute('data-ready', 'true');
+  await expect(page.locator('#github-build-time')).toHaveText('暂无成功的 Pages 构建');
+});
+
 test('Mesh → placement → transforms → history → files on Pages subpath', async ({ page }) => {
   const errors = []; page.on('pageerror', error => errors.push(error.message));
   await page.goto('./');
@@ -136,6 +158,28 @@ test('native JSON maps through the domain model and imports components', async (
   await page.locator('#native-input').setInputFiles({ name: 'other.data', mimeType: 'application/json', buffer: Buffer.from(JSON.stringify(native)) });
   await expect(page.locator('#native-export-btn')).toBeEnabled();
   await expect(page.locator('#native-summary')).toContainText('请同时选择一份 .data 和一份 .meta 文件');
+});
+
+test('extendable components expose native linear dimensions instead of transform scale', async ({ page }) => {
+  await page.goto('./');
+  await expect(page.locator('#viewport')).toHaveAttribute('data-ready', 'true');
+  await page.locator('#language-select').selectOption('en');
+  const component = { id: 'shaft', type: 'drive_shaft', gridId: 'grid-1', position: { x: 0, y: 0, z: 0 }, rotation: { x: 0, y: 0, z: 0 }, scale: { x: 1, y: 1, z: 1 } };
+  await page.locator('#file-input').setInputFiles({ name: 'shaft.json', mimeType: 'application/json', buffer: Buffer.from(JSON.stringify({ format: 'anymaker-web-project', version: 1, objects: [component] })) });
+  await expect(page.locator('#object-count')).toHaveText('1 components');
+  const canvas = page.locator('canvas'); const bounds = await canvas.boundingBox();
+  await canvas.click({ position: { x: bounds.width / 2, y: bounds.height / 2 } });
+  await openRightSidebar(page); await page.locator('#right-tab-inspector').click();
+  await expect(page.locator('#inspector-content')).toContainText('Linear size');
+  const input = page.locator('input[aria-label="Linear size Z"]');
+  await expect(input).toHaveValue('0');
+  await input.fill('3'); await input.press('Tab');
+  await expect(input).toHaveValue('3');
+  const document = await page.evaluate(() => {
+    window.dispatchEvent(new Event('pagehide'));
+    return JSON.parse(localStorage.getItem('anymaker:' + location.pathname + ':autosave:v1')).document;
+  });
+  expect(document.objects[0].nativeExtension).toEqual([0, 0, 3]);
 });
 
 test('history drawer restores a committed snapshot and viewport reports vehicle size', async ({ page }) => {

@@ -25,6 +25,8 @@ import { logicNodePort, logicNodePortsForNetwork, logicNodeCellPosition } from '
 import { componentPropertyDescriptors, updateNativeProperty } from '../src/editor/component-properties.js';
 import { nativePaintColor, nearestNativePaintIndex } from '../src/editor/native-paint.js';
 import { mirrorPoint, mirrorSurfaceDirection, sameGridPoint } from '../src/editor/mirror-mode.js';
+import { accessoryOptionsForComponent, createNativeAccessoryItem, nativeAccessoryDefinition } from '../src/editor/native-accessories.js';
+import { extensionAxes, extensionHandlePosition, extensionVector, stretchMeshPositions, updateExtension } from '../src/editor/component-extension.js';
 
 test('mirror mode reflects integer-grid points on every plane without moving points on the plane', () => {
   assert.deepEqual(mirrorPoint({ x: cell(3), y: cell(-2), z: cell(4) }, { axis: 'x', offset: cell(1) }), { x: cell(-1), y: cell(-2), z: cell(4) });
@@ -33,6 +35,19 @@ test('mirror mode reflects integer-grid points on every plane without moving poi
   const onPlane = { x: cell(1), y: 0, z: 0 };
   assert.equal(sameGridPoint(mirrorPoint(onPlane, { axis: 'x', offset: cell(1) }), onPlane), true);
   assert.deepEqual(mirrorSurfaceDirection({ x: .5, y: -.25, z: .75 }, { axis: 'y' }), { x: .5, y: .25, z: .75 });
+});
+
+test('native linear component extensions use definition modes, intervals and stretch centres', () => {
+  const driveShaft = { mode_z: 'stretch', interval: [0, 0, 1], ext_max: [10, 10, 40], center_stretch: [0, 0, .5] };
+  assert.deepEqual(extensionAxes(driveShaft), [{ axis: 'z', index: 2, mode: 'stretch', interval: 1, max: 40 }]);
+  assert.deepEqual(updateExtension(driveShaft, [0, 0, 1], 'z', 42), [0, 0, 40]);
+  assert.deepEqual(extensionVector(driveShaft, [3, -1, 3]), [3, 0, 3]);
+  const stretched = stretchMeshPositions(driveShaft, [0, 0, 3], new Float32Array([0, 0, .04, 0, 0, .041]), CELL_SIZE_WORLD);
+  assert.ok(Math.abs(stretched[2] - .04) < 1e-6); assert.ok(Math.abs(stretched[5] - .281) < 1e-6);
+  assert.ok(Math.abs(extensionHandlePosition(driveShaft, [0, 0, 3], CELL_SIZE_WORLD)[2] - .28) < 1e-12);
+  const engine = { mode_z: 'tile', interval: [0, 0, 2] };
+  assert.deepEqual(updateExtension(engine, undefined, 'z', 5), [0, 0, 6]);
+  assert.ok(Math.abs(stretchMeshPositions(engine, [0, 0, 6], new Float32Array([0, 0, .2]), CELL_SIZE_WORLD)[2] - .2) < 1e-6);
 });
 
 test('reference vehicle input files match the registered rendering baseline', () => {
@@ -82,6 +97,11 @@ test('reference primary vehicle converts every renderable record into an editor 
   // rotations must therefore put the left and right hubs on opposite sides.
   assert.ok(Math.abs(document.objects.find(object => object.id === '553:grid-553-1:71')?.rotation.y + Math.PI / 2) < 1e-6);
   assert.ok(Math.abs(document.objects.find(object => object.id === '553:grid-553-1:73')?.rotation.y - Math.PI / 2) < 1e-6);
+  const tyres = document.objects.filter(object => object.nativeAccessory?._type === 'wheel_5_prong_tread');
+  assert.equal(tyres.length, 4);
+  assert.deepEqual(tyres.map(object => object.id).sort(), [
+    '553:grid-553-1:71', '553:grid-553-1:72', '553:grid-553-1:73', '553:grid-553-1:75',
+  ]);
   assert.equal(document.topology.edges.find(edge => edge.id === 'grid-553-1:grid-553-1-edge-1')?.col, 49);
   assert.equal(document.topology.plates.find(plate => plate.id === 'grid-553-1:1')?.col_front, 26);
   assert.equal(document.topology.plates.some(plate => plate.type === 'window'), true);
@@ -475,6 +495,36 @@ test('editor projects export a self-contained observed native data and meta pair
   assert.deepEqual(restored.objects[0].position, object.position);
   assert.equal(restored.topology.edges.length, 1);
   assert.equal(restored.topology.plates.length, 1);
+});
+test('installed native items remain on their host component and export back into its element', () => {
+  const native = {
+    definitions: { components: ['wheel'] },
+    vehicles: { vehicles: [{ id: 1, grids: [{ components: [{
+      def: 0, id: 7, pos: [2, 3, 4],
+      element: { acc: { item: { _type: 'wheel_5_prong_tread', id: 42, pattern: 1 } } },
+    }] }] }] },
+  };
+  const document = toEditorDocument(parseNativePair(native, {}));
+  const wheel = document.objects.find(object => object.type === 'wheel');
+  assert.ok(wheel);
+  assert.equal(document.objects.length, 1);
+  assert.deepEqual(wheel.nativeAccessory, { _type: 'wheel_5_prong_tread', id: 42, pattern: 1 });
+  const validated = validateDocument(document, new Map([['wheel', {}]]));
+  const pair = toNativePairFromEditor(validated);
+  assert.deepEqual(pair.data.definitions.components, ['wheel']);
+  assert.equal(pair.data.vehicles.vehicles[0].grids[0].components.length, 1);
+  assert.deepEqual(pair.data.vehicles.vehicles[0].grids[0].components[0].element, native.vehicles.vehicles[0].grids[0].components[0].element);
+});
+test('regular wheel exposes every verified compatible wheel and tread accessory', () => {
+  const types = accessoryOptionsForComponent('wheel');
+  assert.deepEqual(types, [
+    'wheel_car', 'wheel_quadbike', 'wheel_van', 'wheel_5_prong', 'wheel_5_prong_tread',
+    'wheel_rim_20', 'wheel_rim_20_tread', 'wheel_rim_22', 'wheel_rim_22_tread',
+    'wheel_rim_24', 'wheel_rim_24_tread', 'wheel4x4',
+  ]);
+  assert.equal(accessoryOptionsForComponent('wheel_c').length, 0);
+  assert.deepEqual(createNativeAccessoryItem('wheel_rim_24_tread', 99), { _type: 'wheel_rim_24_tread', id: 99, pattern: 1 });
+  assert.equal(nativeAccessoryDefinition('wheel_rim_24_tread').meshBinding.dynamicMeshes[0].path, 'meshes/components/rim_24_wheel_tread.mesh');
 });
 test('component paint RGB values resolve to deterministic native palette slots', () => {
   assert.equal(nearestNativePaintIndex('#bd2636'), 26);

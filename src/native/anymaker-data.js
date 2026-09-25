@@ -229,11 +229,12 @@ function nativeBounds(points) {
 export function toNativePairFromEditor(document, { vehicleId = 1 } = {}) {
   if (!document || !Array.isArray(document.objects) || !Number.isInteger(vehicleId)) throw new Error('Native export requires a valid editor project');
   const topology = document.topology || { nodes: [], edges: [], plates: [], links: [] };
-  const definitions = [...new Set(document.objects.map(object => object.type))];
+  const hostObjects = document.objects;
+  const definitions = [...new Set(hostObjects.map(object => object.type))];
   const definitionIndex = new Map(definitions.map((id, index) => [id, index]));
-  const componentIds = new Map(document.objects.map((object, index) => [object.id, index + 1]));
+  const componentIds = new Map(hostObjects.map((object, index) => [object.id, index + 1]));
   const nodeIds = new Map((topology.nodes || []).map((node, index) => [node.id, index + 1]));
-  const components = document.objects.map(object => {
+  const components = hostObjects.map(object => {
     const result = {
       def: definitionIndex.get(object.type),
       id: componentIds.get(object.id),
@@ -244,6 +245,15 @@ export function toNativePairFromEditor(document, { vehicleId = 1 } = {}) {
     if (Array.isArray(object.nativeExtension) && object.nativeExtension.length === 3 && object.nativeExtension.every(Number.isInteger)) result.ext = [...object.nativeExtension];
     const nativeProperties = validateNativeProperties(object.nativeProperties);
     if (nativeProperties) Object.assign(result, nativeProperties);
+    const accessory = object.nativeAccessory;
+    if (accessory) {
+      // Retain any observed host element fields that are not the installed
+      // item.  Native accessories are nested in `element.acc.item`, rather
+      // than appearing as independent grid component records.
+      const element = result.element && typeof result.element === 'object' && !Array.isArray(result.element) ? result.element : {};
+      const acc = element.acc && typeof element.acc === 'object' && !Array.isArray(element.acc) ? element.acc : {};
+      result.element = { ...element, acc: { ...acc, item: accessory } };
+    }
     if (object.scale && nativeAxes.every(axis => Number.isFinite(object.scale[axis])) && Math.abs(object.scale.x - object.scale.y) < 1e-9 && Math.abs(object.scale.x - object.scale.z) < 1e-9 && Math.abs(object.scale.x - 1) > 1e-9) result.scale = object.scale.x;
     return result;
   });

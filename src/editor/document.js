@@ -2,6 +2,7 @@ import { fromEditorDocument } from './model.js';
 import { validateTopologyState } from './topology.js';
 import { assertGridScalar, assertGridVector, CELL_SIZE_CM } from './grid.js';
 import { validateNativeProperties } from './component-properties.js';
+import { validateNativeAccessory } from './native-accessories.js';
 
 export const FORMAT = 'anymaker-web-project';
 export const VERSION = 1;
@@ -89,6 +90,7 @@ export function validateDocument(input, definitions) {
       if (o.nativeProjected !== true) throw new Error('Invalid native projection at ' + index);
       result.nativeProjected = true;
     }
+    if (o.nativeAccessory !== undefined) result.nativeAccessory = validateNativeAccessory(o.nativeAccessory);
     if (o.nativeExtension !== undefined) {
       if (!Array.isArray(o.nativeExtension) || o.nativeExtension.length !== 3 || o.nativeExtension.some(value => !Number.isInteger(value) || Math.abs(value) > 10000)) throw new Error('Invalid native component extension at ' + index);
       result.nativeExtension = [...o.nativeExtension];

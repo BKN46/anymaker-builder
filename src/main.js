@@ -22,6 +22,8 @@ import { startLocalSession } from './editor/local-session.js';
 import { createOrientationIndicator, orientCamera, applyGridStyle } from './editor/view-settings.js';
 import { RENDER_DEPTH_LAYERS, assignOpaqueDepthOrder, configureOpaqueDepth, configureOpaqueDepthLayer } from './editor/render-depth.js';
 import { nativePaintColor, nearestNativePaintIndex, isGlassPlate } from './editor/native-paint.js';
+import { accessoryOptionsForComponent, createNativeAccessoryItem, nativeAccessoryDefinition } from './editor/native-accessories.js';
+import { extensionAxes, extensionAxisIndex, extensionHandlePosition, extensionVector, updateExtension } from './editor/component-extension.js';
 import { editorMessages } from './editor/ui-messages.js';
 import { connectionNetworkLabel, connectionPortRoleLabel } from './editor/connection-port-labels.js';
 import { logicNodePort, logicNodePortsForNetwork, logicNodeCellPosition } from './editor/connection-ports.js';
@@ -94,7 +96,12 @@ let mirrorMode = { active: false, axis: 'x', offset: 0 };
 let mirrorGuideDrag = false;
 let subgridToolbarOpen = false;
 let latestPagesBuildTime = null;
-const GITHUB_PAGES_WORKFLOW_RUNS = 'https://api.github.com/repos/BKN46/anymaker-builder/actions/workflows/pages.yml/runs?status=completed&per_page=1';
+let pagesBuildTimeUnavailable = false;
+// Pages is deployed by GitHub's generated `pages-build-deployment` workflow,
+// not this repository's old `.github/workflows/pages.yml`. Fetch completed
+// repository runs and choose the latest successful generated Pages deployment.
+const GITHUB_PAGES_WORKFLOW_RUNS = 'https://api.github.com/repos/BKN46/anymaker-builder/actions/runs?status=completed&per_page=100';
+const isGitHubPagesDeployment = run => run?.path === 'dynamic/pages/pages-build-deployment';
 
 $('#app').innerHTML = '<header class="topbar"><div class="brand" aria-label="ANYMAKER builder by BKN"><strong>ANYMAKER</strong><small>builder by BKN</small></div><a id="github-link" class="github-link" href="https://github.com/BKN46/anymaker-builder" target="_blank" rel="noopener noreferrer" data-i18n-aria-label="GitHub 仓库" data-i18n-title="GitHub 仓库"><svg viewBox="0 0 24 24" aria-hidden="true"><path d="M12 .7a11.3 11.3 0 0 0-3.57 22c.56.1.77-.24.77-.54v-2.1c-3.14.68-3.8-1.33-3.8-1.33-.51-1.3-1.25-1.65-1.25-1.65-1.02-.7.08-.69.08-.69 1.13.08 1.73 1.16 1.73 1.16 1 .1.75 2.02 2.92 1.41.1-.73.39-1.22.71-1.5-2.51-.29-5.15-1.25-5.15-5.58 0-1.23.44-2.24 1.16-3.03-.12-.29-.5-1.44.11-2.99 0 0 .95-.3 3.11 1.16a10.8 10.8 0 0 1 5.66 0c2.16-1.46 3.1-1.16 3.1-1.16.62 1.55.23 2.7.12 2.99.72.79 1.16 1.8 1.16 3.03 0 4.34-2.65 5.29-5.17 5.57.4.35.76 1.04.76 2.1v3.11c0 .3.2.65.78.54A11.3 11.3 0 0 0 12 .7Z"></path></svg></a><span id="github-build-time" class="github-build-time" hidden aria-live="polite"></span><select id="language-select" data-i18n-aria-label="界面语言"><option value="en">English</option><option value="zh">中文</option></select><span class="status" id="save-status" role="status" data-i18n="正在加载定义…"></span><section class="section top-tool-section"><h2 data-i18n="编辑工具"></h2><div class="tool-grid" id="tools"></div></section><nav class="top-actions"><button id="library-btn" data-i18n="导入本地载具"></button><button id="new-btn" data-i18n="新建"></button><button id="undo-btn" data-i18n="撤销"></button><button id="redo-btn" data-i18n="重做"></button><button id="save-btn" data-i18n="保存载具"></button><button id="export-btn" class="primary" data-i18n="中间格式 XML"></button></nav></header>' +
   '<main class="workspace" id="workspace"><button id="left-sidebar-toggle" class="sidebar-toggle left-toggle" aria-controls="left-sidebar" aria-expanded="true" aria-keyshortcuts="Tab" data-i18n-title="收起方块库（在视口按 Tab 也可切换）" data-i18n="收起方块库"></button><aside id="left-sidebar" class="sidebar left-sidebar" data-i18n-aria-label="方块库"><div class="sidebar-tabs" role="tablist" data-i18n-aria-label="方块库"><button id="left-tab-catalog" type="button" role="tab" aria-controls="catalog-panel" aria-selected="true" data-sidebar-tab="catalog" data-i18n="方块库"></button><button id="left-tab-subgrids" type="button" role="tab" aria-controls="subgrid-panel" aria-selected="false" tabindex="-1" data-sidebar-tab="subgrids" data-i18n="子网格"></button></div><section id="catalog-panel" class="sidebar-tab-panel catalog-panel" role="tabpanel" aria-labelledby="left-tab-catalog"><section class="section"><h2><span data-i18n="组件定义"></span> <span id="catalog-count"></span></h2><input class="search" id="component-search" data-i18n-aria-label="搜索组件" data-i18n-placeholder="搜索中文、原始 ID、类别…"><select id="category-filter" data-i18n-aria-label="组件分类"><option value="" data-i18n="全部分类"></option></select><div class="catalog-visibility-options"><label class="catalog-visibility"><input id="show-building-furniture" type="checkbox"><span data-i18n="显示建材与家具"></span></label><label class="catalog-visibility"><input id="use-model-thumbnails" type="checkbox"><span data-i18n="使用模型缩略图"></span></label><input id="catalog-card-size" class="catalog-card-size" type="range" min="64" max="156" step="4" data-i18n-aria-label="组件卡片大小" data-i18n-title="组件卡片大小"></div><div id="component-list"></div></section></section><section id="subgrid-panel" class="sidebar-tab-panel" role="tabpanel" aria-labelledby="left-tab-subgrids" hidden><section class="section"><h2 data-i18n="当前载具子网格"></h2><p id="subgrid-summary" class="status"></p><div id="subgrid-list" class="subgrid-list"></div></section></section></aside><div id="left-sidebar-resizer" role="separator" aria-orientation="vertical" aria-controls="left-sidebar" data-i18n-aria-label="调整方块库宽度" aria-valuemin="240" aria-valuemax="720" tabindex="0"></div>' +
@@ -429,10 +436,52 @@ controls.target.set(0, .2, 0);
 const transform = new TransformControls(camera, renderer.domElement);
 transform.setSize(.75);
 scene.add(transform.getHelper());
+const extensionHandle = new THREE.Object3D();
+extensionHandle.name = 'component-extension-handle';
+extensionHandle.userData.extensionHandle = true;
+let extensionTransform = null;
+function resetTransformAxes() {
+  transform.showX = true; transform.showY = true; transform.showZ = true;
+  transform.setSpace('world');
+  transform.setTranslationSnap(CELL_SIZE_WORLD);
+}
+function extensionDefinition(object) {
+  if (!object) return null;
+  return object.userData.definitionOverride || definitions.get(object.userData.type) || null;
+}
+function attachExtensionHandle(object) {
+  const definition = extensionDefinition(object);
+  const descriptors = extensionAxes(definition);
+  if (!descriptors.length || referencePreview) return false;
+  const extension = extensionVector(definition, object.userData.nativeExtension);
+  extensionHandle.removeFromParent();
+  object.add(extensionHandle);
+  extensionHandle.position.fromArray(extensionHandlePosition(definition, extension, CELL_SIZE_WORLD));
+  transform.setMode('translate'); transform.setSpace('local');
+  transform.showX = descriptors.some(item => item.axis === 'x');
+  transform.showY = descriptors.some(item => item.axis === 'y');
+  transform.showZ = descriptors.some(item => item.axis === 'z');
+  transform.setTranslationSnap(CELL_SIZE_WORLD);
+  transform.attach(extensionHandle);
+  return true;
+}
 transform.addEventListener('dragging-changed', e => {
   controls.enabled = !e.value;
   if (e.value) {
     dragOccurred = true;
+    if (transform.object?.userData?.extensionHandle) {
+      const object = extensionHandle.parent;
+      const definition = extensionDefinition(object);
+      if (object && definition) {
+        extensionTransform = {
+          object,
+          definition,
+          initialExtension: extensionVector(definition, object.userData.nativeExtension),
+          initialPosition: extensionHandle.position.clone(),
+        };
+        return;
+      }
+    }
     const nodeId = transform.object?.userData?.topology === 'node' ? transform.object.userData.nodeId : null;
     const linkPoint = transform.object?.userData?.topology === 'link-point' ? {
       linkId: transform.object.userData.linkId,
@@ -441,7 +490,20 @@ transform.addEventListener('dragging-changed', e => {
     topologyTransform = tool === 'translate' ? (nodeId ? { nodeId } : linkPoint) : null;
     return;
   }
-  if (topologyTransform) {
+  if (extensionTransform) {
+    const { object, definition, initialExtension } = extensionTransform;
+    extensionTransform = null;
+    const nextExtension = extensionVector(definition, object.userData.nativeExtension);
+    if (nextExtension.some((value, index) => value !== initialExtension[index])) {
+      const objectId = object.userData.id;
+      void transact(async () => {
+        await restore(snapshot(), topology, transparencyGroups);
+        selected = objects.find(item => item.userData.id === objectId) || null;
+        selectedIds = selected ? new Set([objectId]) : new Set();
+        commit('更新组件线性尺寸'); inspect();
+      });
+    } else setTool(tool);
+  } else if (topologyTransform) {
     const { nodeId, linkId, pointIndex } = topologyTransform;
     topologyTransform = null;
     try {
@@ -463,6 +525,21 @@ transform.addEventListener('dragging-changed', e => {
   } else { commit(); inspect(); }
 });
 transform.addEventListener('objectChange', () => {
+  if (extensionTransform) {
+    const axis = transform.axis?.toLowerCase();
+    const index = extensionAxisIndex(axis);
+    if (index < 0) return;
+    const descriptor = extensionAxes(extensionTransform.definition).find(item => item.index === index);
+    if (!descriptor) return;
+    const delta = (extensionHandle.position.getComponent(index) - extensionTransform.initialPosition.getComponent(index)) / CELL_SIZE_WORLD;
+    extensionTransform.object.userData.nativeExtension = updateExtension(
+      extensionTransform.definition,
+      extensionTransform.initialExtension,
+      descriptor.axis,
+      extensionTransform.initialExtension[index] + delta,
+    );
+    return;
+  }
   if (!topologyTransform) return;
   if (topologyTransform.nodeId && transform.object?.userData?.nodeId === topologyTransform.nodeId) updateTopologyPreview(topologyTransform.nodeId, transform.object.position);
   if (topologyTransform.linkId && transform.object?.userData?.linkId === topologyTransform.linkId) updateLinkPointPreview(topologyTransform.linkId, topologyTransform.pointIndex, transform.object.position);
@@ -1151,7 +1228,7 @@ function setTool(value) {
   edgeToolbar.hidden = value !== 'edge' || referencePreview;
   updateEdgeToolbar();
   updateSubgridToolbar();
-  transform.detach();
+  transform.detach(); extensionHandle.removeFromParent(); resetTransformAxes();
   if (value !== 'place') clearPlacementPreview();
   else if (cursorPoint && pointerInCanvas) void updatePlacementPreview(cursorPoint);
   if (value !== 'edge') cancelEdge();
@@ -1161,7 +1238,10 @@ function setTool(value) {
   if (value !== 'connect') { connectionDraft = null; clearConnectionDraftPreview(); }
   if (!['node', 'translate'].includes(value)) clearNodeSelection();
   if (value !== 'translate') clearLinkPointSelection();
-  if (selected && selectedIds.size === 1 && ['translate', 'rotate', 'scale'].includes(tool)) {
+  if (selected && selectedIds.size === 1 && tool === 'select' && attachExtensionHandle(selected)) {
+    // Native extension handles are always shown while an extendable component
+    // is selected. They edit `ext`, not the generic transform scale.
+  } else if (selected && selectedIds.size === 1 && ['translate', 'rotate', 'scale'].includes(tool)) {
     transform.setMode(tool); transform.attach(selected);
   } else if (tool === 'translate' && selectedTopologyNode) {
     const marker = topologyNodeMarker(selectedTopologyNode);
@@ -1220,6 +1300,7 @@ function snapshot() {
     ...(o.userData.hidden ? { hidden: true } : {}),
     ...(Array.isArray(o.userData.nativeExtension) ? { nativeExtension: [...o.userData.nativeExtension] } : {}),
     ...(o.userData.nativeProperties ? { nativeProperties: structuredClone(o.userData.nativeProperties) } : {}),
+    ...(o.userData.nativeAccessory ? { nativeAccessory: structuredClone(o.userData.nativeAccessory) } : {}),
     ...(o.userData.definitionOverride ? { definitionOverride: structuredClone(o.userData.definitionOverride) } : {}),
     ...(o.userData.nativeProjected ? { nativeProjected: true } : {}),
     position: o.userData.nativeProjected
@@ -1391,8 +1472,22 @@ async function createObject(data) {
   definitions.set(data.type, catalogDefinition);
   const def = data.definitionOverride || catalogDefinition;
   const object = await library.instantiate(def, { nativeExtension: data.nativeExtension });
-  object.userData = { ...object.userData, id: data.id, type: data.type, gridId: data.gridId, mirror: data.mirror, colors: data.colors, paintColor: data.paintColor, nativeExtension: data.nativeExtension, nativeProperties: data.nativeProperties ? structuredClone(data.nativeProperties) : undefined, definitionOverride: data.definitionOverride ? structuredClone(data.definitionOverride) : undefined, nativeProjected: data.nativeProjected === true, hidden: data.hidden === true };
-  if (paintColorValue(data.paintColor) || Number.isInteger(data.colors?.[0])) applyComponentPaint(object, data.paintColor || nativePaintColor(data.colors[0]));
+  object.userData = { ...object.userData, id: data.id, type: data.type, gridId: data.gridId, mirror: data.mirror, colors: data.colors, paintColor: data.paintColor, nativeExtension: data.nativeExtension, nativeProperties: data.nativeProperties ? structuredClone(data.nativeProperties) : undefined, nativeAccessory: data.nativeAccessory ? structuredClone(data.nativeAccessory) : undefined, definitionOverride: data.definitionOverride ? structuredClone(data.definitionOverride) : undefined, nativeProjected: data.nativeProjected === true, hidden: data.hidden === true };
+  // Do not use paintColorValue() as an existence test here: without an
+  // explicit value it returns the active paint-tool colour. Imported native
+  // components commonly omit `colors`, so that fallback used to reach for
+  // data.colors[0] and abort the entire import.
+  const initialPaint = typeof data.paintColor === 'string'
+    ? paintColorValue(data.paintColor)
+    : Number.isInteger(data.colors?.[0])
+      ? nativePaintColor(data.colors[0])
+      : null;
+  if (initialPaint) applyComponentPaint(object, initialPaint);
+  if (data.nativeAccessory) {
+    const accessory = await library.instantiate(nativeAccessoryDefinition(data.nativeAccessory._type));
+    accessory.userData.nativeAccessoryVisual = true;
+    object.add(accessory);
+  }
   for (const field of ['position', 'rotation', 'scale']) object[field].set(...axes.map(a => data[field][a]));
   if (data.mirror?.axis) reflectObject(object, data.mirror.axis);
   configureOpaqueDepthLayer(object, RENDER_DEPTH_LAYERS.component, { key: `component:${data.id}` });
@@ -1869,9 +1964,50 @@ function inspect() {
     }
     row.append(group); host.append(row);
   }
+  renderComponentExtension(host, object, def);
   renderComponentProperties(host, object);
+  renderNativeAccessoryProperty(host, object);
   renderDefinitionEditor(host, object, def);
   const button = document.createElement('button'); button.className = 'full'; button.textContent = t('删除组件'); button.id = 'delete-selected'; button.onclick = () => transact(async () => { await remove(object); }); host.append(button);
+}
+
+function renderComponentExtension(host, object, definition) {
+  const descriptors = extensionAxes(definition);
+  if (!descriptors.length) return;
+  const extension = extensionVector(definition, object.userData.nativeExtension);
+  const section = document.createElement('section'); section.className = 'component-properties component-extension';
+  const heading = document.createElement('h3'); heading.textContent = getLocale() === 'zh' ? '线性尺寸' : 'Linear size'; section.append(heading);
+  const hint = document.createElement('p'); hint.className = 'status';
+  hint.textContent = getLocale() === 'zh'
+    ? '使用视口中的箭头或下方数值按格拉伸。该尺寸会写入原生 ext，而不是普通缩放。'
+    : 'Use the viewport arrows or values below to extend by cells. This writes native ext, not transform scale.';
+  section.append(hint);
+  for (const descriptor of descriptors) {
+    const row = document.createElement('div'); row.className = 'property component-property';
+    const label = document.createElement('label');
+    const mode = descriptor.mode === 'tile'
+      ? (getLocale() === 'zh' ? '平铺' : 'Tiled')
+      : (getLocale() === 'zh' ? '拉伸' : 'Stretched');
+    label.textContent = `${descriptor.axis.toUpperCase()} · ${mode}`;
+    const input = document.createElement('input'); input.type = 'number'; input.min = '0'; input.max = String(descriptor.max); input.step = String(descriptor.interval);
+    input.value = String(extension[descriptor.index]); input.setAttribute('aria-label', `${getLocale() === 'zh' ? '线性尺寸' : 'Linear size'} ${descriptor.axis.toUpperCase()}`);
+    input.addEventListener('change', () => {
+      const value = Number(input.value);
+      if (busy || !Number.isFinite(value)) { inspect(); return; }
+      const nextExtension = updateExtension(definition, object.userData.nativeExtension, descriptor.axis, value);
+      if (nextExtension.every((item, index) => item === extension[index])) { inspect(); return; }
+      const id = object.userData.id;
+      void transact(async () => {
+        const items = snapshot().map(item => item.id === id ? { ...item, nativeExtension: nextExtension } : item);
+        await restore(items, topology, transparencyGroups);
+        selected = objects.find(item => item.userData.id === id) || null;
+        selectedIds = selected ? new Set([id]) : new Set();
+        commit('更新组件线性尺寸'); inspect();
+      });
+    });
+    row.append(label, input); section.append(row);
+  }
+  host.append(section);
 }
 
 function renderDefinitionEditor(host, object, definition) {
@@ -1971,6 +2107,64 @@ function renderComponentProperties(host, object) {
     row.append(input); section.append(row);
   }
   host.append(section);
+}
+
+function nextNativeAccessoryItemId() {
+  const largest = objects.reduce((max, item) => {
+    const id = item.userData.nativeAccessory?.id;
+    return Number.isInteger(id) && id > max ? id : max;
+  }, 0);
+  return largest + 1;
+}
+
+function renderNativeAccessoryProperty(host, object) {
+  const itemTypes = accessoryOptionsForComponent(object.userData.type);
+  if (!itemTypes.length) return;
+  const section = document.createElement('section'); section.className = 'component-properties native-accessory-property';
+  const heading = document.createElement('h3'); heading.textContent = getLocale() === 'zh' ? '已安装轮胎' : 'Installed tyre'; section.append(heading);
+  const hint = document.createElement('p'); hint.className = 'status';
+  hint.textContent = getLocale() === 'zh'
+    ? '轮胎保存在游戏 wheel 记录的 element.acc.item 中，并非独立组件。'
+    : 'The tyre is stored in the game wheel record at element.acc.item, not as an independent component.';
+  section.append(hint);
+  const row = document.createElement('div'); row.className = 'property component-property';
+  const label = document.createElement('label'); label.textContent = getLocale() === 'zh' ? '轮胎' : 'Tyre';
+  const input = document.createElement('select'); input.setAttribute('aria-label', label.textContent);
+  const none = document.createElement('option'); none.value = ''; none.textContent = getLocale() === 'zh' ? '未安装' : 'Not installed'; input.append(none);
+  for (const itemType of itemTypes) {
+    const option = document.createElement('option'); option.value = itemType;
+    option.textContent = componentName(nativeAccessoryDefinition(itemType)); input.append(option);
+  }
+  const currentType = object.userData.nativeAccessory?._type || '';
+  if (![...input.options].some(option => option.value === currentType) && currentType) {
+    const option = document.createElement('option'); option.value = currentType;
+    option.textContent = currentType; input.append(option);
+  }
+  input.value = currentType;
+  input.addEventListener('change', () => {
+    if (busy) return;
+    const itemType = input.value;
+    void transact(async () => {
+      const items = snapshot().map(item => {
+        if (item.id !== object.userData.id) return item;
+        if (!itemType) {
+          const { nativeAccessory, ...withoutAccessory } = item;
+          return withoutAccessory;
+        }
+        const existing = item.nativeAccessory;
+        return {
+          ...item,
+          nativeAccessory: existing?._type === itemType
+            ? existing
+            : createNativeAccessoryItem(itemType, nextNativeAccessoryItemId()),
+        };
+      });
+      await restore(items, topology, transparencyGroups);
+      select(objects.find(item => item.userData.id === object.userData.id) || null);
+      commit(getLocale() === 'zh' ? '更新轮胎' : 'Updated tyre');
+    });
+  });
+  row.append(label, input); section.append(row); host.append(section);
 }
 
 function renderCatalog() {
@@ -2237,18 +2431,49 @@ function pickTopologySurface() {
   if (!['edge', 'plate'].includes(kind)) return null;
   return { kind, id: object.userData[`${kind}Id`], point: hit.point, object };
 }
-function pickSelectable() {
-  const surface = pickTopologySurface();
-  if (surface) return surface.object;
-  if (selectableKinds.link) {
-    const hit = raycaster.intersectObjects(topologyLayer.children.filter(object => object.visible && object.userData.topology === 'link'), true)[0];
-    if (hit) {
-      let object = hit.object;
-      while (object && object.parent !== topologyLayer) object = object.parent;
-      if (object?.userData.topology === 'link') return object;
+function pickSelectionTarget() {
+  const roots = [
+    ...(selectableKinds.component ? objects.filter(object => object.visible) : []),
+    ...topologyLayer.children.filter(object => object.visible && selectableKinds[object.userData.topology]),
+  ];
+  if (!roots.length) return null;
+  const hits = raycaster.intersectObjects(roots, true);
+  const seen = new Set();
+  for (const hit of hits) {
+    let component = hit.object;
+    while (component && !objects.includes(component)) component = component.parent;
+    if (component && selectableKinds.component) {
+      const key = `component:${component.userData.id}`;
+      if (!seen.has(key)) return { kind: 'component', id: component.userData.id, point: hit.point, object: component, distance: hit.distance };
+      seen.add(key);
+      continue;
     }
+    let topologyObject = hit.object;
+    while (topologyObject && topologyObject.parent !== topologyLayer) topologyObject = topologyObject.parent;
+    const kind = topologyObject?.userData.topology;
+    if (!kind || !selectableKinds[kind]) continue;
+    const id = topologyObject.userData[`${kind}Id`];
+    if (!id) continue;
+    const key = `${kind}:${id}`;
+    if (seen.has(key)) continue;
+    seen.add(key);
+    return { kind, id, point: hit.point, object: topologyObject, distance: hit.distance };
   }
-  return pick();
+  // Keep the existing placement-anchor affordance only when the ray missed
+  // every selectable piece of geometry. A real hit above must always win so
+  // a beam or plate cannot steal selection from a closer component, nor can
+  // an anchor select a component through any visible topology.
+  const component = pick();
+  return component ? {
+    kind: 'component',
+    id: component.userData.id,
+    object: component,
+    point: null,
+    distance: Infinity,
+  } : null;
+}
+function pickSelectable() {
+  return pickSelectionTarget()?.object || null;
 }
 function pickInteractionHover() {
   if (tool === 'hide') return pickPaintTarget()?.object || null;
@@ -2910,10 +3135,10 @@ renderer.domElement.addEventListener('pointerup', event => {
     const targetNodeId = nodeId || (edge && nearestEdgeEndpoint(edge.id));
     if (targetNodeId) selectTopologyNode(targetNodeId);
   } else {
-    const topologyTarget = pickTopologySurface();
-    if (topologyTarget) selectTopology(topologyTarget, { toggle: event.shiftKey });
-    else if (pickTopologyLink()) selectTopology(pickTopologyLink(), { toggle: event.shiftKey });
-    else select(pick(), { toggle: event.shiftKey });
+    const target = pickSelectionTarget();
+    if (!target) select(null);
+    else if (target.kind === 'component') select(target.object, { toggle: event.shiftKey });
+    else selectTopology(target, { toggle: event.shiftKey });
   }
 });
 renderer.domElement.addEventListener('pointercancel', () => { mirrorGuideDrag = false; controls.enabled = true; down = null; cancelEdge(); });
@@ -3295,6 +3520,7 @@ $('#native-input').onchange = async e => {
   nativeModel = null; importedNativeRootVehicleIds = []; nativeExportButton.disabled = false; nativeReferencePreviewButton.disabled = true;
   try {
     const pair = readNativePair(files);
+    setText($('#native-summary'), '正在读取 {dataName} / {metaName}…', () => ({ dataName: pair.data.file.name, metaName: pair.meta.file.name }));
     const [dataText, metaText] = await Promise.all([pair.data.file.text(), pair.meta.file.text()]);
     const data = JSON.parse(dataText); const meta = JSON.parse(metaText);
     nativeModel = parseNativePair(data, meta);
@@ -3308,6 +3534,7 @@ $('#native-input').onchange = async e => {
     if (!Array.isArray(vehicles)) throw new Error('没有 vehicles.vehicles 数组');
     const summaries = vehicles.map(v => ({ id: v.id, nodes: v.nodes?.length || 0, edges: v.edges?.length || 0, plates: v.plates?.length || 0, grids: v.grids?.length || 0, components: (v.grids || []).reduce((n, g) => n + (g.components?.length || 0), 0) }));
     const primary = summaries.reduce((best, summary) => summary.components > best.components ? summary : best, summaries[0]);
+    setText($('#native-summary'), '正在导入载具 {id}（{components} 个组件）…', primary);
     if (await importNativeVehicle([String(primary.id)])) setText($('#native-summary'), '已导入 {dataName} / {metaName}：{vehicle}。', () => ({ dataName: pair.data.file.name, metaName: pair.meta.file.name, vehicle: t('载具 {id}：{nodes} 节点 / {edges} 梁 / {plates} 面板 / {grids} 网格 / {components} 组件', primary) }));
   } catch (error) { setText($('#native-summary'), '无法导入原生文件：{error}', () => ({ error: t(error instanceof Error ? error.message : String(error)) })); }
 };
@@ -3315,16 +3542,28 @@ $('#native-input').onchange = async e => {
 async function importNativeVehicle(vehicleIds) {
   status('正在导入配套原生载具');
   if (!nativeModel || busy) { status(!nativeModel ? '原生模型尚未加载' : '当前操作仍在进行'); return false; }
-  return transact(async () => {
-    const document = validateDocument(toEditorDocument(nativeModel, { vehicleIds }), catalog.index);
-    await restore(document.objects, document.topology || toEditorTopology(nativeModel, { vehicleIds }), []);
-    centerImportedVehicleGeometry();
-    importedNativeRootVehicleIds = [...vehicleIds].map(String);
-    renderSubgridList();
-    nativeExportButton.disabled = false;
-    commit(); setReferencePreview(false); fit({ reference: false });
-    status('已将配套 .data / .meta 的组件、节点、梁和面板导入当前场景；连接仍保留在领域模型中');
+  let importError = null;
+  const imported = await transact(async () => {
+    try {
+      const editorDocument = toEditorDocument(nativeModel, { vehicleIds });
+      const document = validateDocument(editorDocument, catalog.index);
+      await restore(document.objects, document.topology || toEditorTopology(nativeModel, { vehicleIds }), []);
+      centerImportedVehicleGeometry();
+      importedNativeRootVehicleIds = [...vehicleIds].map(String);
+      renderSubgridList();
+      nativeExportButton.disabled = false;
+      commit(); setReferencePreview(false); fit({ reference: false });
+      status('已将配套 .data / .meta 的组件、节点、梁和面板导入当前场景；连接仍保留在领域模型中');
+    } catch (error) {
+      importError = error;
+      throw error;
+    }
   });
+  if (!imported) {
+    const detail = importError instanceof Error ? importError.message : '当前操作仍在进行';
+    setText($('#native-summary'), '无法导入原生文件：{error}', () => ({ error: t(detail) }));
+  }
+  return imported;
 }
 
 function saveNativeVehicle() {
@@ -3480,8 +3719,16 @@ changeLanguage(getLocale());
 setGridConstraints(); refresh(); resize();
 function renderLatestPagesBuildTime() {
   const element = $('#github-build-time');
+  if (pagesBuildTimeUnavailable) {
+    setText(element, '无法读取 Pages 构建状态');
+    element.removeAttribute('title');
+    element.hidden = false;
+    return;
+  }
   if (!latestPagesBuildTime || Number.isNaN(latestPagesBuildTime.getTime())) {
-    element.hidden = true;
+    setText(element, '暂无成功的 Pages 构建');
+    element.removeAttribute('title');
+    element.hidden = false;
     return;
   }
   const language = getLocale() === 'zh' ? 'zh-CN' : 'en-US';
@@ -3498,15 +3745,28 @@ async function loadLatestPagesBuildTime() {
       headers: { Accept: 'application/vnd.github+json' },
       signal: controller.signal,
     });
-    if (!response.ok) return;
+    if (!response.ok) {
+      pagesBuildTimeUnavailable = true;
+      renderLatestPagesBuildTime();
+      return;
+    }
     const payload = await response.json();
-    const updatedAt = payload?.workflow_runs?.[0]?.updated_at;
+    if (!Array.isArray(payload?.workflow_runs)) {
+      pagesBuildTimeUnavailable = true;
+      renderLatestPagesBuildTime();
+      return;
+    }
+    const run = payload.workflow_runs.find(candidate =>
+      isGitHubPagesDeployment(candidate) && candidate?.status === 'completed' && candidate?.conclusion === 'success'
+    );
+    const updatedAt = run?.updated_at;
     const time = typeof updatedAt === 'string' ? new Date(updatedAt) : null;
-    if (!time || Number.isNaN(time.getTime())) return;
-    latestPagesBuildTime = time;
+    if (time && !Number.isNaN(time.getTime())) latestPagesBuildTime = time;
     renderLatestPagesBuildTime();
   } catch {
     // GitHub API availability and rate limits must not delay the editor.
+    pagesBuildTimeUnavailable = true;
+    renderLatestPagesBuildTime();
   } finally {
     clearTimeout(timer);
   }

@@ -1,6 +1,7 @@
 // Renderer-independent Anymaker editing model. Native file adapters can map
 // this model to .data without importing Three.js or relying on scene objects.
 import { nativePropertiesFromState } from './component-properties.js';
+import { nativeAccessoryFromState } from './native-accessories.js';
 
 export const MODEL_FORMAT = 'anymaker-builder-domain';
 export const MODEL_VERSION = 1;
@@ -332,8 +333,20 @@ export function toEditorDocument(model, { vehicleIds = null } = {}) {
     const frame = frames.get(`${vehicle.id}:${grid.id}`);
     const position = nativeImport ? nativePosition(component.transform.position, offset, frame) : clone(component.transform.position);
     const sourceColors = component.colors || component.extras?.native?.colors;
+    const id = nativeImport ? `${vehicle.id}:${grid.id}:${component.id}` : component.id;
+    const state = component.extras?.native?.state;
+    const accessoryItem = nativeAccessoryFromState(state);
+    // `element.acc.item` is an installed item (for example a tyre), not a
+    // component record. Keep it on its host as an explicit accessory field;
+    // the renderer adds its visual below the host's component transform.
+    const propertyState = clone(state || {});
+    if (propertyState.element?.acc && typeof propertyState.element.acc === 'object') {
+      // Preserve other `element`/`acc` fields in the host's raw property bag;
+      // only the installed item itself changes ownership to the attachment.
+      delete propertyState.element.acc.item;
+    }
     objects.push({
-      id: nativeImport ? `${vehicle.id}:${grid.id}:${component.id}` : component.id,
+      id,
       type: component.type,
       gridId: grid.id,
       ...(component.mirror ? { mirror: clone(component.mirror) } : {}),
@@ -341,7 +354,8 @@ export function toEditorDocument(model, { vehicleIds = null } = {}) {
       ...(typeof component.paintColor === 'string' ? { paintColor: component.paintColor } : {}),
       ...(component.hidden ? { hidden: true } : {}),
       ...(nativeExtension(component) ? { nativeExtension: nativeExtension(component) } : {}),
-      ...(nativePropertiesFromState(component.extras?.native?.state) ? { nativeProperties: nativePropertiesFromState(component.extras.native.state) } : {}),
+      ...(nativePropertiesFromState(propertyState) ? { nativeProperties: nativePropertiesFromState(propertyState) } : {}),
+      ...(accessoryItem ? { nativeAccessory: accessoryItem } : {}),
       ...(nativeImport ? { nativeProjected: true } : {}),
       position,
       rotation: nativeImport ? matrixToEulerXYZ(multiplyMatrices(frame.rotation, nativeComponentRotation(component))) : clone(component.transform.rotation),

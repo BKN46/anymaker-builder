@@ -42,6 +42,18 @@ for (const file of fs.readdirSync(bindingsRoot)) {
   for (const dynamic of binding.dynamicMeshes || []) if (dynamic.path) sources.add(safeSource(dynamic.path));
 }
 
+// Wheel items are inventory accessories nested in `element.acc.item`, rather
+// than component bindings. Publish their verified meshes too, so the browser
+// can render installed variants without requiring a local game installation.
+const inventoryDefinitionsPath = path.join(root, 'data', 'inventory_definitions.json');
+if (fs.existsSync(inventoryDefinitionsPath)) {
+  const inventory = readJson(inventoryDefinitionsPath);
+  for (const item of inventory.definitions || []) {
+    if (item?.class !== 'wheel' || !Array.isArray(item.flags) || !item.flags.includes('is_component_accessory') || !item.mesh_file) continue;
+    sources.add(safeSource(item.mesh_file));
+  }
+}
+
 // Tileable native components select start/repeat/end siblings from their
 // static Mesh family using the saved `ext`. Include existing siblings in the
 // published bundle; runtime never reads the local ROM.

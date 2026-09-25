@@ -1,6 +1,7 @@
 import * as THREE from 'three';
 import { AssetLibrary, disposeObject } from './library.js';
 import { CELL_SIZE_WORLD } from '../editor/grid.js';
+import { stretchMeshPositions } from '../editor/component-extension.js';
 import { correctGeometryNormals } from './geometry-ops.js';
 
 const typed = (values, Type) => values == null ? null : new Type(values);
@@ -11,6 +12,10 @@ export function withWheelTyreOffset(transform, source) {
   const position = Array.isArray(transform?.position) ? [...transform.position] : [0, 0, 0];
   position[2] += WHEEL_TYRE_OUTBOARD_OFFSET;
   return { ...transform, position };
+}
+
+function isWheelTyreMesh(source) {
+  return /\/car_wheel(?:_b_1|_trims_a)?\.mesh$/.test(source || '');
 }
 
 export function applyMeshTransform(mesh, transform) {
@@ -139,7 +144,13 @@ export class PublishedAssetLibrary {
       const binding = definition.meshBinding || { staticMesh: definition.mesh_static?.mesh_path || definition.mesh || null, dynamicMeshes: [] };
       const manifest = await this.manifest();
       const staticParts = staticMeshParts(definition, binding, extension, manifest);
-      const parts = [...staticParts, ...(binding.dynamicMeshes || []).filter(item => item.path).map(item => ({ path: item.path, transform: withWheelTyreOffset(item, item.path) }))];
+      // The native `wheel` component is the hub/suspension. Its fitted tyre
+      // belongs to `element.acc.item` and is instantiated by the editor as a
+      // separate native accessory. Older generated bindings appended these
+      // three tyre meshes to the wheel, so deliberately ignore that legacy
+      // binding tail while retaining the published files for the accessory.
+      const dynamicMeshes = (binding.dynamicMeshes || []).filter(item => item.path && !(definition.id === 'wheel' && isWheelTyreMesh(item.path)));
+      const parts = [...staticParts, ...dynamicMeshes.map(item => ({ path: item.path, transform: item }))];
       if (!parts.length) return this.fallback.instantiate(definition, { nativeExtension: extension });
       const parsed = await Promise.all(parts.map(part => this.parse(part.path)));
       const group = new THREE.Group();
@@ -153,7 +164,11 @@ export class PublishedAssetLibrary {
       const addParsed = (meshData, transform = null, source = '') => {
         for (const part of meshData.parts) {
           const geometry = new THREE.BufferGeometry();
-          geometry.setAttribute('position', new THREE.BufferAttribute(part.positions, 3));
+          // Stretch modes move only vertices beyond center_stretch. This is
+          // the native `stretch_vertex` rule, unlike a generic object scale
+          // which would also move the fixed/anchored half of the component.
+          const positions = stretchMeshPositions(definition, extension, part.positions, CELL_SIZE_WORLD);
+          geometry.setAttribute('position', new THREE.BufferAttribute(positions, 3));
           geometry.setIndex(new THREE.BufferAttribute(part.indices, 1));
           if (part.normals) geometry.setAttribute('normal', new THREE.BufferAttribute(part.normals, 3)); else geometry.computeVertexNormals();
           correctGeometryNormals(geometry);
