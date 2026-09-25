@@ -1,6 +1,7 @@
 import { fromEditorDocument } from './model.js';
 import { validateTopologyState } from './topology.js';
 import { assertGridScalar, assertGridVector, CELL_SIZE_CM } from './grid.js';
+import { validateNativeProperties } from './component-properties.js';
 
 export const FORMAT = 'anymaker-web-project';
 export const VERSION = 1;
@@ -59,6 +60,8 @@ export function validateDocument(input, definitions) {
       if (!Array.isArray(o.nativeExtension) || o.nativeExtension.length !== 3 || o.nativeExtension.some(value => !Number.isInteger(value) || Math.abs(value) > 10000)) throw new Error('Invalid native component extension at ' + index);
       result.nativeExtension = [...o.nativeExtension];
     }
+    const nativeProperties = validateNativeProperties(o.nativeProperties);
+    if (nativeProperties && Object.keys(nativeProperties).length) result.nativeProperties = nativeProperties;
     for (const field of ['position', 'rotation', 'scale']) {
       const vector = o[field];
       if (!vector || !axes.every(a => own(vector, a) && typeof vector[a] === 'number' && Number.isFinite(vector[a]) && Math.abs(vector[a]) <= 10000)) throw new Error('Invalid transform at ' + index + '.' + field);
