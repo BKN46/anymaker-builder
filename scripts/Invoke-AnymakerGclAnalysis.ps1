@@ -7,6 +7,9 @@ param(
     'vehicle_edge_util.add_static_geometry',
     'client_scene.vehicle_edge.debug_render_geometry',
     'vehicle_util.grid_origin_dir.get_transform',
+    'vehicle_util.grid_origin_dir.get_orientation',
+    'vehicle_grid_util.get_grid_axis_normals',
+    'vehicle_plate_util.get_plate_node_surface_offset',
     'client_scene.vehicle_clipboard_data.load_clipboard_render_data',
     'server_scene.vehicle_component.connect_multibody',
     'server_scene.vehicle_component.hinge_knuckle.connect_multibody',
@@ -35,7 +38,12 @@ $targets = @{
   'client_scene.vehicle_edge.debug_render_geometry' = @{ Offset = '0x121C0BC'; Length = '0xF0A0' }
   # These ranges are read from the current game.gcl function records: the
   # signature is followed by its {code-size, allocation-size} header.
-  'vehicle_util.grid_origin_dir.get_transform' = @{ Offset = '0x126C738'; Length = '0x78' }
+  # 0x126C738 is client_scene.vehicle_grid.get_transform, a wrapper whose last
+  # relocation names the callee. These are the actual function records.
+  'vehicle_util.grid_origin_dir.get_transform' = @{ Offset = '0x3C4E8EC'; Length = '0x500' }
+  'vehicle_util.grid_origin_dir.get_orientation' = @{ Offset = '0x3C4E16F'; Length = '0x130' }
+  'vehicle_grid_util.get_grid_axis_normals' = @{ Offset = '0x3BD9834'; Length = '0x348' }
+  'vehicle_plate_util.get_plate_node_surface_offset' = @{ Offset = '0x3C198C9'; Length = '0x900' }
   'client_scene.vehicle_clipboard_data.load_clipboard_render_data' = @{ Offset = '0xF61984'; Length = '0x420' }
   'server_scene.vehicle_component.connect_multibody' = @{ Offset = '0x257E571'; Length = '0x490' }
   'server_scene.vehicle_component.hinge_knuckle.connect_multibody' = @{ Offset = '0x343B94E'; Length = '0x88' }

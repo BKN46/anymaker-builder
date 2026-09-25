@@ -1,5 +1,6 @@
 import { test, expect } from '@playwright/test';
 import { meshFixture } from '../fixtures.js';
+import { readFileSync } from 'node:fs';
 
 test.beforeEach(async ({ page }) => {
   await page.addInitScript(() => {
@@ -223,7 +224,26 @@ test('registered reference vehicle imports every component and structural record
   await expect(page.locator('#native-reference-preview-btn')).toHaveAttribute('aria-pressed', 'false');
   await expect(page.locator('#orientation-indicator')).toBeVisible();
   await expect(page.locator('.top-tool-section')).toBeVisible();
+  // Read the committed scene snapshot after import; counts alone cannot catch
+  // surface-grid handles floating outside the doors.
+  const imported = await page.evaluate(() => {
+    window.dispatchEvent(new Event('pagehide'));
+    return JSON.parse(localStorage.getItem('anymaker:' + location.pathname + ':autosave:v1')).document;
+  });
+  const evidence = JSON.parse(readFileSync(new URL('../../doc/evidence/native-grid-transform.json', import.meta.url)));
+  // Import recenters the whole assembly at the editor origin. Compare to the
+  // main vehicle's hinge pin so the rendering bounds do not affect this check.
+  const hinge = imported.objects.find(object => object.id === '553:grid-553-1:113');
+  const hingePosition = [6.8, 1.6, 19.6];
+  for (const expected of evidence.referenceComponents) {
+    const handle = imported.objects.find(object => object.id === expected.id);
+    expect(handle.type).toBe('mechanical_handle');
+    for (const [index, axis] of ['x', 'y', 'z'].entries()) expect(handle.position[axis] - hinge.position[axis]).toBeCloseTo(expected.worldPosition[index] - hingePosition[index], 10);
+  }
   await page.locator('canvas').screenshot({ path: 'test-results/reference-vehicle-import.png' });
+  await page.locator('#library-btn').click();
+  await page.locator('#native-reference-preview-btn').click();
+  await page.locator('canvas').screenshot({ path: 'test-results/reference-vehicle-door-handles.png' });
 });
 
 test('editor history atomically restores interleaved component and topology actions', async ({ page }) => {

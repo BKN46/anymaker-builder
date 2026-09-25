@@ -1,0 +1,523 @@
+{
+  "date": "2026-09-25",
+  "status": "static-game-code-evidence; no live-game visual acceptance",
+  "source": {
+    "path": "bin/game.gcl",
+    "bytes": 81871194,
+    "sha256": "32c1389e6bbc49aeae5a7eff93f2f580fed78ec453a69e6a491c014253e4ae09"
+  },
+  "method": "GCL function record and relocation decoding, x86-64 Capstone disassembly, Ghidra 12.0.3 decompilation; numeric reference values evaluated independently of editor code",
+  "localRun": "tmp/door-grid/DoorGridVerified",
+  "correction": {
+    "previousCodeOffset": "0x126c738",
+    "actualOwner": "client_scene.vehicle_grid.get_transform",
+    "reason": "The last relocation signature names the callee, not the owner of the following code body."
+  },
+  "functions": [
+    {
+      "signature": "(mat34) vehicle_util.grid_origin_dir.get_transform (const vehicle_util.grid_origin_dir)",
+      "codeOffset": "0x3c4e8ec",
+      "codeSize": "0x500",
+      "codeSha256": "afe42e812ce3deabb754e7514f07316799db1ccdef1e7be441c683bf7a8031b8",
+      "references": [
+        {
+          "address": "0x3c4edec",
+          "name": "(bool) vehicle_util.grid_origin_dir.get_is_base_grid (const vehicle_util.grid_origin_dir)"
+        },
+        {
+          "address": "0x3c4edf4",
+          "name": "() dtor (mat34)"
+        },
+        {
+          "address": "0x3c4edfc",
+          "name": "() ctor (mat34)"
+        },
+        {
+          "address": "0x3c4ee04",
+          "name": "() ctor (mat33)"
+        },
+        {
+          "address": "0x3c4ee0c",
+          "name": "(mat33) vehicle_util.grid_origin_dir.get_orientation (const vehicle_util.grid_origin_dir)"
+        },
+        {
+          "address": "0x3c4ee14",
+          "name": "() ctor (vec3)"
+        },
+        {
+          "address": "0x3c4ee1c",
+          "name": "(vec3) vehicle_util.grid_origin_dir.get_normal (const vehicle_util.grid_origin_dir)"
+        },
+        {
+          "address": "0x3c4ee24",
+          "name": "(vec3) vehicle_plate_util.get_plate_node_surface_offset (const vec3_s32, const vec3, const s32)"
+        },
+        {
+          "address": "0x3c4ee2c",
+          "name": "(vec3) vec3.from_s32 (const vec3_s32)"
+        },
+        {
+          "address": "0x3c4ee34",
+          "name": "G_VEHICLE_GRID_SIZE"
+        },
+        {
+          "address": "0x3c4ee3c",
+          "name": "(vec3) operator_mul (const vec3, const f64)"
+        },
+        {
+          "address": "0x3c4ee44",
+          "name": "(vec3) operator_add (const vec3, const vec3)"
+        },
+        {
+          "address": "0x3c4ee4c",
+          "name": "() ctor (mat34, const mat33, const vec3)"
+        },
+        {
+          "address": "0x3c4ee54",
+          "name": "() dtor (vec3)"
+        },
+        {
+          "address": "0x3c4ee5c",
+          "name": "() dtor (mat33)"
+        }
+      ],
+      "signatureOffset": "0x3c4e596",
+      "allocationSize": "0x578"
+    },
+    {
+      "signature": "(mat33) vehicle_util.grid_origin_dir.get_orientation (const vehicle_util.grid_origin_dir)",
+      "codeOffset": "0x3c4e16f",
+      "codeSize": "0x130",
+      "codeSha256": "b84ca98ce3e1c29e6799436c66f6e11b417b53000ca2fc3efa404cc99d85a886",
+      "references": [
+        {
+          "address": "0x3c4e29f",
+          "name": "() ctor (vec3)"
+        },
+        {
+          "address": "0x3c4e2a7",
+          "name": "() vehicle_util.grid_origin_dir.get_axis_normals (const vehicle_util.grid_origin_dir, vec3, vec3, vec3)"
+        },
+        {
+          "address": "0x3c4e2af",
+          "name": "() dtor (mat33)"
+        },
+        {
+          "address": "0x3c4e2b7",
+          "name": "() ctor (mat33, const vec3, const vec3, const vec3)"
+        },
+        {
+          "address": "0x3c4e2bf",
+          "name": "() dtor (vec3)"
+        }
+      ],
+      "signatureOffset": "0x3c4e015",
+      "allocationSize": "0x160"
+    },
+    {
+      "signature": "() vehicle_grid_util.get_grid_axis_normals (const vec3_s32, vec3, vec3, vec3)",
+      "codeOffset": "0x3bd9834",
+      "codeSize": "0x348",
+      "codeSha256": "c62315e12a109423a6811a7f0c6176469e00b7c78f230f9ef0a239c2e41dbdd2",
+      "references": [
+        {
+          "address": "0x3bd9b7c",
+          "name": "() ctor (vec3_s32, const s32, const s32, const s32)"
+        },
+        {
+          "address": "0x3bd9b84",
+          "name": "(bool) vehicle_util.test_vectors_parallel_s32 (const vec3_s32, const vec3_s32)"
+        },
+        {
+          "address": "0x3bd9b8c",
+          "name": "() dtor (vec3_s32)"
+        },
+        {
+          "address": "0x3bd9b94",
+          "name": "() ctor (vec3_s32, const vec3_s32)"
+        },
+        {
+          "address": "0x3bd9b9c",
+          "name": "() ctor (vec3_s32)"
+        },
+        {
+          "address": "0x3bd9ba4",
+          "name": "(vec3_s32) vec3_s32.get_cross (const vec3_s32, const vec3_s32)"
+        },
+        {
+          "address": "0x3bd9bac",
+          "name": "() ctor (vec3)"
+        },
+        {
+          "address": "0x3bd9bb4",
+          "name": "(vec3) vec3.from_s32 (const vec3_s32)"
+        },
+        {
+          "address": "0x3bd9bbc",
+          "name": "(vec3) vec3.normalize (const vec3)"
+        },
+        {
+          "address": "0x3bd9bc4",
+          "name": "() dtor (vec3)"
+        }
+      ],
+      "signatureOffset": "0x3bd961b",
+      "allocationSize": "0x398"
+    },
+    {
+      "signature": "(vec3) vehicle_plate_util.get_plate_node_surface_offset (const vec3_s32, const vec3, const s32)",
+      "codeOffset": "0x3c198c9",
+      "codeSize": "0x900",
+      "codeSha256": "1f12684393a9ddeb4b7ee459cadd85a455e2e49daed1fa364ca2fab2f3cb5f4f",
+      "references": [
+        {
+          "address": "0x3c1a1c9",
+          "name": "(s32) vehicle_util.get_nonzero_axis_count (const vec3_s32)"
+        },
+        {
+          "address": "0x3c1a1d1",
+          "name": "G_VEHICLE_GRID_SIZE"
+        },
+        {
+          "address": "0x3c1a1d9",
+          "name": "() ctor (vec3)"
+        },
+        {
+          "address": "0x3c1a1e1",
+          "name": "(vec3) operator_mul (const vec3, const f64)"
+        },
+        {
+          "address": "0x3c1a1e9",
+          "name": "() dtor (vec3)"
+        },
+        {
+          "address": "0x3c1a1f1",
+          "name": "vehicle_plate_util._g_plate_node_corners"
+        },
+        {
+          "address": "0x3c1a1f9",
+          "name": "(uptr) vector<vec3>.begin (const vector<vec3>)"
+        },
+        {
+          "address": "0x3c1a201",
+          "name": "(uptr) vector<vec3>.end (const vector<vec3>)"
+        },
+        {
+          "address": "0x3c1a209",
+          "name": "(s32) vector<vec3>.key (const vector<vec3>, const uptr)"
+        },
+        {
+          "address": "0x3c1a211",
+          "name": "(ptr<vec3>) vector<vec3>.value (const vector<vec3>, const uptr)"
+        },
+        {
+          "address": "0x3c1a219",
+          "name": "(f64) vec3.get_dot (const vec3, const vec3)"
+        },
+        {
+          "address": "0x3c1a221",
+          "name": "(uptr) vector<vec3>.next (const vector<vec3>, const uptr)"
+        },
+        {
+          "address": "0x3c1a229",
+          "name": "(ptr<vec3>) operator_aa (const vector<vec3>, const s32)"
+        },
+        {
+          "address": "0x3c1a231",
+          "name": "(vec3) operator_add (const vec3, const vec3)"
+        }
+      ],
+      "signatureOffset": "0x3c19593",
+      "allocationSize": "0x970"
+    },
+    {
+      "signature": "(bool) vehicle_util.grid_origin_dir.get_is_base_grid (const vehicle_util.grid_origin_dir)",
+      "codeOffset": "0x3c4dbb3",
+      "codeSize": "0x160",
+      "codeSha256": "3da50d5a0c8521de4faff85ef7dc64eaf4c28869dad64ca71e50d3c91418a18f",
+      "references": [
+        {
+          "address": "0x3c4dd13",
+          "name": "() ctor (vec3_s32, const s32, const s32, const s32)"
+        },
+        {
+          "address": "0x3c4dd1b",
+          "name": "(bool) operator_eq (const vec3_s32, const vec3_s32)"
+        },
+        {
+          "address": "0x3c4dd23",
+          "name": "() dtor (vec3_s32)"
+        }
+      ],
+      "signatureOffset": "0x3c4dab6",
+      "allocationSize": "0x178"
+    },
+    {
+      "signature": "() vehicle_util.grid_origin_dir.parse_json (vehicle_util.grid_origin_dir, json.parser, json.node)",
+      "codeOffset": "0x3c4f332",
+      "codeSize": "0x230",
+      "codeSha256": "872fb737531783375e5ead3edeee8494dce3746f654c6fea5d8f149eebb8b603",
+      "references": [
+        {
+          "address": "0x3c4f562",
+          "name": "() $string_ctor_cstr (string, const uptr)"
+        },
+        {
+          "address": "0x3c4f56a",
+          "name": "() ctor (vec3_s32, const s32, const s32, const s32)"
+        },
+        {
+          "address": "0x3c4f572",
+          "name": "() json.parser.parse_value (json.parser, json.node, const string, vec3_s32, const vec3_s32)"
+        },
+        {
+          "address": "0x3c4f57a",
+          "name": "() dtor (vec3_s32)"
+        },
+        {
+          "address": "0x3c4f582",
+          "name": "() $string_dtor (string)"
+        }
+      ],
+      "signatureOffset": "0x3c4f1b4",
+      "allocationSize": "0x258"
+    },
+    {
+      "signature": "() vehicle_plate_util._g_plate_node_corners.$ctor ()",
+      "codeOffset": "0x3be0721",
+      "codeSize": "0x280",
+      "codeSha256": "0dd89a475fa9433733b60548a95f1a941dbb19d34f9f8fd977d362e7e934185a",
+      "references": [
+        {
+          "address": "0x3be09a1",
+          "name": "vehicle_plate_util._g_plate_node_corners"
+        },
+        {
+          "address": "0x3be09a9",
+          "name": "() ctor (vector<vec3>)"
+        },
+        {
+          "address": "0x3be09b1",
+          "name": "() vector<vec3>._reserve (vector<vec3>, const s32)"
+        },
+        {
+          "address": "0x3be09b9",
+          "name": "(ptr<vec3>) operator_aa (const vector<vec3>, const s32)"
+        },
+        {
+          "address": "0x3be09c1",
+          "name": "() ctor (vec3, const f64, const f64, const f64)"
+        }
+      ],
+      "signatureOffset": "0x3be05db",
+      "allocationSize": "0x2a8"
+    }
+  ],
+  "decodedRules": {
+    "defaultOrigin": [
+      0,
+      0,
+      0
+    ],
+    "defaultDirection": [
+      0,
+      1,
+      0
+    ],
+    "baseGrid": "origin == [0,0,0] and dir == [0,1,0]: identity transform",
+    "up": "[0,1,0], replaced with [0,0,1] only when dir is parallel to Y",
+    "axes": "X = normalize(dir cross up); Y = normalize(dir); Z = normalize((dir cross up) cross dir)",
+    "surfaceOffsetCells": "0.5 * sign(dir), componentwise; face center / edge midpoint / corner for 1 / 2 / 3 nonzero axes",
+    "translationCells": "origin + surfaceOffsetCells + 0.5 * normalize(dir)",
+    "componentPosition": "0.08 * (vehicleAttachmentOffsetCells + translationCells + orientation * pos)",
+    "componentRotation": "orientation * columnMajor(rot)"
+  },
+  "referenceInput": {
+    "path": "test-vehicle/vehicle.data",
+    "sha256": "89844924ac0b99c714b90ee2055beae478f8e0f0ea10433ae4dc855975302210"
+  },
+  "referenceComponents": [
+    {
+      "id": "551:grid-551-2:5",
+      "gridOrigin": [
+        -1,
+        0,
+        0
+      ],
+      "gridDirection": [
+        6,
+        1,
+        0
+      ],
+      "localPosition": [
+        -15,
+        0,
+        5
+      ],
+      "vehicleAttachmentOffsetCells": [
+        85,
+        20,
+        244
+      ],
+      "worldPosition": [
+        6.733696162031142,
+        2.0411335290250716,
+        18.32
+      ],
+      "mountingNormal": [
+        0.9863939238321437,
+        0.1643989873053573,
+        0.0
+      ]
+    },
+    {
+      "id": "551:grid-551-3:6",
+      "gridOrigin": [
+        -1,
+        0,
+        0
+      ],
+      "gridDirection": [
+        -6,
+        -1,
+        0
+      ],
+      "localPosition": [
+        5,
+        0,
+        6
+      ],
+      "vehicleAttachmentOffsetCells": [
+        85,
+        20,
+        244
+      ],
+      "worldPosition": [
+        6.561632729140143,
+        2.0268931239472145,
+        19.12
+      ],
+      "mountingNormal": [
+        -0.9863939238321437,
+        -0.1643989873053573,
+        0.0
+      ]
+    },
+    {
+      "id": "552:grid-552-2:3",
+      "gridOrigin": [
+        1,
+        0,
+        0
+      ],
+      "gridDirection": [
+        -6,
+        1,
+        0
+      ],
+      "localPosition": [
+        15,
+        0,
+        5
+      ],
+      "vehicleAttachmentOffsetCells": [
+        61,
+        20,
+        244
+      ],
+      "worldPosition": [
+        4.946303837968857,
+        2.0411335290250716,
+        18.32
+      ],
+      "mountingNormal": [
+        -0.9863939238321437,
+        0.1643989873053573,
+        0.0
+      ]
+    },
+    {
+      "id": "552:grid-552-3:8",
+      "gridOrigin": [
+        1,
+        0,
+        0
+      ],
+      "gridDirection": [
+        6,
+        -1,
+        0
+      ],
+      "localPosition": [
+        -6,
+        0,
+        5
+      ],
+      "vehicleAttachmentOffsetCells": [
+        61,
+        20,
+        244
+      ],
+      "worldPosition": [
+        5.105215351875429,
+        1.9479816100406433,
+        19.04
+      ],
+      "mountingNormal": [
+        0.9863939238321437,
+        -0.1643989873053573,
+        0.0
+      ]
+    }
+  ],
+  "constants": [
+    {
+      "address": "0x3c4eddc",
+      "type": "s32",
+      "value": 0,
+      "meaning": "get_transform passes edge_size = 0"
+    },
+    {
+      "address": "0x3c4ede4",
+      "type": "f64",
+      "value": 0.5,
+      "meaning": "additional normal displacement in cells"
+    },
+    {
+      "address": "0x3c1a191",
+      "type": "f64",
+      "value": 1.0,
+      "meaning": "surface offset multiplier for edge_size = 0"
+    },
+    {
+      "address": "0x3c1a1a9",
+      "type": "f64",
+      "value": 0.5,
+      "meaning": "face radius / midpoint factor"
+    },
+    {
+      "address": "0x3be0971",
+      "type": "f64",
+      "value": -0.5,
+      "meaning": "negative node-cube corner"
+    },
+    {
+      "address": "0x3be0981",
+      "type": "f64",
+      "value": 0.5,
+      "meaning": "positive node-cube corner"
+    },
+    {
+      "address": "0x3c4f552",
+      "type": "s32",
+      "value": 0,
+      "meaning": "omitted origin and dir X/Z default"
+    },
+    {
+      "address": "0x3c4f55a",
+      "type": "s32",
+      "value": 1,
+      "meaning": "omitted dir Y default"
+    }
+  ]
+}

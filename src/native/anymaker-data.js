@@ -51,7 +51,9 @@ export function parseNativeData(input) {
     const nativeGrids = Array.isArray(vehicleValue.grids) ? vehicleValue.grids : [];
     vehicle.grids = nativeGrids.map((nativeGrid, gridIndex) => {
       const gridId = `grid-${vehicle.id}-${gridIndex + 1}`;
-      const grid = new Grid({ id: gridId, origin: vector(nativeGrid.origin), dir: vector(nativeGrid.dir) });
+      const direction = nativeGrid.dir === undefined ? [0, 1, 0] : nativeGrid.dir;
+      if (!finiteArray(direction, 3) || !direction.every(Number.isInteger) || direction.every(value => value === 0)) throw new Error(`Invalid native grid direction for ${gridId}`);
+      const grid = new Grid({ id: gridId, origin: vector(nativeGrid.origin), dir: vector(direction) });
       grid.components = (nativeGrid.components || []).map(component => nativeComponent(component, definitions, gridId));
       // The native sample stores nodes, edges, plates and links at vehicle
       // level while components are grouped under grids. Keep those global

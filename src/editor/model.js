@@ -15,7 +15,6 @@ const nativeVector = value => Array.isArray(value)
 const identity = () => ({ position: vector(), rotation: vector(), scale: vector({ x: 1, y: 1, z: 1 }, 1) });
 const id = (value, fallback) => typeof value === 'string' && value ? value : fallback;
 const identityMatrix = () => [1, 0, 0, 0, 1, 0, 0, 0, 1];
-const dot = (a, b) => AXES.reduce((sum, axis) => sum + a[axis] * b[axis], 0);
 const cross = (a, b) => ({ x: a.y * b.z - a.z * b.y, y: a.z * b.x - a.x * b.z, z: a.x * b.y - a.y * b.x });
 const length = value => Math.hypot(...AXES.map(axis => value[axis]));
 const scale = (value, factor) => Object.fromEntries(AXES.map(axis => [axis, value[axis] * factor]));
@@ -201,22 +200,27 @@ function selectedVehicles(model, vehicleIds) {
   return model.vehicles.filter(vehicle => ids.has(vehicle.id));
 }
 
-// The editor's native-grid projection treats `dir` as the plane normal and
-// retains a stable X direction by projecting world X onto that plane. The
-// resulting X/Y/Z basis is right-handed. Keep the frame in native cell units
-// so vehicle attachment offsets can be composed before the final 8 cm conversion.
+// Game GCL: vehicle_grid_util.get_grid_axis_normals and
+// vehicle_util.grid_origin_dir.get_transform (see doc/06_REVERSE_ENGINEERING.md).
+// Keep the frame in cells so attachment offsets precede the 8 cm conversion.
 export function nativeGridFrame(grid) {
   const origin = vector(grid?.origin);
-  const direction = vector(grid?.dir);
+  const direction = vector(grid?.dir ?? { x: 0, y: 1, z: 0 });
   if ([...AXES.map(axis => origin[axis]), ...AXES.map(axis => direction[axis])].some(value => !Number.isFinite(value))) throw new Error('Native grid origin/dir must contain finite numbers');
-  if (length(direction) < 1e-9) return { origin, rotation: identityMatrix() };
+  if (length(direction) === 0) throw new Error('Native grid direction must be nonzero');
+  // Only the zero-origin, +Y base grid bypasses surface mounting. A translated
+  // +Y grid is still a surface grid and needs the mounting offset.
+  if (AXES.every(axis => origin[axis] === 0) && direction.x === 0 && direction.y === 1 && direction.z === 0) return { origin, rotation: identityMatrix() };
   const y = normalize(direction);
-  let reference = { x: 1, y: 0, z: 0 };
-  if (Math.abs(dot(reference, y)) > .999999) reference = { x: 0, y: 0, z: 1 };
-  const x = normalize(subtract(reference, scale(y, dot(reference, y))));
-  const z = cross(x, y);
+  const up = direction.x === 0 && direction.z === 0 ? { x: 0, y: 0, z: 1 } : { x: 0, y: 1, z: 0 };
+  const x = normalize(cross(direction, up));
+  const z = normalize(cross(x, y));
+  // get_plate_node_surface_offset(dir, normal, 0): the supporting face center,
+  // edge midpoint or corner of the half-cell node cube. get_transform then
+  // adds another half-cell along the normal to place the component base.
+  const surfaceOffset = Object.fromEntries(AXES.map(axis => [axis, Math.sign(direction[axis]) * .5]));
   return {
-    origin,
+    origin: add(origin, add(surfaceOffset, scale(y, .5))),
     // Columns are the local axes expressed in the vehicle frame.
     rotation: [x.x, y.x, z.x, x.y, y.y, z.y, x.z, y.z, z.z],
   };
@@ -382,7 +386,9 @@ export function toEditorTopology(model, { vehicleIds = null } = {}) {
     const componentIds = new Map(vehicle.grids.flatMap(grid => grid.components.map(component => [String(component.id), nativeImport ? `${vehicle.id}:${grid.id}:${component.id}` : component.id])));
     const offset = offsets.get(vehicle.id) || vector();
     for (const grid of vehicle.grids) {
-    const frame = frames.get(`${vehicle.id}:${grid.id}`);
+    // Native topology is stored in vehicle coordinates. The adapter keeps it
+    // on the first grid only as a container; it is not mounted on that grid.
+    const frame = nativeImport ? { origin: vector(), rotation: identityMatrix() } : null;
     nodes.push(...grid.nodes.map(node => ({ id: `${grid.id}:${node.id}`, position: nativeImport ? nativePosition(node.position, offset, frame) : clone(node.position), gridId: grid.id,
       ...(nativeImport ? { nativeProjected: true } : {}),
     })));
