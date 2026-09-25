@@ -1,6 +1,6 @@
 export const operationMessages = {
   '梁 1 格 · 点击起点': 'Edge 1 cell · Click start', '梁 1 格 · 点击终点 · Esc 取消': 'Edge 1 cell · Click end · Esc to cancel',
-  '轴向吸附': 'Axis snap', '仅建梁：自动吸附单一世界轴（A 切换）': 'Edges only: snap to one world axis (A to toggle)',
+  '轴向吸附': 'Axis snap', '仅建梁：自动吸附单一世界轴（A 切换）': 'Edges only: snap to one world axis (A to toggle)', '仅建梁：自动吸附单一世界轴（A 切换，Shift 临时启用）': 'Edges only: snap to one world axis (A to toggle, hold Shift temporarily)',
   'XYZ 长度 · 整数格（1 格 = 8 cm）': 'XYZ lengths · Integer cells (1 cell = 8 cm)',
   '吸附 {axis} 轴': 'Snap to {axis} axis', '自由建梁': 'Free edge', '{axis} {cells} 格（{centimeters} cm）': '{axis} {cells} cells ({centimeters} cm)', '{axis} {cells} 格': '{axis} {cells} cells',
   '操作失败：{error}': 'Operation failed: {error}', '请先选择组件': 'Select a component first', '达到组件上限': 'Component limit reached',
@@ -15,8 +15,8 @@ export const operationMessages = {
   '起点已定位；移动鼠标预览实体梁，再次点击完成': 'Start placed. Move to preview the edge and click to finish.', '已创建 1 格实体梁': 'Created a 1-cell solid edge',
   '已合并节点': 'Nodes merged', '节点合并失败：{error}': 'Node merge failed: {error}',
   '已选择节点 {id}；点击节点合并，点击空白位置移动；Esc 取消选择': 'Selected node {id}. Click a node to merge, empty space to move, or Esc to cancel.',
+  '面板已选择 {count} 根梁；闭环后自动创建，Esc 取消': 'Plate has selected {count} edges; it will be created automatically when the loop closes, or press Esc to cancel.',
   '已移动并合并节点': 'Node moved and merged', '已移动节点': 'Node moved', '已创建节点 {id}': 'Created node {id}', '已选择已有节点 {id}': 'Selected existing node {id}',
-  '面板工具需要点击已有节点': 'Select existing nodes to form a plate', '面板已选择 {count} 个节点；按 Enter 完成，Esc 取消': '{count} plate nodes selected; Enter to finish, Esc to cancel',
   '无法定位：射线与建造平面平行': 'No intersection: ray parallel to build plane',
   '梁 1 格 · 整格端点 · 点击完成 / Esc 取消': 'Edge 1 cell · Grid endpoint · Click to finish / Esc to cancel', '梁 1 格 · 无有效终点 · Esc 取消': 'Edge 1 cell · No valid endpoint · Esc to cancel', '无有效终点': 'No valid endpoint', '该梁没有可用整格分割点': 'This edge has no valid interior grid split point',
   '梁操作失败：{error}': 'Edge operation failed: {error}', '拓扑操作失败：{error}': 'Topology operation failed: {error}',

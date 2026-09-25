@@ -69,3 +69,20 @@ export function removeLink(links, id, componentIds = null) {
   if (!next.some(link => link.id === id)) throw new Error(`Connection does not exist: ${id}`);
   return { links: next.filter(link => link.id !== id) };
 }
+
+// Route points are independent editor data: moving one must not mutate the
+// imported link or any sibling route point. Native projected routes retain the
+// fractional coordinates observed in the source file; authored routes remain
+// aligned to the editor's integer-cell grid.
+export function moveLinkPoint(links, id, pointIndex, position, componentIds = null) {
+  const next = validateLinks(links, componentIds);
+  if (!Number.isInteger(pointIndex) || pointIndex < 0) throw new Error('Connection route point index is invalid');
+  const linkIndex = next.findIndex(link => link.id === id);
+  if (linkIndex < 0) throw new Error(`Connection does not exist: ${id}`);
+  const link = next[linkIndex];
+  if (pointIndex >= link.points.length) throw new Error('Connection route point does not exist');
+  const points = link.points.map((point, index) => index === pointIndex ? routePoint(position, link.nativeProjected === true) : clone(point));
+  const linksWithMove = next.map((value, index) => index === linkIndex ? { ...value, points } : value);
+  const validated = validateLinks(linksWithMove, componentIds);
+  return { links: validated, link: validated[linkIndex] };
+}

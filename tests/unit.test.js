@@ -1,18 +1,18 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
-import { readFileSync } from 'node:fs';
+import { readFileSync, readdirSync } from 'node:fs';
 import { createHash } from 'node:crypto';
 import { meshFixture } from './fixtures.js';
 import { parseMesh } from '../src/assets/mesh.js';
 import { History, project, validateDocument, migrateDocument, toIntermediateXml } from '../src/editor/document.js';
 import { copyObjects, mirrorObjects, moveObjects, removeObjects, splitGrid, mergeGrids, gridIds } from '../src/editor/operations.js';
 import { Project, Vehicle, Grid, Component, Node, Edge, Plate, Link, fromEditorDocument, toEditorDocument, toEditorTopology, validateProject } from '../src/editor/model.js';
-import { parseNativePair, nativeStats, toNativeData, toNativePair, verifyNativePairRoundTrip } from '../src/native/anymaker-data.js';
+import { parseNativePair, nativeStats, toNativeData, toNativePair, toNativePairFromEditor, verifyNativePairRoundTrip } from '../src/native/anymaker-data.js';
 import { createNode, moveNode, moveNodeAndMerge, mergeNodes, removeNode, removeEdge, removePlate, createEdge, createEdgeFromPoints, splitEdge, createPlate, createPlateFromEdges, createGlassPlateFromEdges, triangulatePlate, validateTopologyState } from '../src/editor/topology.js';
-import { LINK_COLORS, LINK_KINDS, createLink, removeLink, validateLinks } from '../src/editor/connections.js';
+import { LINK_COLORS, LINK_KINDS, createLink, moveLinkPoint, removeLink, validateLinks } from '../src/editor/connections.js';
 import * as THREE from 'three';
-import { reflectGeometry } from '../src/assets/geometry-ops.js';
-import { GRID_SIZE, GRID_DIVISIONS, cameraBuildFrame, projectBuildPoint, resolveEdgePoint, resolvePlacementPoint, edgeMeasurements, createEdgeMesh, createEdgeJointMesh, createConnectionRoute, updateEdgeMesh, setEdgeOutline } from '../src/editor/construction-view.js';
+import { correctGeometryNormals, reflectGeometry } from '../src/assets/geometry-ops.js';
+import { cameraBuildFrame, projectBuildPoint, resolveEdgePoint, resolvePlacementPoint, edgeMeasurements, createEdgeMesh, createEdgeJointMesh, createConnectionRoute, updateEdgeMesh, setEdgeOutline, edgeConnectionCorners, plateSurfaceBoundary, plateSurfaceVertices, cameraFacingPlateOffset, rayFacingPlateSide } from '../src/editor/construction-view.js';
 import { CELL_SIZE_WORLD, CELL_SIZE_CM, assertGridVector, cellToWorld, quantizeWorldVector, worldToCell } from '../src/editor/grid.js';
 import { categoryInfo } from '../src/catalog/category-icons.js';
 import { normalizeSettings, createLocalStore, AUTOSAVE_INTERVAL } from '../src/editor/local-storage.js';
@@ -20,6 +20,8 @@ import { applyGridStyle, orientCamera, VIEW_DIRECTIONS } from '../src/editor/vie
 import { applyMeshTransform, WHEEL_TYRE_OUTBOARD_OFFSET, withWheelTyreOffset } from '../src/assets/published-library.js';
 import { DEPTH_SUBLAYERS, LOG_DEPTH_LAYER_STEP, LOG_DEPTH_SUBLAYER_STEP, RENDER_DEPTH_LAYERS, assignOpaqueDepthOrder, configureOpaqueDepthLayer, depthBias, logDepthBias, stableDepthRank } from '../src/editor/render-depth.js';
 import { t, setLocale, addMessages } from '../src/i18n.js';
+import { connectionDescriptorLabel, connectionNetworkLabel, connectionPortRoleLabel } from '../src/editor/connection-port-labels.js';
+import { componentPropertyDescriptors, updateNativeProperty } from '../src/editor/component-properties.js';
 
 test('reference vehicle input files match the registered rendering baseline', () => {
   const baseline = JSON.parse(readFileSync(new URL('../doc/evidence/vehicle-reference.json', import.meta.url)));
@@ -63,6 +65,7 @@ test('reference primary vehicle converts every renderable record into an editor 
   assert.deepEqual(Object.fromEntries(['x', 'y', 'z'].map(axis => [axis, worldToCell(node69[axis])])), { x: 69, y: 17, z: 247 });
   assert.deepEqual(document.objects.find(object => object.id === '553:grid-553-1:12')?.colors, [79, 79, 79, 79, 79, 79, 79, 79, 79, 79]);
   assert.deepEqual(document.objects.find(object => object.id === '553:grid-553-1:12')?.nativeExtension, [0, 0, 6]);
+  assert.deepEqual(document.objects.find(object => object.id === '553:grid-553-1:124')?.nativeProperties, { throttle: 1, gear_count: 3, user_defined_alias: 'Gear_stick_auto' });
   // Wheel hub meshes have an outboard local tyre offset. Native component
   // rotations must therefore put the left and right hubs on opposite sides.
   assert.ok(Math.abs(document.objects.find(object => object.id === '553:grid-553-1:71')?.rotation.y + Math.PI / 2) < 1e-6);
@@ -73,7 +76,26 @@ test('reference primary vehicle converts every renderable record into an editor 
   assert.ok(document.objects.some(object => object.id.startsWith('551:')));
   assert.ok(document.objects.some(object => object.id.startsWith('552:')));
   assert.ok(document.objects.some(object => object.id.startsWith('554:')));
-  assert.deepEqual(document.topology.nodes.find(node => node.id === 'grid-551-1:1')?.position, { x: 6.72, y: 1.6, z: 19.6 });
+  // `hinge_knuckle.constraint_position` is one native cell behind its
+  // component origin. Resolving that pivot (rather than averaging component
+  // origins) produces one exact rigid offset for every recorded attachment.
+  assert.deepEqual(document.topology.nodes.find(node => node.id === 'grid-551-1:1')?.position, { x: 6.72, y: 1.6, z: 19.52 });
+  const objectPosition = id => document.objects.find(object => object.id === id)?.position;
+  const assertSamePosition = (actual, expected) => assert.ok(['x', 'y', 'z'].every(axis => Math.abs(actual[axis] - expected[axis]) < 1e-12));
+  for (const [parentId, childId] of [
+    ['553:grid-553-1:113', '551:grid-551-1:1'],
+    ['553:grid-553-1:178', '552:grid-552-1:1'],
+    ['553:grid-553-1:200', '554:grid-554-1:1'],
+    ['553:grid-553-1:201', '554:grid-554-1:2'],
+  ]) {
+    const child = objectPosition(childId);
+    assertSamePosition(objectPosition(parentId), { ...child, z: child.z + .08 });
+  }
+  for (const [parentId, childId] of [
+    ['553:grid-553-1:177', '551:grid-551-1:24'],
+    ['553:grid-553-1:179', '552:grid-552-1:5'],
+    ['553:grid-553-1:204', '554:grid-554-1:4'],
+  ]) assertSamePosition(objectPosition(parentId), objectPosition(childId));
   // Grid 2 is a local dashboard construction plane. Its origin/dir frame
   // rotates the z=129–131 local positions into the primary vehicle frame;
   // this is intentionally independent of the data-link routing records.
@@ -86,7 +108,6 @@ test('reference primary vehicle converts every renderable record into an editor 
   assert.ok(Math.abs(dashboardDisplay.position.z - 19.32679848083956) < 1e-12);
   const primaryBounds = JSON.parse(meta).vehicles.vehicles.find(vehicle => vehicle.id === 553).bounds;
   assert.ok(dashboard.every(object => ['x', 'y', 'z'].every((axis, index) => object.position[axis] >= primaryBounds.min[index] && object.position[axis] <= primaryBounds.max[index])));
-  assert.deepEqual(document.objects.find(object => object.id === '552:grid-552-1:1')?.position, document.objects.find(object => object.id === '553:grid-553-1:178')?.position);
   const validated = validateDocument(document, catalogDefinitions);
   assert.equal(validated.objects.length, 159);
   assert.equal(validated.topology.edges.length, 493);
@@ -108,10 +129,13 @@ test('translations interpolate values once and do not translate untrusted parame
 test('UI preferences default to English and reject unsafe or unsupported values', () => {
   const defaults = normalizeSettings();
   assert.equal(defaults.language, 'en'); assert.equal(AUTOSAVE_INTERVAL, 60000);
-  const value = normalizeSettings({ version: 1, language: 'zh', leftWidth: 1e9, gridColor: 'url(evil)', gridOpacity: -1, snap: '1', camera: { position: [0, 0, 0], target: [0, 0, 0] }, drawers: { inspector: true } });
+  const value = normalizeSettings({ version: 1, language: 'zh', leftWidth: 1e9, rightWidth: 1e9, gridColor: 'url(evil)', gridOpacity: -1, snap: '1', camera: { position: [0, 0, 0], target: [0, 0, 0] }, sidebarTabs: { left: 'subgrids', right: 'history' } });
   assert.equal(value.language, 'zh'); assert.equal(value.leftWidth, 304); assert.equal(value.gridColor, defaults.gridColor);
+  assert.equal(value.rightWidth, 304);
   assert.equal(value.gridOpacity, defaults.gridOpacity); assert.equal(Object.hasOwn(value, 'snap'), false); assert.equal(value.camera, null);
-  assert.equal(value.drawers.inspector, true);
+  assert.equal(value.sidebarTabs.left, 'subgrids'); assert.equal(value.sidebarTabs.right, 'history');
+  assert.equal(defaults.sidebarTabs.left, 'catalog'); assert.equal(defaults.sidebarTabs.right, 'editor');
+  assert.equal(defaults.rightWidth, 304);
   assert.equal(defaults.nodeColor, '#246bce'); assert.equal(defaults.nodeSize, .055); assert.equal(defaults.nodeOpacity, 1);
   const nodeStyle = normalizeSettings({ version: 1, nodeColor: '#12Ab34', nodeSize: .12, nodeOpacity: .4 });
   assert.equal(nodeStyle.nodeColor, '#12Ab34'); assert.equal(nodeStyle.nodeSize, .12); assert.equal(nodeStyle.nodeOpacity, .4);
@@ -120,15 +144,23 @@ test('UI preferences default to English and reject unsafe or unsupported values'
     assert.equal(normalized.nodeColor, defaults.nodeColor); assert.equal(normalized.nodeSize, defaults.nodeSize); assert.equal(normalized.nodeOpacity, defaults.nodeOpacity);
   }
   assert.equal(defaults.edgeAxisSnap, false);
+  assert.deepEqual(defaults.connectionVisibility, { electric: true, mechanical: true, liquid: true, gas: true, belt: true, data: true });
   assert.deepEqual(defaults.paintQuickColors, ['#bd2636', '#631a24', '#2b3440', '#20252c', '#a16a30']);
   assert.deepEqual(normalizeSettings({ version: 1, paintQuickColors: ['#7C3AED', 26] }).paintQuickColors, ['#7c3aed', '#bd2636']);
   assert.deepEqual(normalizeSettings({ version: 1, paintQuickColors: ['#7C3AED', '#bad'] }).paintQuickColors, defaults.paintQuickColors);
   assert.equal(normalizeSettings({ version: 1, edgeAxisSnap: true }).edgeAxisSnap, true);
+  assert.equal(normalizeSettings({ version: 1, connectionVisibility: { liquid: false } }).connectionVisibility.liquid, false);
   for (const invalid of ['true', 1, null, {}]) assert.equal(normalizeSettings({ version: 1, edgeAxisSnap: invalid }).edgeAxisSnap, false);
   assert.equal(defaults.edgeLengthsVisible, false);
   assert.equal(normalizeSettings({ version: 1, edgeLengthsVisible: true, leftWidth: 720 }).edgeLengthsVisible, true);
   assert.equal(defaults.edgeOutlinesVisible, false);
   assert.equal(normalizeSettings({ version: 1, edgeOutlinesVisible: true }).edgeOutlinesVisible, true);
+  assert.equal(defaults.modelThumbnails, false);
+  assert.equal(normalizeSettings({ version: 1, modelThumbnails: true }).modelThumbnails, true);
+  for (const invalid of ['true', 1, null, {}]) assert.equal(normalizeSettings({ version: 1, modelThumbnails: invalid }).modelThumbnails, false);
+  assert.equal(defaults.catalogCardSize, 72);
+  assert.equal(normalizeSettings({ version: 1, catalogCardSize: 120 }).catalogCardSize, 120);
+  assert.equal(normalizeSettings({ version: 1, catalogCardSize: 1000 }).catalogCardSize, defaults.catalogCardSize);
   assert.equal(normalizeSettings({ version: 1, leftWidth: 721 }).leftWidth, 304);
   const render = normalizeSettings({ version: 1, backgroundColor: '#102030', lightAzimuth: 80, lightElevation: 35, lightIntensity: 4.2, shadowStrength: .8, cameraLightEnabled: false, cameraLightIntensity: 5.5, orthographic: true });
   assert.deepEqual(Object.fromEntries(['backgroundColor', 'lightAzimuth', 'lightElevation', 'lightIntensity', 'shadowStrength', 'cameraLightEnabled', 'cameraLightIntensity', 'orthographic'].map(key => [key, render[key]])), { backgroundColor: '#102030', lightAzimuth: 80, lightElevation: 35, lightIntensity: 4.2, shadowStrength: .8, cameraLightEnabled: false, cameraLightIntensity: 5.5, orthographic: true });
@@ -360,6 +392,78 @@ test('native vehicle data maps global topology once and preserves raw fields', (
   model.vehicles[0].grids[0].components[0].transform.position.x = 9;
   assert.equal(toNativeData(model).value.vehicles.vehicles[0].grids[0].components[0].pos[0], 9);
 });
+
+test('connection port labels remain localized when definitions provide raw data', () => {
+  assert.equal(connectionNetworkLabel('electric', 'en'), 'Electric');
+  assert.equal(connectionDescriptorLabel('display_value', 'en'), 'Display value');
+  assert.equal(connectionPortRoleLabel({ type: 'surface' }, 'en'), 'Physical port');
+  assert.equal(connectionDescriptorLabel('自定义描述', 'en'), 'Data port');
+  assert.doesNotMatch(connectionPortRoleLabel({ descriptor: '中文节点', type: 'data' }, 'en'), /\p{Script=Han}/u);
+  assert.equal(connectionDescriptorLabel('display_value', 'zh'), '显示数值');
+  assert.equal(connectionPortRoleLabel({ type: 'surface' }, 'zh'), '物理端口');
+});
+
+test('published component metadata cannot introduce Chinese into English names or port labels', () => {
+  const definitionDirectory = new URL('../public/data/definitions/', import.meta.url);
+  for (const file of readdirSync(definitionDirectory)) {
+    const definition = JSON.parse(readFileSync(new URL(file, definitionDirectory), 'utf8'));
+    assert.doesNotMatch(definition.name, /\p{Script=Han}/u, `${file} must provide an English name`);
+    for (const descriptor of definition.data_descriptors || []) {
+      assert.doesNotMatch(connectionDescriptorLabel(descriptor.name, 'en'), /\p{Script=Han}/u, `${file}:${descriptor.name}`);
+    }
+  }
+});
+test('editor projects export a self-contained observed native data and meta pair', () => {
+  const document = project([{ ...object, id: 'component-a', colors: [26], nativeExtension: [2, 0, 0] }], {
+    nodes: [
+      { id: 'node-a', position: { x: 0, y: 0, z: 0 } },
+      { id: 'node-b', position: { x: cell(2), y: 0, z: 0 } },
+      { id: 'node-c', position: { x: 0, y: cell(2), z: 0 } },
+    ],
+    edges: [{ id: 'edge-a', a: 'node-a', b: 'node-b', col: 26 }],
+    plates: [{ id: 'plate-a', nodeIds: ['node-a', 'node-b', 'node-c'], col_front: 49, type: 'window' }],
+    links: [{ id: 'electric-a', kind: 'electric', from: { componentId: 'component-a', port: 1 }, to: { componentId: 'component-a' }, points: [{ x: cell(1), y: 0, z: 0 }] }],
+  });
+  const pair = toNativePairFromEditor(document);
+  assert.deepEqual(pair.data.definitions.components, ['engine']);
+  assert.equal(pair.data.vehicles.vehicles[0].grids[0].components[0].def, 0);
+  assert.deepEqual(pair.data.vehicles.vehicles[0].grids[0].components[0].pos, [1, 2, 3]);
+  assert.deepEqual(pair.data.vehicles.vehicles[0].edges[0], { n0: 1, n1: 2, col: 26 });
+  assert.deepEqual(pair.data.vehicles.vehicles[0].plates[0].nodes, [1, 2, 3]);
+  assert.equal(pair.data.vehicles.vehicles[0].plates[0].type, 'window');
+  assert.deepEqual(pair.data.vehicles.vehicles[0].electric_links[0].points, [[1, 0, 0]]);
+  assert.deepEqual(pair.meta.vehicles.vehicles[0].transform, { m: [1, 0, 0, 0, 1, 0, 0, 0, 1], t: [0, 0, 0] });
+  const restored = toEditorDocument(parseNativePair(pair.data, pair.meta));
+  assert.deepEqual(restored.objects[0].position, object.position);
+  assert.equal(restored.topology.edges.length, 1);
+  assert.equal(restored.topology.plates.length, 1);
+});
+test('native component properties survive editor validation and native export', () => {
+  const document = validateDocument(project([{ ...object, type: 'engine', nativeProperties: { user_defined_alias: 'Port engine', gear_count: 4, enabled: true } }]), definitions);
+  assert.deepEqual(document.objects[0].nativeProperties, { user_defined_alias: 'Port engine', gear_count: 4, enabled: true });
+  const pair = toNativePairFromEditor(document);
+  assert.deepEqual(pair.data.vehicles.vehicles[0].grids[0].components[0].user_defined_alias, 'Port engine');
+  assert.equal(pair.data.vehicles.vehicles[0].grids[0].components[0].gear_count, 4);
+  assert.equal(pair.data.vehicles.vehicles[0].grids[0].components[0].enabled, true);
+  assert.throws(() => validateDocument(project([{ ...object, nativeProperties: { connected_vehicle: 1 } }]), definitions), /property name/);
+});
+test('known Properties Tool constraints are available for new component instances', () => {
+  const descriptor = componentPropertyDescriptors('gear_stick').find(value => value.key === 'gear_count');
+  assert.deepEqual(descriptor, { key: 'gear_count', type: 'integer', step: 1, min: 2, max: 10, defaultValue: 2 });
+  assert.deepEqual(updateNativeProperty({}, descriptor, 8), { gear_count: 8 });
+  assert.throws(() => updateNativeProperty({}, descriptor, 11), /supported range/);
+  const gearbox = componentPropertyDescriptors('gearbox', {}, [0, 0, 2]);
+  assert.deepEqual(gearbox.map(value => value.key), ['user_defined_alias', 'gear_ratio_1', 'gear_ratio_2', 'gear_ratio_3', 'gear_ratio_4', 'reverse']);
+  assert.deepEqual(updateNativeProperty({}, gearbox[1], 8), { gear_ratio_1: 8 });
+  assert.throws(() => updateNativeProperty({}, gearbox[1], 17), /supported range/);
+});
+test('native export preserves combined XYZ component rotations', () => {
+  const rotation = { x: 0.3, y: 0.5, z: -0.7 };
+  const pair = toNativePairFromEditor(project([{ ...object, rotation }]));
+  const restored = toEditorDocument(parseNativePair(pair.data, pair.meta));
+  const actual = restored.objects[0].rotation;
+  for (const axis of ['x', 'y', 'z']) assert.ok(Math.abs(actual[axis] - rotation[axis]) < 1e-12, `${axis}: ${actual[axis]} !== ${rotation[axis]}`);
+});
 test('native grid origin and dir form a complete position and rotation frame without links', () => {
   const native = { definitions: { components: ['engine'] }, vehicles: { vehicles: [
     { id: 1, grids: [{ origin: [10, 20, 30], dir: [0, 3, 4], components: [{ def: 0, id: 1, pos: [2, 5, 7], rot: [1, 0, 0, 0, 1, 0, 0, 0, 1], connected_vehicle: 2, connected_component: 2 }] }] },
@@ -382,6 +486,18 @@ test('native grid origin and dir form a complete position and rotation frame wit
   assert.deepEqual(childAnchor.position, parent.position);
   const validated = validateDocument(document, new Map([['engine', {}]]));
   assert.equal(validated.objects.length, 2);
+});
+test('native child import rejects incompatible rigid attachment anchors', () => {
+  const native = { definitions: { components: ['engine'] }, vehicles: { vehicles: [
+    { id: 1, grids: [{ components: [
+      { def: 0, id: 1, pos: [0, 0, 0], connected_vehicle: 2, connected_component: 1 },
+      { def: 0, id: 2, pos: [2, 0, 0], connected_vehicle: 2, connected_component: 2 },
+    ] }] },
+    { id: 2, grids: [{ components: [
+      { def: 0, id: 1, pos: [0, 0, 0] }, { def: 0, id: 2, pos: [0, 0, 0] },
+    ] }] },
+  ] } };
+  assert.throws(() => toEditorDocument(parseNativePair(native, {}), { vehicleIds: ['1'] }), /incompatible construction attachment anchors/);
 });
 test('topology commands create, split, merge and validate structure on the integer grid', () => {
   let nodes = [];
@@ -584,29 +700,144 @@ test('solid edges reject zero length and off-axis or endpoint splits', () => {
   assert.throws(() => validateTopologyState(invalid), /坐标/);
   assert.equal(state.nodes.length, 2);
 });
-test('edge meshes use a rectangular profile and cover endpoint cells', () => {
+test('edge meshes fill axis-aligned endpoint cubes and bridge facing square corners', () => {
   const material = new THREE.MeshBasicMaterial();
   const axisEnds = [new THREE.Vector3(4, 0, 0), new THREE.Vector3(-4, 0, 0), new THREE.Vector3(0, 4, 0), new THREE.Vector3(0, -4, 0), new THREE.Vector3(0, 0, 4), new THREE.Vector3(0, 0, -4)];
   const planar = new THREE.Vector3(4, 4, 0);
   for (const offset of [...axisEnds, planar, new THREE.Vector3(3, 4, 5)]) {
     const start = new THREE.Vector3(1, 2, 3); const end = offset.clone().add(start);
     const edge = createEdgeMesh(start, end, material);
-    assert.equal(edge.isMesh, true); assert.equal(edge.geometry.type, 'BoxGeometry');
-    assert.equal(edge.scale.x, GRID_SIZE / GRID_DIVISIONS); assert.equal(edge.scale.z, CELL_SIZE_WORLD);
-    assert.ok(Math.abs(edge.scale.y - start.distanceTo(end) - CELL_SIZE_WORLD) < 1e-9);
-    const direction = end.clone().sub(start).normalize();
-    assert.ok(edge.localToWorld(new THREE.Vector3(0, -.5, 0)).distanceTo(start.clone().addScaledVector(direction, -CELL_SIZE_WORLD / 2)) < 1e-9);
-    assert.ok(edge.localToWorld(new THREE.Vector3(0, .5, 0)).distanceTo(end.clone().addScaledVector(direction, CELL_SIZE_WORLD / 2)) < 1e-9);
-    if (axisEnds.includes(offset)) {
-      for (const basis of [new THREE.Vector3(1, 0, 0), new THREE.Vector3(0, 1, 0), new THREE.Vector3(0, 0, 1)]) {
-        const worldBasis = basis.applyQuaternion(edge.quaternion).toArray().map(Math.abs);
-        assert.equal(worldBasis.filter(value => Math.abs(value - 1) < 1e-9).length, 1);
-        assert.equal(worldBasis.filter(value => value < 1e-9).length, 2);
+    assert.equal(edge.isMesh, true); assert.equal(edge.geometry.type, 'BufferGeometry');
+    assert.deepEqual(edge.quaternion.toArray(), [0, 0, 0, 1]);
+    assert.deepEqual(edge.scale.toArray(), [1, 1, 1]);
+    const worldVertices = [];
+    const attribute = edge.geometry.getAttribute('position');
+    for (let index = 0; index < attribute.count; index++) worldVertices.push(edge.localToWorld(new THREE.Vector3().fromBufferAttribute(attribute, index)));
+    for (const endpoint of [start, end]) {
+      for (const x of [-1, 1]) for (const y of [-1, 1]) for (const z of [-1, 1]) {
+        const corner = endpoint.clone().add(new THREE.Vector3(x, y, z).multiplyScalar(CELL_SIZE_WORLD / 2));
+        assert.ok(worldVertices.some(vertex => vertex.distanceTo(corner) < 1e-6));
       }
     }
+    edge.geometry.computeBoundingBox();
+    const expectedMin = start.clone().min(end).addScalar(-CELL_SIZE_WORLD / 2);
+    const expectedMax = start.clone().max(end).addScalar(CELL_SIZE_WORLD / 2);
+    assert.ok(edge.geometry.boundingBox.min.clone().add(edge.position).distanceTo(expectedMin) < 1e-6);
+    assert.ok(edge.geometry.boundingBox.max.clone().add(edge.position).distanceTo(expectedMax) < 1e-6);
     edge.geometry.dispose();
   }
   material.dispose();
+});
+
+test('connection route points move independently and preserve native projections', () => {
+  const componentIds = new Set(['source', 'target']);
+  const created = createLink([], { kind: 'electric', from: { componentId: 'source', port: 0 }, to: { componentId: 'target', port: 1 }, points: [{ x: cell(1), y: 0, z: 0 }, { x: cell(2), y: 0, z: 0 }] }, componentIds);
+  const moved = moveLinkPoint(created.links, created.link.id, 1, { x: cell(2), y: cell(1), z: 0 }, componentIds);
+  assert.deepEqual(moved.links[0].points, [{ x: cell(1), y: 0, z: 0 }, { x: cell(2), y: cell(1), z: 0 }]);
+  assert.throws(() => moveLinkPoint(created.links, created.link.id, 0, { x: cell(1) + .001, y: 0, z: 0 }, componentIds), /对齐/);
+  const native = moveLinkPoint([{ ...created.link, nativeProjected: true, points: [{ x: .25, y: 0, z: 0 }] }], created.link.id, 0, { x: .5, y: .25, z: 0 }, componentIds);
+  assert.deepEqual(native.links[0].points[0], { x: .5, y: .25, z: 0 });
+});
+test('edge connections use the complete projected node-cube silhouette', () => {
+  const halfSize = CELL_SIZE_WORLD / 2;
+  for (const direction of [
+    new THREE.Vector3(4, 0, 0), new THREE.Vector3(-4, 0, 0),
+    new THREE.Vector3(4, 3, 0), new THREE.Vector3(-4, 3, 0),
+    new THREE.Vector3(4, 3, 2), new THREE.Vector3(-4, 3, -2),
+  ]) {
+    const start = edgeConnectionCorners(new THREE.Vector3(), direction, 1, halfSize);
+    const endCenter = direction.clone();
+    const end = edgeConnectionCorners(endCenter, direction, -1, halfSize);
+    const activeAxisCount = ['x', 'y', 'z'].filter(axis => Math.abs(direction[axis]) > 1e-9).length;
+    const expectedCount = activeAxisCount === 3 ? 6 : 4;
+    assert.equal(start.length, expectedCount); assert.equal(end.length, expectedCount);
+    for (const [points, center] of [[start, new THREE.Vector3()], [end, endCenter]]) {
+      for (const point of points) for (const axis of ['x', 'y', 'z']) {
+        assert.ok(Math.abs(Math.abs(point[axis] - center[axis]) - halfSize) < 1e-9);
+      }
+    }
+    const projectedWidth = Math.max(...start.flatMap((point, index) => start.slice(index + 1).map(other => point.distanceTo(other))));
+    if (activeAxisCount > 1) assert.ok(projectedWidth > CELL_SIZE_WORLD);
+    const unit = direction.clone().normalize();
+    for (let index = 0; index < expectedCount; index++) {
+      const connection = end[index].clone().sub(start[index]);
+      assert.ok(connection.clone().cross(unit).length() < 1e-9);
+      assert.ok(connection.dot(unit) >= -1e-9);
+    }
+  }
+});
+test('spatial diagonal edge bridge has finite projected geometry', () => {
+  const edge = createEdgeMesh(new THREE.Vector3(), new THREE.Vector3(CELL_SIZE_WORLD * 3, CELL_SIZE_WORLD * 2, CELL_SIZE_WORLD), new THREE.MeshBasicMaterial());
+  assert.equal(edge.geometry.getAttribute('position').count, 108);
+  for (const attributeName of ['position', 'normal']) {
+    const attribute = edge.geometry.getAttribute(attributeName);
+    for (let index = 0; index < attribute.count; index++) assert.ok(Number.isFinite(attribute.getX(index) + attribute.getY(index) + attribute.getZ(index)));
+  }
+  edge.geometry.dispose(); edge.material.dispose();
+});
+test('plate surfaces expand closed beam loops to the beam envelope', () => {
+  const size = CELL_SIZE_WORLD * 4;
+  const positions = new Map([
+    ['a', new THREE.Vector3(0, 0, 0)], ['b', new THREE.Vector3(size, 0, 0)],
+    ['c', new THREE.Vector3(size, size, 0)], ['d', new THREE.Vector3(0, size, 0)],
+  ]);
+  const ids = ['a', 'b', 'c', 'd'];
+  assert.equal(cameraFacingPlateOffset(ids, positions, new THREE.Vector3(0, 0, 10)), CELL_SIZE_WORLD / 2);
+  assert.equal(cameraFacingPlateOffset(ids, positions, new THREE.Vector3(0, 0, -10)), -CELL_SIZE_WORLD / 2);
+  const boundary = plateSurfaceBoundary(ids, positions, CELL_SIZE_WORLD / 2);
+  assert.equal(boundary.length, ids.length);
+  const expectedBoundary = [
+    [-CELL_SIZE_WORLD / 2, -CELL_SIZE_WORLD / 2, CELL_SIZE_WORLD / 2],
+    [size + CELL_SIZE_WORLD / 2, -CELL_SIZE_WORLD / 2, CELL_SIZE_WORLD / 2],
+    [size + CELL_SIZE_WORLD / 2, size + CELL_SIZE_WORLD / 2, CELL_SIZE_WORLD / 2],
+    [-CELL_SIZE_WORLD / 2, size + CELL_SIZE_WORLD / 2, CELL_SIZE_WORLD / 2],
+  ];
+  boundary.forEach((point, index) => point.toArray().forEach((value, axis) => {
+    assert.ok(Math.abs(value - expectedBoundary[index][axis]) < 1e-9);
+  }));
+  const front = plateSurfaceVertices(ids, positions, CELL_SIZE_WORLD / 2);
+  const frontCorners = Array.from({ length: front.length / 3 }, (_, index) => front.slice(index * 3, index * 3 + 3));
+  const uniqueFront = [...new Map(frontCorners.map(point => [point.join(','), point])).values()];
+  assert.equal(uniqueFront.length, 4);
+  uniqueFront.forEach(point => assert.ok(
+    point[0] <= -CELL_SIZE_WORLD / 2 + 1e-9 || point[0] >= size + CELL_SIZE_WORLD / 2 - 1e-9,
+  ));
+  const back = plateSurfaceVertices(ids, positions, -CELL_SIZE_WORLD / 2);
+  assert.ok(back.every((value, index) => index % 3 !== 2 || Math.abs(value + CELL_SIZE_WORLD / 2) < 1e-9));
+});
+test('expanded plate boundaries remain finite for diagonal and triangular closures', () => {
+  const positions = new Map([
+    ['a', new THREE.Vector3(0, 0, 0)],
+    ['b', new THREE.Vector3(CELL_SIZE_WORLD * 3, CELL_SIZE_WORLD, CELL_SIZE_WORLD)],
+    ['c', new THREE.Vector3(CELL_SIZE_WORLD * 2, CELL_SIZE_WORLD * 4, CELL_SIZE_WORLD * 2)],
+    ['d', new THREE.Vector3(-CELL_SIZE_WORLD, CELL_SIZE_WORLD * 2, CELL_SIZE_WORLD)],
+  ]);
+  for (const ids of [['a', 'b', 'c'], ['a', 'b', 'c', 'd']]) {
+    const boundary = plateSurfaceBoundary(ids, positions, CELL_SIZE_WORLD / 2);
+    assert.ok(boundary.length >= ids.length && boundary.length <= ids.length * 2);
+    assert.ok(boundary.every(point => point.toArray().every(Number.isFinite)));
+    const vertices = plateSurfaceVertices(ids, positions, CELL_SIZE_WORLD / 2);
+    assert.ok(vertices.length >= 9 && vertices.every(Number.isFinite));
+  }
+});
+test('acute plate closures bevel instead of creating panel spikes beyond their beams', () => {
+  const positions = new Map([
+    ['a', new THREE.Vector3(0, 0, 0)],
+    ['b', new THREE.Vector3(.8, 0, 0)],
+    ['c', new THREE.Vector3(.01, .08, 0)],
+  ]);
+  const boundary = plateSurfaceBoundary(['a', 'b', 'c'], positions, CELL_SIZE_WORLD / 2);
+  assert.ok(boundary.length > 3, 'acute corner receives a bevel');
+  for (const point of boundary) {
+    assert.ok(point.x >= -.06 && point.x <= .86, `x spike: ${point.x}`);
+    assert.ok(point.y >= -.06 && point.y <= .14, `y spike: ${point.y}`);
+  }
+});
+test('plate paint follows the ray-visible front or back side', () => {
+  const normal = new THREE.Vector3(0, 0, 1);
+  const matrix = new THREE.Matrix4();
+  assert.equal(rayFacingPlateSide(normal, matrix, new THREE.Vector3(0, 0, -1)), 'front');
+  assert.equal(rayFacingPlateSide(normal, matrix, new THREE.Vector3(0, 0, 1)), 'back');
 });
 test('edge outlines are optional and preserve the edge geometry transform', () => {
   const material = new THREE.MeshBasicMaterial();
@@ -665,6 +896,15 @@ test('placement follows the pointer vehicle hit before its work-plane fallback',
   assert.deepEqual(resolvePlacementPoint(pointer, [], workPlane).toArray(), [cell(2), 0, cell(2)]);
   vehicle.geometry.dispose(); vehicle.material.dispose();
 });
+test('placement snaps to the outward side of nearby component envelopes', () => {
+  const component = new THREE.Mesh(new THREE.BoxGeometry(CELL_SIZE_WORLD, CELL_SIZE_WORLD, CELL_SIZE_WORLD), new THREE.MeshBasicMaterial());
+  component.position.set(cell(2), cell(1), cell(2)); component.updateMatrixWorld(true);
+  const pointer = new THREE.Raycaster(new THREE.Vector3(cell(2), 1, cell(2) + .065), new THREE.Vector3(0, -1, 0));
+  const workPlane = new THREE.Plane(new THREE.Vector3(0, 1, 0), 0);
+  const point = resolvePlacementPoint(pointer, [], workPlane, { adjacentTargets: [component] });
+  assert.deepEqual(point.toArray(), [cell(2), cell(2), cell(3)]);
+  component.geometry.dispose(); component.material.dispose();
+});
 test('edge axis snapping selects every signed world axis on integer cells', () => {
   const camera = new THREE.PerspectiveCamera(45, 1, .01, 2000);
   const start = new THREE.Vector3(cell(2), cell(3), cell(-2));
@@ -721,4 +961,14 @@ test('geometry reflection changes positions, winding and normals without negativ
   assert.deepEqual([...mirrored.getIndex().array], [0, 2, 1]);
   assert.deepEqual([...mirrored.getAttribute('normal').array], [0, 0, 1, 0, 0, 1, 0, 0, 1]);
   geometry.dispose(); mirrored.dispose();
+});
+
+test('mesh normals are corrected when native winding is reversed', () => {
+  const geometry = new THREE.BufferGeometry();
+  geometry.setAttribute('position', new THREE.Float32BufferAttribute([0, 0, 0, 1, 0, 0, 0, 1, 0], 3));
+  geometry.setIndex([0, 1, 2]);
+  geometry.setAttribute('normal', new THREE.Float32BufferAttribute([0, 0, -1, 0, 0, -1, 0, 0, -1], 3));
+  assert.equal(correctGeometryNormals(geometry), true);
+  assert.deepEqual([...geometry.getAttribute('normal').array].map(value => value === 0 ? 0 : value), [0, 0, 1, 0, 0, 1, 0, 0, 1]);
+  geometry.dispose();
 });

@@ -25,7 +25,7 @@ export function applyGridStyle(grid, { gridColor, gridOpacity, gridStyle }) {
   for (const material of Array.isArray(old) ? old : [old]) material.dispose();
 }
 
-export function createOrientationIndicator(host, camera, onView, label) {
+export function createOrientationIndicator(host, camera, onView, label, onProjection = null) {
   const getCamera = typeof camera === 'function' ? camera : () => camera;
   const root = document.createElement('section'); root.id = 'orientation-indicator';
   root.setAttribute('aria-label', label('orientation'));
@@ -45,11 +45,15 @@ export function createOrientationIndicator(host, camera, onView, label) {
     return { view, line, button, direction: new THREE.Vector3(...direction) };
   });
   const footer = document.createElement('div'); footer.className = 'orientation-footer';
-  const iso = document.createElement('button'); iso.dataset.view = 'iso'; iso.textContent = label('iso'); iso.onclick = () => onView('iso'); footer.append(iso);
+  const iso = document.createElement('button');
+  iso.dataset.view = 'iso';
+  iso.textContent = label('iso');
+  iso.onclick = () => (onProjection ? onProjection() : onView('iso'));
+  footer.append(iso);
   root.append(sphere, footer); host.append(root);
   const inverse = new THREE.Quaternion(); const point = new THREE.Vector3();
   return {
-    root, footer,
+    root, footer, projectionButton: iso,
     update() {
       inverse.copy(getCamera().quaternion).invert();
       for (const { line, button, direction } of endpoints) {

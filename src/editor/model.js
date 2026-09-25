@@ -1,5 +1,7 @@
 // Renderer-independent Anymaker editing model. Native file adapters can map
 // this model to .data without importing Three.js or relying on scene objects.
+import { nativePropertiesFromState } from './component-properties.js';
+
 export const MODEL_FORMAT = 'anymaker-builder-domain';
 export const MODEL_VERSION = 1;
 const AXES = ['x', 'y', 'z'];
@@ -229,6 +231,25 @@ function nativeFrames(vehicles) {
   return frames;
 }
 
+// These are construction-constraint pivots, not interaction or logic ports.
+// The published hinge-knuckle definition explicitly declares
+// `constraint_position: [0, 0, -1]`; other currently observed connected
+// components have their multibody pivot at their component origin. In
+// particular, tow_hitch's surface/logic position is an exposed port and does
+// not agree with the stored connected_vehicle construction anchor.
+const NATIVE_CONSTRAINT_POSITIONS = new Map([
+  ['hinge_knuckle', { x: 0, y: 0, z: -1 }],
+]);
+
+function nativeConstraintPosition(component, frame) {
+  const local = NATIVE_CONSTRAINT_POSITIONS.get(component.type) || vector();
+  const componentRotation = nativeComponentRotation(component);
+  return add(
+    nativeCellPosition(component.transform.position, frame),
+    multiplyMatrixVector(frame.rotation, multiplyMatrixVector(componentRotation, local)),
+  );
+}
+
 function nativeVehicleOffsets(vehicles, roots, frames) {
   const byId = new Map(vehicles.map(vehicle => [vehicle.id, vehicle]));
   const attached = new Set();
@@ -249,14 +270,27 @@ function nativeVehicleOffsets(vehicles, roots, frames) {
   while (pending.length) {
     const vehicle = byId.get(pending.shift());
     const parentOffset = offsets.get(vehicle.id);
+    const candidates = new Map();
     for (const grid of vehicle.grids) for (const parent of grid.components) {
       const childId = String(parent.extras?.native?.state?.connected_vehicle ?? '');
       const child = byId.get(childId);
       const target = child && component(child, parent.extras?.native?.state?.connected_component);
       if (!target || offsets.has(childId)) continue;
-      const parentPosition = nativeCellPosition(parent.transform.position, frames.get(`${vehicle.id}:${grid.id}`));
-      const targetPosition = nativeCellPosition(target.component.transform.position, frames.get(`${child.id}:${target.grid.id}`));
-      offsets.set(childId, add(parentOffset, subtract(parentPosition, targetPosition)));
+      const parentPosition = nativeConstraintPosition(parent, frames.get(`${vehicle.id}:${grid.id}`));
+      const targetPosition = nativeConstraintPosition(target.component, frames.get(`${child.id}:${target.grid.id}`));
+      const positions = candidates.get(childId) || [];
+      positions.push(add(parentOffset, subtract(parentPosition, targetPosition)));
+      candidates.set(childId, positions);
+    }
+    // Construction anchors of a rigid child must resolve to the same offset.
+    // Averaging component origins hides an incorrect pivot and shifts every
+    // child object; fail the import instead of inventing a position.
+    for (const [childId, positions] of candidates) {
+      const offset = positions[0];
+      if (positions.some(position => AXES.some(axis => Math.abs(position[axis] - offset[axis]) > 1e-6))) {
+        throw new Error(`Native vehicle ${childId} has incompatible construction attachment anchors`);
+      }
+      offsets.set(childId, offset);
       pending.push(childId);
     }
   }
@@ -301,6 +335,7 @@ export function toEditorDocument(model, { vehicleIds = null } = {}) {
       ...(Array.isArray(sourceColors) && sourceColors.length <= 10 && sourceColors.every(color => Number.isInteger(color) && color >= 0 && color <= 255) ? { colors: [...sourceColors] } : {}),
       ...(component.hidden ? { hidden: true } : {}),
       ...(nativeExtension(component) ? { nativeExtension: nativeExtension(component) } : {}),
+      ...(nativePropertiesFromState(component.extras?.native?.state) ? { nativeProperties: nativePropertiesFromState(component.extras.native.state) } : {}),
       ...(nativeImport ? { nativeProjected: true } : {}),
       position,
       rotation: nativeImport ? matrixToEulerXYZ(multiplyMatrices(frame.rotation, nativeComponentRotation(component))) : clone(component.transform.rotation),

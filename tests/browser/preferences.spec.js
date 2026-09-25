@@ -44,10 +44,20 @@ test('English default, language switching, axis views, grid and panel preference
   await page.locator('#camera-light-enabled').uncheck();
   await page.locator('#camera-light-intensity').fill('5.5');
   await page.locator('#show-building-furniture').check();
+  await expect(page.locator('#use-model-thumbnails')).not.toBeChecked();
+  await page.locator('#use-model-thumbnails').check();
   await page.locator('#orthographic-view').check();
+  const projectionButton = page.locator('#orientation-indicator [data-view="iso"]');
+  await expect(projectionButton).toHaveAttribute('aria-pressed', 'true');
+  await projectionButton.click();
+  await expect(page.locator('#orthographic-view')).not.toBeChecked();
+  await expect(projectionButton).toHaveAttribute('aria-pressed', 'false');
+  await projectionButton.click();
+  await expect(page.locator('#orthographic-view')).toBeChecked();
   await expect(page.locator('#node-size-value')).toHaveText('0.120');
   await expect(page.locator('#grid-settings')).toContainText('1 cell = 8 cm');
-  await expect(page.locator('#axis-snap-btn')).toHaveText('Axis snap');
+  await expect(page.locator('#axis-snap-btn')).toContainText('Axis snap');
+  await expect(page.locator('#axis-snap-btn')).toContainText('Shift');
   await expect(page.locator('#axis-snap-btn')).toHaveAttribute('aria-pressed', 'false');
   await page.locator('#axis-snap-btn').click();
   await page.locator('#nodes-btn').click();
@@ -64,6 +74,7 @@ test('English default, language switching, axis views, grid and panel preference
   expect(before.lightIntensity).toBe(4.2); expect(before.shadowStrength).toBe(.8); expect(before.lightSoftness).toBe(3.5); expect(before.orthographic).toBe(true);
   expect(before.cameraLightEnabled).toBe(false); expect(before.cameraLightIntensity).toBe(5.5);
   expect(before.showBuildingFurniture).toBe(true);
+  expect(before.modelThumbnails).toBe(true);
   expect(before.camera.position[0]).toBeGreaterThan(before.camera.target[0]);
   await page.reload(); await ready(page, '598 / 598');
   await expect(page.locator('#left-sidebar')).toBeHidden();
@@ -86,6 +97,7 @@ test('English default, language switching, axis views, grid and panel preference
   await expect(page.locator('#camera-light-enabled')).not.toBeChecked();
   await expect(page.locator('#camera-light-intensity')).toHaveValue('5.5');
   await expect(page.locator('#show-building-furniture')).toBeChecked();
+  await expect(page.locator('#use-model-thumbnails')).toBeChecked();
   await expect(page.locator('#grid-settings')).toContainText('1 cell = 8 cm');
   await expect(page.locator('#axis-snap-btn')).toHaveAttribute('aria-pressed', 'true');
   await expect(page.locator('#nodes-btn')).toHaveAttribute('aria-pressed', 'false');

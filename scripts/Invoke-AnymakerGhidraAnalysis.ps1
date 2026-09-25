@@ -17,15 +17,15 @@ $workspace = Get-Item -LiteralPath $AnalysisWorkspace
 $runner = Join-Path $workspace.FullName 'scripts\Invoke-GhidraAnalysis.ps1'
 if (-not (Test-Path -LiteralPath $runner)) { throw "Ghidra analysis runner not found: $runner" }
 
-$arguments = @(
-  '-GameDir', $game.DirectoryName,
-  '-TargetNames', $game.Name,
-  '-MaxDecompileFunctions', [string]$MaxDecompileFunctions,
-  '-AnalysisTimeoutPerFile', [string]$AnalysisTimeoutPerFile,
-  '-MaxMemory', $MaxMemory
-)
-if ($FullAnalysis) { $arguments += '-FullAnalysis' }
-if ($LightAnalysis) { $arguments += '-LightAnalysis' }
+$runnerArguments = @{
+  GameDir = $game.DirectoryName
+  TargetNames = @($game.Name)
+  MaxDecompileFunctions = $MaxDecompileFunctions
+  AnalysisTimeoutPerFile = $AnalysisTimeoutPerFile
+  MaxMemory = $MaxMemory
+  FullAnalysis = $FullAnalysis
+  LightAnalysis = $LightAnalysis
+}
 
-& $runner @arguments
+& $runner @runnerArguments
 if ($LASTEXITCODE -ne 0) { throw "Ghidra analysis failed with exit code $LASTEXITCODE" }

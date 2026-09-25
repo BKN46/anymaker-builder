@@ -23,6 +23,7 @@ export function normalizeSettings(input = {}) {
     version: 1,
     language: s.language === 'zh' ? 'zh' : 'en',
     leftWidth: finite(s.leftWidth, 240, 720, 304),
+    rightWidth: finite(s.rightWidth, 240, 720, 304),
     leftCollapsed: bool(s.leftCollapsed, false),
     rightOpen: bool(s.rightOpen, false),
     gridColor: typeof s.gridColor === 'string' && /^#[\da-f]{6}$/i.test(s.gridColor) ? s.gridColor : '#8294a8',
@@ -34,6 +35,14 @@ export function normalizeSettings(input = {}) {
     nodeSize: finite(s.nodeSize, .02, .25, .055),
     nodeOpacity: finite(s.nodeOpacity, 0, 1, 1),
     edgeAxisSnap: bool(s.edgeAxisSnap, false),
+    connectionVisibility: {
+      electric: bool(s.connectionVisibility?.electric, true),
+      mechanical: bool(s.connectionVisibility?.mechanical, true),
+      liquid: bool(s.connectionVisibility?.liquid, true),
+      gas: bool(s.connectionVisibility?.gas, true),
+      belt: bool(s.connectionVisibility?.belt, true),
+      data: bool(s.connectionVisibility?.data, true),
+    },
     edgeLengthsVisible: bool(s.edgeLengthsVisible, false),
     edgeOutlinesVisible: bool(s.edgeOutlinesVisible, false),
     backgroundColor: typeof s.backgroundColor === 'string' && /^#[\da-f]{6}$/i.test(s.backgroundColor) ? s.backgroundColor : '#ffffff',
@@ -49,9 +58,14 @@ export function normalizeSettings(input = {}) {
     paintQuickColors: paintColors(s.paintQuickColors, ['#bd2636', '#631a24', '#2b3440', '#20252c', '#a16a30']),
     orthographic: bool(s.orthographic, false),
     showBuildingFurniture: bool(s.showBuildingFurniture, false),
+    modelThumbnails: bool(s.modelThumbnails, false),
+    catalogCardSize: finite(s.catalogCardSize, 64, 156, 72),
     query: text(s.query, 200), category: text(s.category, 80), selectedType: text(s.selectedType, 100, 'engine'),
     tool: ['select', 'place', 'erase', 'translate', 'rotate', 'scale', 'node', 'edge', 'split', 'plate', 'glass', 'connect', 'paint'].includes(s.tool) ? s.tool : 'select',
-    drawers: { catalog: bool(s.drawers?.catalog, true), inspector: bool(s.drawers?.inspector, false), resources: bool(s.drawers?.resources, false), history: bool(s.drawers?.history, false) },
+    sidebarTabs: {
+      left: s.sidebarTabs?.left === 'subgrids' ? 'subgrids' : 'catalog',
+      right: ['editor', 'inspector', 'resources', 'history'].includes(s.sidebarTabs?.right) ? s.sidebarTabs.right : 'editor',
+    },
     camera,
   };
 }

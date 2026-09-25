@@ -1,5 +1,6 @@
 import * as THREE from 'three';
 import { parseMesh } from './mesh.js';
+import { correctGeometryNormals } from './geometry-ops.js';
 
 // File objects stay local. No fetch/upload, executable access, or filesystem writes.
 export class AssetLibrary {
@@ -50,6 +51,7 @@ export class AssetLibrary {
       geometry.setIndex(new THREE.BufferAttribute(part.indices, 1));
       if (part.normals) geometry.setAttribute('normal', new THREE.BufferAttribute(part.normals, 3));
       else geometry.computeVertexNormals();
+      correctGeometryNormals(geometry);
       if (part.uv) geometry.setAttribute('uv', new THREE.BufferAttribute(part.uv, 2));
       // Do not mistake packed paint/material channels for verified sRGB colors.
       geometry.setAttribute('gameColorBytes', new THREE.BufferAttribute(part.colors, 4, true));

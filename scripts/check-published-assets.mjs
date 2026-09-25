@@ -12,6 +12,7 @@ if (!fs.existsSync(indexFile)) throw new Error('Missing public/data/index.json')
 const manifest = JSON.parse(fs.readFileSync(manifestFile, 'utf8'));
 const index = JSON.parse(fs.readFileSync(indexFile, 'utf8'));
 if (index.format !== 'anymaker-component-index' || index.version !== 1 || index.schema !== 'anymaker-component-index/1' || !Array.isArray(index.definitions)) throw new Error('Invalid component index schema');
+if (typeof index.translationSource !== 'string' || !/^rom\/languages_components\.tsv$/.test(index.translationSource) || !/^[\da-f]{64}$/i.test(index.translationSourceSha256 || '')) throw new Error('Missing component translation source fingerprint');
 if (manifest.format !== 'anymaker-mesh-manifest' || manifest.version !== 1) throw new Error('Unsupported Mesh manifest');
 const referenced = new Set();
 const errors = [];
@@ -23,8 +24,14 @@ for (const file of fs.readdirSync(bindingsRoot)) {
 }
 if (index.count !== index.definitions.length) errors.push('component index count does not match definitions');
 for (const definition of index.definitions) {
+  if (typeof definition.name !== 'string' || !definition.name.trim()) errors.push(`missing English component name: ${definition.id}`);
+  if (typeof definition.name_zh !== 'string' || !definition.name_zh.trim()) errors.push(`missing Chinese component name: ${definition.id}`);
   for (const relative of [definition.detail, definition.binding]) {
     if (typeof relative !== 'string' || !relative.startsWith('data/') || !fs.existsSync(path.join(root, 'public', relative))) errors.push(`missing component data file: ${relative}`);
+  }
+  if (typeof definition.detail === 'string' && fs.existsSync(path.join(root, 'public', definition.detail))) {
+    const detail = JSON.parse(fs.readFileSync(path.join(root, 'public', definition.detail), 'utf8'));
+    if (detail.id !== definition.id || detail.name !== definition.name || detail.name_zh !== definition.name_zh) errors.push(`component name/detail mismatch: ${definition.id}`);
   }
 }
 for (const source of Object.keys(manifest.entries || {})) {

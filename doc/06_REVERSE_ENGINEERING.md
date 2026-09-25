@@ -21,6 +21,12 @@
 
 待验证：这批产物尚未给出 `.data` 中 `electric_links`、`connected_vehicle` 等字段到运行时端口或父级变换的直接引用。因此编辑器按 `connected_vehicle` / `connected_component` 补齐关联子载具、并按组件定义的 `logic_nodes` 显示网络端口，属于可审计的当前实现，不代表已证明与游戏连接、旋转和约束逻辑完全一致。
 
+### 子载具约束（2026-09-24）
+
+已验证样本事实：参考载具的 551、552、554 子载具均同时含有 hinge 与 tow 连接记录。若直接比较组件原点，锚点会相差一格；将定义文件 `public/data/definitions/hinge_knuckle.json` 的 `constraint_position: [0, 0, -1]` 按组件列主序旋转变换后，七条记录恰好各自求得同一子载具刚体偏移。`tow_hitch` 的 `surface.pos` 与 `logic_nodes.pos` 不参与这一计算：把它们当作枢轴会与同一份样本的 hinge 偏移冲突。
+
+已验证的只读 GCL 代码区：run `20260924_202337` 导出的 `server_scene.vehicle_component.hinge_knuckle.connect_multibody.c` 位于 `D:\00Data00\Stormworks\analysis\artifacts\anymaker-gcl\20260924_202337`，该类型将多体连接委托给基类；run `20260924_202458` 导出的 `server_scene.vehicle_component.tow_bar.connect_multibody.c` 位于对应目录，调用记录包含双方 `get_transform`、格点转换和 `physics.scene.create_constraint_point`，但不包含 surface/logic 端口读取。这支持当前将端口与多体约束枢轴分开的导入实现；Ghidra 伪代码本身仍不足以证明所有连接器和运行时姿态的完整语义。
+
 ### 梁几何（2026-09-23）
 
 已验证事实：游戏目录的 `bin/game.gcl` 包含带函数签名及 x86-64 机器码的 GCL 产物，而不是仅有资源。仓库新增 `scripts/Invoke-AnymakerGclAnalysis.ps1` 与 `scripts/ExportAnymakerGclFunction.java`，可将它作为 Raw Binary 载入 Ghidra 后，仅对已登记的代码区间反汇编和导出伪 C；游戏文件和大型输出仍只放在本机分析工作区。

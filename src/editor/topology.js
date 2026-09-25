@@ -36,6 +36,7 @@ export function validateTopologyState(state = {}, componentIds = null) {
   for (const node of nodes) {
     if (!node || typeof node.id !== 'string' || !node.id || nodeIds.has(node.id)) throw new Error('节点 ID 无效或重复');
     if (node.nativeProjected !== undefined && node.nativeProjected !== true) throw new Error('节点原生投影标记无效');
+    if (node.hidden !== undefined && typeof node.hidden !== 'boolean') throw new Error('节点可见性无效');
     const nativeProjected = node.nativeProjected === true;
     const gridPosition = nativeProjected ? node.position : assertGridVector(node.position, '节点坐标');
     if (!gridPosition || AXES.some(axis => typeof gridPosition[axis] !== 'number')) throw new Error('节点坐标无效');

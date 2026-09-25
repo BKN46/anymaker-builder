@@ -1,4 +1,6 @@
 import { Project, Vehicle, Grid, Component, Node, Edge, Plate, Link, validateProject } from '../editor/model.js';
+import { CELL_SIZE_WORLD } from '../editor/grid.js';
+import { validateNativeProperties } from '../editor/component-properties.js';
 
 const vector = value => ({ x: Number(value?.[0] ?? 0), y: Number(value?.[1] ?? 0), z: Number(value?.[2] ?? 0) });
 const matrix = value => Array.isArray(value) && value.length === 9 && value.every(number => Number.isFinite(number)) ? [...value] : null;
@@ -177,5 +179,108 @@ export function verifyNativePairRoundTrip(dataInput, metaInput) {
   return {
     data: diffNativeValues(data, output.data),
     meta: diffNativeValues(meta, output.meta),
+  };
+}
+
+const nativeAxes = ['x', 'y', 'z'];
+const nativeIdentity = [1, 0, 0, 0, 1, 0, 0, 0, 1];
+
+function nativeCells(position) {
+  if (!position || nativeAxes.some(axis => !Number.isFinite(position[axis]))) throw new Error('Native export requires finite positions');
+  return nativeAxes.map(axis => position[axis] / CELL_SIZE_WORLD);
+}
+
+function nativeRotation(rotation) {
+  if (!rotation || nativeAxes.some(axis => !Number.isFinite(rotation[axis]))) return [...nativeIdentity];
+  const cx = Math.cos(rotation.x); const sx = Math.sin(rotation.x);
+  const cy = Math.cos(rotation.y); const sy = Math.sin(rotation.y);
+  const cz = Math.cos(rotation.z); const sz = Math.sin(rotation.z);
+  // `matrixToEulerXYZ` reads a row-major XYZ matrix after transposing the
+  // native value. Build that same matrix here, then transpose it back to the
+  // native column-major layout. The previous formula mixed the row/column
+  // terms (it was effectively a different Euler order), which made any
+  // combined rotation come back with a different heading and could make a
+  // vehicle appear mirrored after it was saved and loaded by the game.
+  const rowMajor = [
+    cy * cz, -cy * sz, sy,
+    sx * sy * cz + cx * sz, cx * cz - sx * sy * sz, -sx * cy,
+    sx * sz - cx * sy * cz, sx * cz + cx * sy * sz, cx * cy,
+  ];
+  return [rowMajor[0], rowMajor[3], rowMajor[6], rowMajor[1], rowMajor[4], rowMajor[7], rowMajor[2], rowMajor[5], rowMajor[8]];
+}
+
+function nativeColor(value) {
+  return Number.isInteger(value) && value >= 0 && value <= 255 ? value : undefined;
+}
+
+function nativeBounds(points) {
+  const values = points.length ? points : [[0, 0, 0]];
+  return {
+    min: nativeAxes.map((_, index) => Math.min(...values.map(value => value[index]))),
+    max: nativeAxes.map((_, index) => Math.max(...values.map(value => value[index]))),
+  };
+}
+
+// Build a complete observed-native-schema pair from an editor snapshot. This
+// deliberately has no dependency on a previously imported .data/.meta pair:
+// saving a new vehicle must not require users to supply a template first.
+export function toNativePairFromEditor(document, { vehicleId = 1 } = {}) {
+  if (!document || !Array.isArray(document.objects) || !Number.isInteger(vehicleId)) throw new Error('Native export requires a valid editor project');
+  const topology = document.topology || { nodes: [], edges: [], plates: [], links: [] };
+  const definitions = [...new Set(document.objects.map(object => object.type))];
+  const definitionIndex = new Map(definitions.map((id, index) => [id, index]));
+  const componentIds = new Map(document.objects.map((object, index) => [object.id, index + 1]));
+  const nodeIds = new Map((topology.nodes || []).map((node, index) => [node.id, index + 1]));
+  const components = document.objects.map(object => {
+    const result = {
+      def: definitionIndex.get(object.type),
+      id: componentIds.get(object.id),
+      pos: nativeCells(object.position),
+      rot: nativeRotation(object.rotation),
+    };
+    if (Array.isArray(object.colors) && object.colors.every(color => nativeColor(color) !== undefined)) result.colors = [...object.colors];
+    if (Array.isArray(object.nativeExtension) && object.nativeExtension.length === 3 && object.nativeExtension.every(Number.isInteger)) result.ext = [...object.nativeExtension];
+    const nativeProperties = validateNativeProperties(object.nativeProperties);
+    if (nativeProperties) Object.assign(result, nativeProperties);
+    if (object.scale && nativeAxes.every(axis => Number.isFinite(object.scale[axis])) && Math.abs(object.scale.x - object.scale.y) < 1e-9 && Math.abs(object.scale.x - object.scale.z) < 1e-9 && Math.abs(object.scale.x - 1) > 1e-9) result.scale = object.scale.x;
+    return result;
+  });
+  const nodes = (topology.nodes || []).map(node => ({ id: nodeIds.get(node.id), pos: nativeCells(node.position) }));
+  const edges = (topology.edges || []).map(edge => {
+    const result = { n0: nodeIds.get(edge.a), n1: nodeIds.get(edge.b) };
+    const color = nativeColor(edge.col); if (color !== undefined) result.col = color;
+    return result;
+  });
+  const plates = (topology.plates || []).map((plate, index) => {
+    const result = { id: index + 1, nodes: plate.nodeIds.map(id => nodeIds.get(id)), glass_impacts: [] };
+    const front = nativeColor(plate.col_front); const back = nativeColor(plate.col_back);
+    if (front !== undefined) result.col_front = front;
+    if (back !== undefined) result.col_back = back;
+    if (plate.type === 'window') result.type = 'window';
+    return result;
+  });
+  const links = Object.fromEntries(['electric', 'mechanical', 'liquid', 'gas', 'belt', 'data'].map(kind => [`${kind}_links`, (topology.links || []).filter(link => link.kind === kind).flatMap(link => {
+    const first = componentIds.get(link.from?.componentId); const second = componentIds.get(link.to?.componentId);
+    if (!first || !second) return [];
+    const endpoint = (value, id) => ({ comp: id, ...(Number.isInteger(value?.port) ? { pos: value.port } : {}) });
+    return [{ p0: endpoint(link.from, first), p1: endpoint(link.to, second), ...(Array.isArray(link.points) ? { points: link.points.map(nativeCells) } : {}) }];
+  })]));
+  const vehicle = {
+    id: vehicleId,
+    transform: { m: [...nativeIdentity], t: [0, 0, 0] },
+    nodes,
+    edges,
+    plates,
+    plate_paint: [],
+    grids: [{ components }],
+    ...links,
+    loot_locations: [],
+    creature_locations: [],
+    buoyancy_fill: [0],
+  };
+  const points = [...components.map(component => component.pos.map(value => value * CELL_SIZE_WORLD)), ...nodes.map(node => node.pos.map(value => value * CELL_SIZE_WORLD))];
+  return {
+    data: { definitions: { components: definitions }, vehicles: { vehicles: [vehicle] } },
+    meta: { vehicles: { vehicles: [{ id: vehicleId, transform: structuredClone(vehicle.transform), bounds: nativeBounds(points) }] } },
   };
 }

@@ -1,6 +1,7 @@
 import * as THREE from 'three';
 import { AssetLibrary, disposeObject } from './library.js';
 import { CELL_SIZE_WORLD } from '../editor/grid.js';
+import { correctGeometryNormals } from './geometry-ops.js';
 
 const typed = (values, Type) => values == null ? null : new Type(values);
 export const WHEEL_TYRE_OUTBOARD_OFFSET = CELL_SIZE_WORLD;
@@ -155,6 +156,7 @@ export class PublishedAssetLibrary {
           geometry.setAttribute('position', new THREE.BufferAttribute(part.positions, 3));
           geometry.setIndex(new THREE.BufferAttribute(part.indices, 1));
           if (part.normals) geometry.setAttribute('normal', new THREE.BufferAttribute(part.normals, 3)); else geometry.computeVertexNormals();
+          correctGeometryNormals(geometry);
           if (part.uv) geometry.setAttribute('uv', new THREE.BufferAttribute(part.uv, 2));
           geometry.setAttribute('gameColorBytes', new THREE.BufferAttribute(part.colors, 4, true));
           // The wheel hub definition only references the suspension meshes.
