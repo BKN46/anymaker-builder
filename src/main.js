@@ -28,6 +28,9 @@ import { editorMessages } from './editor/ui-messages.js';
 import { connectionNetworkLabel, connectionPortRoleLabel } from './editor/connection-port-labels.js';
 import { logicNodePort, logicNodePortsForNetwork, logicNodeCellPosition } from './editor/connection-ports.js';
 import { mirrorPoint, mirrorSurfaceDirection, sameGridPoint } from './editor/mirror-mode.js';
+import { gridSelectionClosure } from './editor/selection-closure.js';
+import { createMicrocontrollerVariable, microcontrollerState, updateMicrocontrollerState } from './editor/microcontroller.js';
+import { stageImportedSubgrid, translateImportedSubgrid, translateSubgridTopology } from './editor/imported-subgrid.js';
 import './style.css';
 
 addMessages(editorMessages);
@@ -54,6 +57,8 @@ let dragOccurred = false;
 let nativeModel = null;
 let importedNativeRootVehicleIds = [];
 let topology = { nodes: [], edges: [], plates: [], links: [] };
+let subgrids = [{ id: 'grid-1' }];
+let activeGridId = 'grid-1';
 // A history entry is a complete editor document. Never coordinate independent
 // object/topology cursors: a user action must undo and redo atomically.
 const history = new History({ objects: [], topology }, '初始状态');
@@ -77,6 +82,9 @@ let placementPreview = null;
 let placementPreviewType = '';
 let placementPreviewLoadingType = '';
 let placementPreviewRequest = 0;
+let importedSubgridDraft = null;
+let selectedSubgridId = null;
+let subgridTransform = null;
 let referencePreview = false;
 let hoveredObject = null;
 let paintColorPicking = false;
@@ -95,6 +103,8 @@ let hoveredConnectionPort = null;
 let mirrorMode = { active: false, axis: 'x', offset: 0 };
 let mirrorGuideDrag = false;
 let subgridToolbarOpen = false;
+let selectionAction = null;
+let selectionBoxDraft = null;
 let latestPagesBuildTime = null;
 let pagesBuildTimeUnavailable = false;
 // Pages is deployed by GitHub's generated `pages-build-deployment` workflow,
@@ -103,12 +113,17 @@ let pagesBuildTimeUnavailable = false;
 const GITHUB_PAGES_WORKFLOW_RUNS = 'https://api.github.com/repos/BKN46/anymaker-builder/actions/runs?status=completed&per_page=100';
 const isGitHubPagesDeployment = run => run?.path === 'dynamic/pages/pages-build-deployment';
 
-$('#app').innerHTML = '<header class="topbar"><div class="brand" aria-label="ANYMAKER builder by BKN"><strong>ANYMAKER</strong><small>builder by BKN</small></div><a id="github-link" class="github-link" href="https://github.com/BKN46/anymaker-builder" target="_blank" rel="noopener noreferrer" data-i18n-aria-label="GitHub 仓库" data-i18n-title="GitHub 仓库"><svg viewBox="0 0 24 24" aria-hidden="true"><path d="M12 .7a11.3 11.3 0 0 0-3.57 22c.56.1.77-.24.77-.54v-2.1c-3.14.68-3.8-1.33-3.8-1.33-.51-1.3-1.25-1.65-1.25-1.65-1.02-.7.08-.69.08-.69 1.13.08 1.73 1.16 1.73 1.16 1 .1.75 2.02 2.92 1.41.1-.73.39-1.22.71-1.5-2.51-.29-5.15-1.25-5.15-5.58 0-1.23.44-2.24 1.16-3.03-.12-.29-.5-1.44.11-2.99 0 0 .95-.3 3.11 1.16a10.8 10.8 0 0 1 5.66 0c2.16-1.46 3.1-1.16 3.1-1.16.62 1.55.23 2.7.12 2.99.72.79 1.16 1.8 1.16 3.03 0 4.34-2.65 5.29-5.17 5.57.4.35.76 1.04.76 2.1v3.11c0 .3.2.65.78.54A11.3 11.3 0 0 0 12 .7Z"></path></svg></a><span id="github-build-time" class="github-build-time" hidden aria-live="polite"></span><select id="language-select" data-i18n-aria-label="界面语言"><option value="en">English</option><option value="zh">中文</option></select><span class="status" id="save-status" role="status" data-i18n="正在加载定义…"></span><section class="section top-tool-section"><h2 data-i18n="编辑工具"></h2><div class="tool-grid" id="tools"></div></section><nav class="top-actions"><button id="library-btn" data-i18n="导入本地载具"></button><button id="new-btn" data-i18n="新建"></button><button id="undo-btn" data-i18n="撤销"></button><button id="redo-btn" data-i18n="重做"></button><button id="save-btn" data-i18n="保存载具"></button><button id="export-btn" class="primary" data-i18n="中间格式 XML"></button></nav></header>' +
+$('#app').innerHTML = '<header class="topbar"><div class="brand" aria-label="ANYMAKER builder by BKN"><strong>ANYMAKER</strong><small>builder by BKN</small></div><a id="github-link" class="github-link" href="https://github.com/BKN46/anymaker-builder" target="_blank" rel="noopener noreferrer" data-i18n-aria-label="GitHub 仓库" data-i18n-title="GitHub 仓库"><svg viewBox="0 0 24 24" aria-hidden="true"><path d="M12 .7a11.3 11.3 0 0 0-3.57 22c.56.1.77-.24.77-.54v-2.1c-3.14.68-3.8-1.33-3.8-1.33-.51-1.3-1.25-1.65-1.25-1.65-1.02-.7.08-.69.08-.69 1.13.08 1.73 1.16 1.73 1.16 1 .1.75 2.02 2.92 1.41.1-.73.39-1.22.71-1.5-2.51-.29-5.15-1.25-5.15-5.58 0-1.23.44-2.24 1.16-3.03-.12-.29-.5-1.44.11-2.99 0 0 .95-.3 3.11 1.16a10.8 10.8 0 0 1 5.66 0c2.16-1.46 3.1-1.16 3.1-1.16.62 1.55.23 2.7.12 2.99.72.79 1.16 1.8 1.16 3.03 0 4.34-2.65 5.29-5.17 5.57.4.35.76 1.04.76 2.1v3.11c0 .3.2.65.78.54A11.3 11.3 0 0 0 12 .7Z"></path></svg></a><span id="github-build-time" class="github-build-time" hidden aria-live="polite"></span><select id="language-select" data-i18n-aria-label="界面语言"><option value="en">English</option><option value="zh">中文</option></select><span class="status" id="save-status" role="status" data-i18n="正在加载定义…"></span><section class="section top-tool-section"><h2 data-i18n="编辑工具"></h2><div class="tool-grid" id="tools"></div></section><nav class="top-actions"><button id="library-btn" data-i18n="导入本地载具"></button><button id="subgrid-import-btn" data-i18n="导入载具作为子网格"></button><button id="new-btn" data-i18n="新建"></button><button id="undo-btn" data-i18n="撤销"></button><button id="redo-btn" data-i18n="重做"></button><button id="save-btn" data-i18n="保存载具"></button><button id="export-btn" class="primary" data-i18n="中间格式 XML"></button></nav></header>' +
   '<main class="workspace" id="workspace"><button id="left-sidebar-toggle" class="sidebar-toggle left-toggle" aria-controls="left-sidebar" aria-expanded="true" aria-keyshortcuts="Tab" data-i18n-title="收起方块库（在视口按 Tab 也可切换）" data-i18n="收起方块库"></button><aside id="left-sidebar" class="sidebar left-sidebar" data-i18n-aria-label="方块库"><div class="sidebar-tabs" role="tablist" data-i18n-aria-label="方块库"><button id="left-tab-catalog" type="button" role="tab" aria-controls="catalog-panel" aria-selected="true" data-sidebar-tab="catalog" data-i18n="方块库"></button><button id="left-tab-subgrids" type="button" role="tab" aria-controls="subgrid-panel" aria-selected="false" tabindex="-1" data-sidebar-tab="subgrids" data-i18n="子网格"></button></div><section id="catalog-panel" class="sidebar-tab-panel catalog-panel" role="tabpanel" aria-labelledby="left-tab-catalog"><section class="section"><h2><span data-i18n="组件定义"></span> <span id="catalog-count"></span></h2><input class="search" id="component-search" data-i18n-aria-label="搜索组件" data-i18n-placeholder="搜索中文、原始 ID、类别…"><select id="category-filter" data-i18n-aria-label="组件分类"><option value="" data-i18n="全部分类"></option></select><div class="catalog-visibility-options"><label class="catalog-visibility"><input id="show-building-furniture" type="checkbox"><span data-i18n="显示建材与家具"></span></label><label class="catalog-visibility"><input id="use-model-thumbnails" type="checkbox"><span data-i18n="使用模型缩略图"></span></label><input id="catalog-card-size" class="catalog-card-size" type="range" min="64" max="156" step="4" data-i18n-aria-label="组件卡片大小" data-i18n-title="组件卡片大小"></div><div id="component-list"></div></section></section><section id="subgrid-panel" class="sidebar-tab-panel" role="tabpanel" aria-labelledby="left-tab-subgrids" hidden><section class="section"><h2 data-i18n="当前载具子网格"></h2><p id="subgrid-summary" class="status"></p><div id="subgrid-list" class="subgrid-list"></div></section></section></aside><div id="left-sidebar-resizer" role="separator" aria-orientation="vertical" aria-controls="left-sidebar" data-i18n-aria-label="调整方块库宽度" aria-valuemin="240" aria-valuemax="720" tabindex="0"></div>' +
   '<section id="viewport" tabindex="0" data-i18n-aria-label="三维建造视口"><button id="right-sidebar-toggle" class="sidebar-toggle right-toggle" aria-controls="right-sidebar" aria-expanded="false" data-i18n="打开右侧面板"></button><div class="view-controls"><button data-view="iso" data-i18n="正交"></button><button data-view="top" data-i18n="顶视"></button><button data-view="front" data-i18n="前视"></button><button id="fit-btn" data-i18n="回到中心"></button></div><div class="hud"><span class="badge" id="object-count"></span><span class="badge" id="vehicle-size"></span><span id="topology-count" hidden></span><span class="badge" id="cursor-pos" data-i18n="工作平面 Y = 0"></span></div></section><div id="right-sidebar-resizer" role="separator" aria-orientation="vertical" aria-controls="right-sidebar" data-i18n-aria-label="调整右侧面板宽度" aria-valuemin="240" aria-valuemax="720" aria-valuenow="304" tabindex="0" hidden></div>' +
   '<aside id="right-sidebar" class="sidebar right-sidebar" data-i18n-aria-label="编辑器面板" hidden><div class="sidebar-tabs" role="tablist" data-i18n-aria-label="编辑器面板"><button id="right-tab-editor" type="button" role="tab" aria-controls="editor-tab-panel" aria-selected="true" data-sidebar-tab="editor" data-i18n="编辑器参数"></button><button id="right-tab-inspector" type="button" role="tab" aria-controls="inspector-tab-panel" aria-selected="false" tabindex="-1" data-sidebar-tab="inspector" data-i18n="选中方块属性"></button><button id="right-tab-resources" type="button" role="tab" aria-controls="resources-tab-panel" aria-selected="false" tabindex="-1" data-sidebar-tab="resources" data-i18n="资源与校验"></button><button id="right-tab-history" type="button" role="tab" aria-controls="history-tab-panel" aria-selected="false" tabindex="-1" data-sidebar-tab="history" data-i18n="历史记录"></button></div><section id="editor-tab-panel" class="sidebar-tab-panel" role="tabpanel" aria-labelledby="right-tab-editor"><section id="grid-settings" class="section"><h2 data-i18n="工作网格 · 编辑器参数"></h2><p class="status" data-i18n="固定单位网格：1 格 = 8 cm；手动编辑位置为整数格，原生子网格投影可保留小数。"></p><button id="grid-btn" aria-pressed="true" data-i18n="隐藏网格"></button><p class="status"><span data-i18n="左键：当前工具 · 右键拖动：旋转视角"></span><br><span data-i18n="中键：平移 · 滚轮：缩放 · F：聚焦"></span><br><span data-i18n="Shift + 点击连续放置 · Ctrl / ⌘ + Z：撤销"></span></p></section></section><section id="inspector-tab-panel" class="sidebar-tab-panel" role="tabpanel" aria-labelledby="right-tab-inspector" hidden><section class="section"><div id="inspector-content" class="empty"></div></section></section><section id="resources-tab-panel" class="sidebar-tab-panel" role="tabpanel" aria-labelledby="right-tab-resources" hidden><section class="section"><h2 data-i18n="资源状态"></h2><p class="status" id="asset-status" data-i18n="尚未导入 Mesh。橙色线框仅是缺失资源标记，不代表游戏尺寸。"></p><button id="mesh-files-btn" class="full" data-i18n="选择 .mesh 文件"></button><p class="status" data-i18n="推荐选择游戏的 rom/meshes 文件夹。只在浏览器读取，不上传、不执行 EXE。仅渲染静态 Mesh，动态部件数量会单独提示。"></p></section><section class="section"><h2 data-i18n="本地原生载具"></h2><button id="native-btn" class="full" data-i18n="选择配套 .data / .meta"></button><p class="status" id="native-summary" data-i18n="选择同名的 .data 与 .meta JSON 文件。浏览器只读取，不上传；校验后立即替换当前场景。"></p></section><section class="section"><h2 data-i18n="校验"></h2><div id="validation" class="status"></div></section></section><section id="history-tab-panel" class="sidebar-tab-panel" role="tabpanel" aria-labelledby="right-tab-history" hidden><section class="section"><p class="status" data-i18n="最近 50 次已提交操作。选择任一项即可恢复到该状态。"></p><div id="history-list" class="history-list"></div></section></section></aside></main>' +
-  '<input id="mesh-input" type="file" accept=".mesh" multiple hidden><input id="file-input" type="file" accept=".json" hidden><input id="native-input" type="file" accept=".data,.meta" multiple hidden><button id="project-save-btn" type="button" hidden></button>';
+  '<input id="mesh-input" type="file" accept=".mesh" multiple hidden><input id="file-input" type="file" accept=".json" hidden><input id="native-input" type="file" accept=".data,.meta" multiple hidden><input id="native-subgrid-input" type="file" accept=".data,.meta" multiple hidden><button id="project-save-btn" type="button" hidden></button>';
 applyTranslations(document);
+const subgridCreate = document.createElement('div');
+subgridCreate.className = 'subgrid-create';
+subgridCreate.innerHTML = '<input id="subgrid-new-id" maxlength="80" data-i18n-placeholder="子网格 ID" data-i18n-aria-label="子网格 ID"><button id="subgrid-create-btn" type="button" data-i18n="新建子网格"></button>';
+applyTranslations(subgridCreate);
+$('#subgrid-summary').before(subgridCreate);
 $('#catalog-card-size').value = String(settings.catalogCardSize);
 $('#left-sidebar-resizer').setAttribute('aria-valuenow', String(settings.leftWidth));
 const componentIdTooltip = document.createElement('span'); componentIdTooltip.id = 'component-id-tooltip'; componentIdTooltip.hidden = true; document.body.append(componentIdTooltip);
@@ -140,6 +155,13 @@ const paintToolbar = document.createElement('section');
 paintToolbar.id = 'paint-toolbar'; paintToolbar.className = 'context-toolbar'; paintToolbar.hidden = true;
 paintToolbar.innerHTML = '<strong data-i18n="涂色色板"></strong><div id="paint-quick-colors" class="quick-colors"></div><label><input id="paint-toolbar-color" type="color" value="#dddddd" aria-label="Hex RGB color"><input id="paint-toolbar-hex" type="text" value="#dddddd" maxlength="7" spellcheck="false" aria-label="Hex RGB color"></label><button id="pick-paint-color" type="button" aria-pressed="false" data-i18n="取色" data-i18n-aria-label="取色"></button><button id="save-paint-quick-color" type="button" data-i18n="保存快捷颜色"></button>';
 applyTranslations(paintToolbar);
+
+const selectionToolbar = document.createElement('section');
+selectionToolbar.id = 'selection-toolbar'; selectionToolbar.className = 'context-toolbar selection-toolbar'; selectionToolbar.hidden = true;
+selectionToolbar.innerHTML = '<strong data-i18n="选择工具"></strong><button id="box-select-action" type="button" aria-pressed="false" data-i18n="框选"></button><button id="closure-select-action" type="button" aria-pressed="false" data-i18n="闭包选择"></button>';
+applyTranslations(selectionToolbar);
+const selectionBox = document.createElement('div');
+selectionBox.id = 'selection-box'; selectionBox.hidden = true;
 
 const connectionToolbar = document.createElement('section');
 connectionToolbar.id = 'connection-toolbar'; connectionToolbar.className = 'context-toolbar'; connectionToolbar.hidden = true;
@@ -199,7 +221,18 @@ function setConnectionVisibilityCollapsed(collapsed) {
 connectionVisibilityToggle.addEventListener('click', () => setConnectionVisibilityCollapsed(!connectionVisibilityOptions.hidden));
 
 const workspace = $('#workspace');
-workspace.append(selectionFilterToolbar, paintToolbar, connectionToolbar, transparencyToolbar, edgeToolbar, subgridToolbar);
+workspace.append(selectionFilterToolbar, selectionToolbar, paintToolbar, connectionToolbar, transparencyToolbar, edgeToolbar, subgridToolbar);
+$('#viewport').append(selectionBox);
+function setSelectionAction(value) {
+  selectionAction = selectionAction === value ? null : value;
+  for (const button of selectionToolbar.querySelectorAll('button')) {
+    const active = button.id === `${selectionAction}-select-action`;
+    button.classList.toggle('active', active); button.setAttribute('aria-pressed', String(active));
+  }
+  selectionBox.hidden = true; selectionBoxDraft = null;
+}
+$('#box-select-action').onclick = () => setSelectionAction('box');
+$('#closure-select-action').onclick = () => setSelectionAction('closure');
 $('#tools').after(mirrorToolbar);
 for (const input of selectionFilterToolbar.querySelectorAll('[data-selectable-kind]')) {
   input.addEventListener('change', () => {
@@ -439,6 +472,11 @@ scene.add(transform.getHelper());
 const extensionHandle = new THREE.Object3D();
 extensionHandle.name = 'component-extension-handle';
 extensionHandle.userData.extensionHandle = true;
+const subgridMoveHandle = new THREE.Object3D();
+subgridMoveHandle.name = 'subgrid-move-handle';
+subgridMoveHandle.userData.subgridMoveHandle = true;
+subgridMoveHandle.visible = false;
+scene.add(subgridMoveHandle);
 let extensionTransform = null;
 function resetTransformAxes() {
   transform.showX = true; transform.showY = true; transform.showZ = true;
@@ -469,6 +507,16 @@ transform.addEventListener('dragging-changed', e => {
   controls.enabled = !e.value;
   if (e.value) {
     dragOccurred = true;
+    if (transform.object?.userData?.subgridMoveHandle && selectedSubgridId) {
+      subgridTransform = {
+        gridId: selectedSubgridId,
+        componentIds: selectedObjects().map(object => object.userData.id),
+        initialPosition: subgridMoveHandle.position.clone(),
+        initialTopology: structuredClone(topology),
+        initialComponentPositions: new Map(selectedObjects().map(object => [object.userData.id, object.position.clone()])),
+      };
+      return;
+    }
     if (transform.object?.userData?.extensionHandle) {
       const object = extensionHandle.parent;
       const definition = extensionDefinition(object);
@@ -490,7 +538,20 @@ transform.addEventListener('dragging-changed', e => {
     topologyTransform = tool === 'translate' ? (nodeId ? { nodeId } : linkPoint) : null;
     return;
   }
-  if (extensionTransform) {
+  if (subgridTransform) {
+    const active = subgridTransform; subgridTransform = null;
+    const offset = subgridMoveHandle.position.clone().sub(active.initialPosition);
+    if (offset.lengthSq() <= 1e-12) { setTool(tool); return; }
+    const nextTopology = translateSubgridTopology(active.initialTopology, active.componentIds, active.gridId, offset);
+    void transact(async () => {
+      await restore(snapshot(), nextTopology, transparencyGroups, subgrids);
+      selectedSubgridId = active.gridId;
+      selectedIds = new Set(objects.filter(object => object.userData.gridId === active.gridId).map(object => object.userData.id));
+      selected = null;
+      commit('已移动子网格 {id}', { id: active.gridId });
+      inspect();
+    });
+  } else if (extensionTransform) {
     const { object, definition, initialExtension } = extensionTransform;
     extensionTransform = null;
     const nextExtension = extensionVector(definition, object.userData.nativeExtension);
@@ -525,6 +586,16 @@ transform.addEventListener('dragging-changed', e => {
   } else { commit(); inspect(); }
 });
 transform.addEventListener('objectChange', () => {
+  if (subgridTransform) {
+    const offset = subgridMoveHandle.position.clone().sub(subgridTransform.initialPosition);
+    for (const [id, initial] of subgridTransform.initialComponentPositions) {
+      const object = objects.find(item => item.userData.id === id);
+      if (object) object.position.copy(initial).add(offset);
+    }
+    const previewTopology = translateSubgridTopology(subgridTransform.initialTopology, subgridTransform.componentIds, subgridTransform.gridId, offset);
+    replaceTopologyVisual(buildTopologyVisual(previewTopology, componentEntries()));
+    return;
+  }
   if (extensionTransform) {
     const axis = transform.axis?.toLowerCase();
     const index = extensionAxisIndex(axis);
@@ -566,8 +637,8 @@ function updateLighting() {
 }
 updateLighting();
 const grid = new THREE.GridHelper(GRID_SIZE, GRID_DIVISIONS, 0x426780, 0x203345);
-// World integer coordinates are the centres of construction cells. Offset the
-// visual boundaries by half a cell so edges of one-cell width land on cell
+// World integer coordinates are the centres of construction blocks. Offset the
+// visual boundaries by half a block so edges of one-block width land on block
 // edges instead of straddling a grid-line intersection.
 grid.position.set(-CELL_SIZE_WORLD / 2, -.002, -CELL_SIZE_WORLD / 2); scene.add(grid);
 const mirrorGuide = new THREE.Group();
@@ -1209,9 +1280,38 @@ function updateInteractionHighlights(hovered = hoveredObject) {
   $('#viewport').dataset.edgeCenterHighlightCount = String(edgeCenterHighlightCount);
   $('#viewport').dataset.plateBoundaryHighlightCount = String(plateBoundaryHighlightCount);
 }
+function subgridMoveCenter(gridId) {
+  const bounds = new THREE.Box3();
+  let hasBounds = false;
+  for (const object of objects) {
+    if (object.userData.gridId !== gridId) continue;
+    bounds.expandByObject(object); hasBounds = true;
+  }
+  for (const node of topology.nodes) {
+    if (node.gridId !== gridId) continue;
+    bounds.expandByPoint(new THREE.Vector3(node.position.x, node.position.y, node.position.z)); hasBounds = true;
+  }
+  return hasBounds ? bounds.getCenter(new THREE.Vector3()) : null;
+}
+function attachSubgridMoveHandle(gridId) {
+  const center = subgridMoveCenter(gridId);
+  if (!center || referencePreview) return false;
+  subgridMoveHandle.position.copy(center);
+  subgridMoveHandle.visible = true;
+  transform.setMode('translate'); transform.setSpace('world'); transform.setTranslationSnap(CELL_SIZE_WORLD);
+  transform.attach(subgridMoveHandle);
+  return true;
+}
+function selectSubgridForMove(gridId) {
+  selectedSubgridId = gridId;
+  selectedIds = new Set(objects.filter(object => object.userData.gridId === gridId).map(object => object.userData.id));
+  selectedTopologyIds.clear(); selected = null;
+  setTool('translate'); updateInteractionHighlights(); inspect();
+}
 function setTool(value) {
   if (busy) return;
   tool = value;
+  if (value !== 'select' && selectionAction) setSelectionAction(null);
   if (!['edge', 'connect'].includes(value) && edgeShiftSnap) {
     edgeShiftSnap = false;
     updateEdgeAxisSnapButton();
@@ -1221,6 +1321,7 @@ function setTool(value) {
   hideConnectionPortTooltip();
   scheduleSettings();
   document.querySelectorAll('.tool').forEach(b => b.classList.toggle('active', b.dataset.tool === tool));
+  selectionToolbar.hidden = value !== 'select' || referencePreview;
   paintToolbar.hidden = value !== 'paint' || referencePreview;
   connectionToolbar.hidden = value !== 'connect' || referencePreview;
   transparencyToolbar.hidden = value !== 'hide' || referencePreview;
@@ -1228,9 +1329,10 @@ function setTool(value) {
   edgeToolbar.hidden = value !== 'edge' || referencePreview;
   updateEdgeToolbar();
   updateSubgridToolbar();
-  transform.detach(); extensionHandle.removeFromParent(); resetTransformAxes();
+  transform.detach(); extensionHandle.removeFromParent(); subgridMoveHandle.visible = false; resetTransformAxes();
   if (value !== 'place') clearPlacementPreview();
   else if (cursorPoint && pointerInCanvas) void updatePlacementPreview(cursorPoint);
+  if (value !== 'subgrid-place') clearImportedSubgridPreview();
   if (value !== 'edge') cancelEdge();
   buildStatus.hidden = value !== 'edge';
   if (value === 'edge' && !edgeDraft) setText(buildStatus, '梁 1 格 · 点击起点');
@@ -1238,7 +1340,9 @@ function setTool(value) {
   if (value !== 'connect') { connectionDraft = null; clearConnectionDraftPreview(); }
   if (!['node', 'translate'].includes(value)) clearNodeSelection();
   if (value !== 'translate') clearLinkPointSelection();
-  if (selected && selectedIds.size === 1 && tool === 'select' && attachExtensionHandle(selected)) {
+  if (tool === 'translate' && selectedSubgridId && attachSubgridMoveHandle(selectedSubgridId)) {
+    // A placed native vehicle moves as one subgrid, including its topology.
+  } else if (selected && selectedIds.size === 1 && tool === 'select' && attachExtensionHandle(selected)) {
     // Native extension handles are always shown while an extendable component
     // is selected. They edit `ext`, not the generic transform scale.
   } else if (selected && selectedIds.size === 1 && ['translate', 'rotate', 'scale'].includes(tool)) {
@@ -1259,6 +1363,7 @@ function setGridConstraints() {
   transform.setScaleSnap(null);
 }
 function select(object, { toggle = false } = {}) {
+  selectedSubgridId = null;
   clearNodeSelection();
   clearTopologySelection();
   if (!object) {
@@ -1277,6 +1382,7 @@ function select(object, { toggle = false } = {}) {
   inspect();
 }
 function selectTopology(target, { toggle = false } = {}) {
+  selectedSubgridId = null;
   clearNodeSelection(); clearLinkPointSelection();
   selected = null; selectedIds.clear();
   if (!target) clearTopologySelection();
@@ -1290,6 +1396,51 @@ function selectTopology(target, { toggle = false } = {}) {
   setTool(tool);
   updateInteractionHighlights();
   inspect();
+}
+function selectMixed(componentIds, topologyTargets) {
+  selectedSubgridId = null;
+  clearNodeSelection(); clearLinkPointSelection();
+  selectedIds = new Set(componentIds);
+  selectedTopologyIds = new Set(topologyTargets.map(target => typeof target === 'string' ? target : topologySelectionKey(target.kind, target.id)));
+  selected = selectedIds.size === 1 ? selectedObjects()[0] || null : null;
+  setTool(tool); updateInteractionHighlights(); inspect();
+}
+function projectedBounds(object) {
+  const box = new THREE.Box3().setFromObject(object);
+  if (box.isEmpty()) return null;
+  const rect = renderer.domElement.getBoundingClientRect();
+  const points = [];
+  for (const x of [box.min.x, box.max.x]) for (const y of [box.min.y, box.max.y]) for (const z of [box.min.z, box.max.z]) {
+    const point = new THREE.Vector3(x, y, z).project(camera);
+    if (point.z < -1 || point.z > 1) continue;
+    points.push({ x: rect.left + (point.x + 1) * rect.width / 2, y: rect.top + (1 - point.y) * rect.height / 2 });
+  }
+  if (!points.length) return null;
+  return { minX: Math.min(...points.map(point => point.x)), maxX: Math.max(...points.map(point => point.x)), minY: Math.min(...points.map(point => point.y)), maxY: Math.max(...points.map(point => point.y)) };
+}
+function finishBoxSelection(rect) {
+  const overlap = bounds => bounds && bounds.maxX >= rect.minX && bounds.minX <= rect.maxX && bounds.maxY >= rect.minY && bounds.minY <= rect.maxY;
+  const components = selectableKinds.component ? objects.filter(object => object.visible && overlap(projectedBounds(object))).map(object => object.userData.id) : [];
+  const structural = [];
+  for (const root of topologyLayer.children) {
+    const kind = root.userData.topology; const id = root.userData[`${kind}Id`];
+    if (kind && id && selectableKinds[kind] && root.visible && overlap(projectedBounds(root))) structural.push({ kind, id });
+  }
+  if (selectableKinds.node) for (const node of topology.nodes) {
+    const marker = topologyNodeMarker(node.id);
+    if (marker?.visible && overlap(projectedBounds(marker))) structural.push({ kind: 'node', id: node.id });
+  }
+  selectMixed(components, structural);
+  status('已选择 {count} 个对象', { count: components.length + structural.length });
+}
+function selectClosure(object) {
+  const components = objects.map(value => {
+    const box = new THREE.Box3().setFromObject(value);
+    return { id: value.userData.id, gridId: value.userData.gridId || 'grid-1', bounds: { min: box.min, max: box.max } };
+  });
+  const result = gridSelectionClosure({ components, topology, startComponentId: object.userData.id, padding: CELL_SIZE_WORLD / 2 });
+  selectMixed(result.components, result.topology);
+  status('已选择闭包：{count} 个对象', { count: result.components.length + result.topology.length });
 }
 function snapshot() {
   return objects.map(o => ({ id: o.userData.id, type: o.userData.type,
@@ -1434,31 +1585,57 @@ function renderSubgridList() {
   const summary = $('#subgrid-summary');
   const host = $('#subgrid-list');
   if (!summary || !host) return;
-  const vehicles = importedNativeVehicles();
-  host.replaceChildren();
-  if (!vehicles.length) {
-    setText(summary, '尚未导入原生载具。');
-    return;
-  }
-  setText(summary, '{count} 个载具', { count: vehicles.length });
+  const known = new Set(subgrids.map(grid => grid.id));
+  for (const object of objects) known.add(object.userData.gridId || 'grid-1');
+  for (const item of [...topology.nodes, ...topology.edges, ...topology.plates]) known.add(item.gridId || 'grid-1');
+  const ids = [...known];
+  const nativeVehicles = importedNativeVehicles();
   const roots = new Set(importedNativeRootVehicleIds.map(String));
-  for (const vehicle of vehicles) {
-    const components = objects.filter(object => object.userData.id.startsWith(`${vehicle.id}:`));
-    const gridIds = new Set(vehicle.grids.map(grid => grid.id));
-    const structuralItems = [...topology.nodes, ...topology.edges, ...topology.plates].filter(item => gridIds.has(item.gridId));
+  host.replaceChildren();
+  setText(summary, '当前子网格：{id} · {count} 个子网格', { id: activeGridId, count: ids.length });
+  for (const gridId of ids) {
+    const components = objects.filter(object => (object.userData.gridId || 'grid-1') === gridId);
+    const structuralItems = [...topology.nodes, ...topology.edges, ...topology.plates].filter(item => (item.gridId || 'grid-1') === gridId);
     const visibilityTargets = [...components, ...structuralItems];
     const fullyHidden = visibilityTargets.length > 0 && visibilityTargets.every(item => item.userData?.hidden ?? item.hidden);
-    const componentCount = vehicle.grids.reduce((count, grid) => count + grid.components.length, 0);
     const row = document.createElement('div'); row.className = 'subgrid-row';
     const detail = document.createElement('div'); detail.className = 'subgrid-detail';
-    const title = document.createElement('strong'); title.textContent = `${roots.has(String(vehicle.id)) ? t('主载具') : t('子载具')} ${vehicle.id}`;
-    const meta = document.createElement('span'); meta.textContent = `${vehicle.grids.length} ${t('网格')} · ${componentCount} ${t('组件')} · ${fullyHidden ? t('已隐藏') : t('可见')}`;
-    const action = document.createElement('button'); action.type = 'button'; action.textContent = t(fullyHidden ? '取消隐藏' : '隐藏');
+    const nativeVehicle = nativeVehicles.find(vehicle => vehicle.grids.some(grid => grid.id === gridId));
+    const title = document.createElement('strong'); title.textContent = nativeVehicle ? `${roots.has(String(nativeVehicle.id)) ? t('主载具') : t('子载具')} ${nativeVehicle.id}` : `Grid ${gridId}`;
+    const meta = document.createElement('span'); meta.textContent = nativeVehicle
+      ? `${nativeVehicle.grids.filter(grid => grid.id === gridId).length} ${t('网格')} · ${components.length} ${t('组件')} · ${fullyHidden ? t('已隐藏') : t('可见')}`
+      : t('{components} 个组件 · {structural} 个结构对象 · {visibility}', { components: components.length, structural: structuralItems.length, visibility: t(fullyHidden ? '已隐藏' : '可见') });
+    const select = document.createElement('button'); select.type = 'button'; select.className = 'subgrid-select'; setText(select, gridId === activeGridId ? '当前' : '使用');
+    select.setAttribute('aria-pressed', String(gridId === activeGridId)); select.disabled = busy;
+    select.onclick = () => { activeGridId = gridId; renderSubgridList(); status('当前子网格：{id} · {count} 个子网格', { id: gridId, count: ids.length }); };
+    const action = document.createElement('button'); action.type = 'button'; setText(action, fullyHidden ? '取消隐藏' : '隐藏');
     action.disabled = busy || !visibilityTargets.length;
-    action.onclick = () => { void setNativeVehicleVisibility(vehicle.id, !fullyHidden); };
-    detail.append(title, meta); row.append(detail, action); host.append(row);
+    action.onclick = () => { void setGridVisibility(gridId, !fullyHidden); };
+    detail.append(title, meta); row.append(detail, select, action); host.append(row);
   }
 }
+async function setGridVisibility(gridId, hidden) {
+  if (busy) return;
+  await transact(async () => {
+    const items = snapshot().map(object => (object.gridId || 'grid-1') === gridId ? setHidden(object, hidden) : object);
+    const nextTopology = {
+      ...topology,
+      nodes: topology.nodes.map(item => (item.gridId || 'grid-1') === gridId ? setHidden(item, hidden) : item),
+      edges: topology.edges.map(item => (item.gridId || 'grid-1') === gridId ? setHidden(item, hidden) : item),
+      plates: topology.plates.map(item => (item.gridId || 'grid-1') === gridId ? setHidden(item, hidden) : item),
+    };
+    await restore(items, nextTopology, transparencyGroups, subgrids);
+    commit(hidden ? '隐藏子网格 {id}' : '取消隐藏子网格 {id}', { id: gridId });
+  });
+}
+$('#subgrid-create-btn').onclick = () => {
+  if (busy) return;
+  const input = $('#subgrid-new-id'); const id = input.value.trim();
+  if (!/^[A-Za-z0-9_-]{1,80}$/.test(id)) { status('子网格 ID 无效'); return; }
+  if (subgrids.some(grid => grid.id === id)) { status('子网格 ID 已存在'); return; }
+  subgrids = [...subgrids, { id }]; activeGridId = id; input.value = '';
+  commit('已创建子网格 {id}', { id }); renderSubgridList(); status('已创建子网格 {id}', { id });
+};
 async function transact(operation) {
   if (busy) return;
   busy = true; transform.enabled = false; refresh();
@@ -1514,6 +1691,40 @@ function clearPlacementPreview() {
   placementPreviewLoadingType = '';
   disposePlacementPreview();
 }
+function clearImportedSubgridPreview() {
+  if (!importedSubgridDraft?.preview) return;
+  const preview = importedSubgridDraft.preview;
+  scene.remove(preview); disposeObject(preview);
+  importedSubgridDraft = null;
+}
+function setImportedSubgridPreviewPoint(point) {
+  const draft = importedSubgridDraft;
+  if (!draft?.preview || !point) return null;
+  const preview = draft.preview;
+  preview.position.set(point.x - draft.anchor.x, 0, point.z - draft.anchor.z);
+  preview.updateMatrixWorld(true);
+  const bounds = new THREE.Box3().setFromObject(preview);
+  if (bounds.isEmpty()) return null;
+  preview.position.y += point.y - bounds.min.y;
+  preview.visible = true; preview.updateMatrixWorld(true);
+  return preview.position.clone();
+}
+async function createImportedSubgridPreview(staged) {
+  const preview = new THREE.Group();
+  try {
+    preview.add(...await Promise.all(staged.objects.map(data => createObject(data))));
+    const visual = buildTopologyVisual(staged.topology, new Map(staged.objects.map(object => [object.id, object])));
+    preview.add(...[...visual.children]);
+    makePlacementPreview(preview);
+    preview.position.set(0, 0, 0); preview.updateMatrixWorld(true);
+    const bounds = new THREE.Box3().setFromObject(preview);
+    if (bounds.isEmpty()) throw new Error('Imported vehicle has no renderable geometry');
+    return { preview, anchor: bounds.getCenter(new THREE.Vector3()) };
+  } catch (error) {
+    disposeObject(preview);
+    throw error;
+  }
+}
 function setPlacementPreviewPoint(point) {
   if (!placementPreview || !point) return;
   placementPreview.position.set(point.x, 0, point.z);
@@ -1558,10 +1769,10 @@ async function updatePlacementPreview(point) {
     if (request === placementPreviewRequest) { placementPreviewLoadingType = ''; reportError('放置虚影加载失败：{error}', error); }
   }
 }
-async function restore(items, nextTopology = topology, nextTransparencyGroups = transparencyGroups) {
+async function restore(items, nextTopology = topology, nextTransparencyGroups = transparencyGroups, nextSubgrids = subgrids) {
   if (referencePreview) setReferencePreview(false);
   nextTransparencyGroups = pruneTransparencyGroups(nextTransparencyGroups, items, nextTopology);
-  const candidate = validateDocument(project(items, nextTopology, nextTransparencyGroups), catalog.index);
+  const candidate = validateDocument(project(items, nextTopology, nextTransparencyGroups, nextSubgrids), catalog.index);
   const next = [];
   let visual;
   try {
@@ -1575,11 +1786,13 @@ async function restore(items, nextTopology = topology, nextTransparencyGroups = 
     visual = buildTopologyVisual(candidate.topology, componentEntries(candidate.objects));
   } catch (error) { next.forEach(disposeObject); throw error; }
   cancelTopologyDraft();
-  transform.detach(); selected = null; selectedIds.clear(); selectedTopologyIds.clear();
+  transform.detach(); selected = null; selectedIds.clear(); selectedTopologyIds.clear(); selectedSubgridId = null;
   objects.forEach(o => { scene.remove(o); disposeObject(o); });
   objects = next; objects.forEach(o => scene.add(o));
   topology = candidate.topology;
   transparencyGroups = candidate.visibilityGroups || [];
+  subgrids = candidate.grids || [{ id: 'grid-1' }];
+  if (!subgrids.some(grid => grid.id === activeGridId)) activeGridId = subgrids[0].id;
   replaceTopologyVisual(visual);
   refreshConnectionPorts();
   inspect(); refresh(); renderSubgridList();
@@ -1622,7 +1835,7 @@ async function place(point) {
   if (mirrorMode.active && objects.length >= LIMIT - 1) throw new Error('镜像放置会超过组件上限');
   const color = paintColorValue();
   const colorIndex = nearestNativePaintIndex(color);
-  const object = await createObject({ id: crypto.randomUUID(), type: selectedType, gridId: 'grid-1', ...(color ? { paintColor: color } : {}), ...(colorIndex !== null ? { colors: [colorIndex] } : {}), position: { x: 0, y: 0, z: 0 }, rotation: { x: 0, y: 0, z: 0 }, scale: { x: 1, y: 1, z: 1 } });
+  const object = await createObject({ id: crypto.randomUUID(), type: selectedType, gridId: activeGridId, ...(selectedType === 'microcontroller' ? { nativeProperties: microcontrollerState() } : {}), ...(color ? { paintColor: color } : {}), ...(colorIndex !== null ? { colors: [colorIndex] } : {}), position: { x: 0, y: 0, z: 0 }, rotation: { x: 0, y: 0, z: 0 }, scale: { x: 1, y: 1, z: 1 } });
   const gridPoint = quantizeWorldVector(point);
   if (!gridPoint) throw new Error('放置位置超出整数格范围');
   const box = new THREE.Box3().setFromObject(object);
@@ -1640,6 +1853,34 @@ async function place(point) {
   status(reflectedPosition && !sameGridPoint(source.position, reflectedPosition)
     ? '已放置组件及其镜像'
     : object.userData.visual === 'mesh' ? '已放置真实静态 Mesh' : '已放置缺失资源标记');
+}
+async function placeImportedSubgrid(point) {
+  const draft = importedSubgridDraft;
+  if (!draft || busy) return;
+  const offset = setImportedSubgridPreviewPoint(point);
+  if (!offset) return;
+  if (objects.length + draft.objects.length > LIMIT) {
+    status('导入子网格会超过组件上限');
+    return;
+  }
+  const placed = translateImportedSubgrid(draft, offset);
+  const nextTopology = {
+    nodes: [...topology.nodes, ...placed.topology.nodes],
+    edges: [...topology.edges, ...placed.topology.edges],
+    plates: [...topology.plates, ...placed.topology.plates],
+    links: [...(topology.links || []), ...placed.topology.links],
+  };
+  const nextGrids = [...subgrids, { id: placed.gridId }];
+  clearImportedSubgridPreview();
+  const completed = await transact(async () => {
+    await restore([...snapshot(), ...placed.objects], nextTopology, transparencyGroups, nextGrids);
+    activeGridId = placed.gridId;
+    commit('已放置导入子网格 {id}', { id: placed.gridId });
+  });
+  if (completed) {
+    selectSubgridForMove(placed.gridId);
+    status('已放置导入载具子网格 {id}；可直接拖动移动手柄调整', { id: placed.gridId });
+  }
 }
 async function remove(object) {
   if (!object) return;
@@ -1699,6 +1940,7 @@ function addMirroredEdge(state, start, end) {
   return createEdgeFromPoints(state, reflectedStart, reflectedEnd, {
     ...(source?.color ? { color: source.color } : {}),
     ...(source?.size ? { size: source.size } : {}),
+    gridId: source?.gridId || activeGridId,
   });
 }
 function addMirroredPlate(state, plate) {
@@ -1719,6 +1961,7 @@ function addMirroredPlate(state, plate) {
     ...(plate.surfaceDirection ? { surfaceDirection: mirrorSurfaceDirection(plate.surfaceDirection, mirrorMode) } : {}),
     ...(paintColorValue(plate.color_front) ? { color_front: plate.color_front } : {}),
     ...(paintColorValue(plate.color_back) ? { color_back: plate.color_back } : {}),
+    gridId: plate.gridId || activeGridId,
   };
   try {
     const result = createPlate(state.plates, [...nodeIds].reverse(), nodes, properties);
@@ -1893,7 +2136,7 @@ function undo() {
   const value = history.peekUndo();
   if (!value) return;
   transact(async () => {
-    await restore(value.objects, value.topology, value.visibilityGroups || []);
+    await restore(value.objects, value.topology, value.visibilityGroups || [], value.grids);
     history.cursor--;
     status('已撤销');
   });
@@ -1902,7 +2145,7 @@ function redo() {
   const value = history.peekRedo();
   if (!value) return;
   transact(async () => {
-    await restore(value.objects, value.topology, value.visibilityGroups || []);
+    await restore(value.objects, value.topology, value.visibilityGroups || [], value.grids);
     history.cursor++;
     status('已重做');
   });
@@ -1911,7 +2154,7 @@ function restoreHistory(index) {
   if (busy || !Number.isInteger(index) || index < 0 || index >= history.entries.length || index === history.cursor) return;
   const value = structuredClone(history.entries[index]);
   transact(async () => {
-    await restore(value.objects, value.topology, value.visibilityGroups || []);
+    await restore(value.objects, value.topology, value.visibilityGroups || [], value.grids);
     history.cursor = index;
     status('已恢复历史记录');
   });
@@ -1919,6 +2162,11 @@ function restoreHistory(index) {
 
 function inspect() {
   const host = $('#inspector-content'); host.replaceChildren();
+  if (selectedIds.size && selectedTopologyIds.size) {
+    const summary = document.createElement('strong'); summary.textContent = t('已选择 {components} 个组件和 {structural} 个结构对象', { components: selectedIds.size, structural: selectedTopologyIds.size }); host.append(summary);
+    const hint = document.createElement('p'); hint.className = 'status'; hint.textContent = t('复制、镜像和删除会作用于选中的组件；结构对象保留高亮以供参考。'); host.append(hint);
+    return;
+  }
   if (selectedTopologyIds.size) {
     const selectedTopology = selectedTopologyObjects();
     const summary = document.createElement('strong'); summary.textContent = t('已选择 {count} 个结构对象', { count: selectedTopology.length }); host.append(summary);
@@ -1930,7 +2178,9 @@ function inspect() {
   if (!selected) { host.textContent = t('选择组件查看属性。按住 Shift 点击可多选。'); return; }
   if (selectedIds.size > 1) {
     const summary = document.createElement('strong'); summary.textContent = t('已选择 {count} 个组件', { count: selectedIds.size }); host.append(summary);
-    const hint = document.createElement('p'); hint.className = 'status'; hint.textContent = t('可批量复制、镜像、拆分或删除。批量变换和框选尚未实现。'); host.append(hint);
+    const hint = document.createElement('p'); hint.className = 'status'; hint.textContent = selectedSubgridId
+      ? t('已选择导入子网格；拖动视口中的移动手柄可整体调整组件、结构和内部连接。')
+      : t('可批量复制、镜像、拆分或删除。批量变换和框选尚未实现。'); host.append(hint);
     const button = document.createElement('button'); button.className = 'full'; button.textContent = t('删除已选组件'); button.id = 'delete-selected';
     button.onclick = () => transact(async () => { await remove(selected); }); host.append(button);
     return;
@@ -1965,6 +2215,7 @@ function inspect() {
     row.append(group); host.append(row);
   }
   renderComponentExtension(host, object, def);
+  renderMicrocontrollerEditor(host, object);
   renderComponentProperties(host, object);
   renderNativeAccessoryProperty(host, object);
   renderDefinitionEditor(host, object, def);
@@ -1980,7 +2231,7 @@ function renderComponentExtension(host, object, definition) {
   const hint = document.createElement('p'); hint.className = 'status';
   hint.textContent = getLocale() === 'zh'
     ? '使用视口中的箭头或下方数值按格拉伸。该尺寸会写入原生 ext，而不是普通缩放。'
-    : 'Use the viewport arrows or values below to extend by cells. This writes native ext, not transform scale.';
+    : 'Use the viewport arrows or values below to extend by blocks. This writes native ext, not transform scale.';
   section.append(hint);
   for (const descriptor of descriptors) {
     const row = document.createElement('div'); row.className = 'property component-property';
@@ -2029,8 +2280,8 @@ async function applyDefinitionOverride(id, source) {
   try { definition = JSON.parse(source); }
   catch (error) { throw new Error(t('原始定义 JSON 无效：{error}', { error: error.message })); }
   const items = snapshot().map(item => item.id === id ? { ...item, definitionOverride: definition } : item);
-  const candidate = validateDocument(project(items, topology, transparencyGroups), catalog.index);
-  await restore(candidate.objects, candidate.topology, candidate.visibilityGroups || []);
+  const candidate = validateDocument(project(items, topology, transparencyGroups, subgrids), catalog.index);
+  await restore(candidate.objects, candidate.topology, candidate.visibilityGroups || [], candidate.grids);
   const restored = objects.find(object => object.userData.id === id);
   select(restored || null);
   commit('已应用原始定义 JSON');
@@ -2065,9 +2316,68 @@ function componentPropertyLabel(key) {
   return labels[key] ? labels[key][getLocale() === 'zh' ? 0 : 1] : key.replaceAll('_', ' ').replace(/\b\w/g, letter => letter.toUpperCase());
 }
 
+function renderMicrocontrollerEditor(host, object) {
+  if (object.userData.type !== 'microcontroller') return;
+  let state;
+  try { state = microcontrollerState(object.userData.nativeProperties); }
+  catch (error) { status('微控制器状态无效：{error}', { error: error.message }); return; }
+  const section = document.createElement('section'); section.className = 'component-properties microcontroller-editor';
+  const heading = document.createElement('h3'); heading.textContent = getLocale() === 'zh' ? '微控制器' : 'Microcontroller'; section.append(heading);
+  const hint = document.createElement('p'); hint.className = 'status'; hint.textContent = getLocale() === 'zh'
+    ? '游戏原生脚本会读取和写入同一数据网络中的组件。本编辑器只保存代码和变量定义，不会在浏览器执行脚本。'
+    : 'The native script reads and writes components on its data network. This editor saves code and variable definitions; it never runs the script in your browser.';
+  section.append(hint);
+  const scriptLabel = document.createElement('label'); scriptLabel.textContent = getLocale() === 'zh' ? '脚本' : 'Script';
+  const script = document.createElement('textarea'); script.className = 'microcontroller-script'; script.spellcheck = false; script.value = state.script; script.maxLength = 65536; script.setAttribute('aria-label', getLocale() === 'zh' ? '微控制器脚本' : 'Microcontroller script');
+  script.addEventListener('change', () => applyMicrocontrollerState(object, { ...state, script: script.value }));
+  scriptLabel.append(script); section.append(scriptLabel);
+  const labels = { global_inputs: getLocale() === 'zh' ? '全局输入' : 'Global inputs', global_outputs: getLocale() === 'zh' ? '全局输出' : 'Global outputs', global_private: getLocale() === 'zh' ? '私有变量' : 'Private variables' };
+  for (const group of ['global_inputs', 'global_outputs', 'global_private']) {
+    const details = document.createElement('details'); details.className = 'microcontroller-variables';
+    const summary = document.createElement('summary'); summary.textContent = `${labels[group]} (${state[group].length})`; details.append(summary);
+    const list = document.createElement('div'); list.className = 'microcontroller-variable-list';
+    state[group].forEach((entry, index) => {
+      const row = document.createElement('div'); row.className = 'microcontroller-variable';
+      const name = document.createElement('input'); name.type = 'text'; name.value = entry.name; name.maxLength = 80; name.setAttribute('aria-label', `${labels[group]} name`);
+      const type = document.createElement('select'); type.setAttribute('aria-label', `${labels[group]} type`);
+      for (const value of ['f64', 'bool']) { const option = document.createElement('option'); option.value = value; option.textContent = value; option.selected = entry.data_value._type === value; type.append(option); }
+      const value = document.createElement('input'); value.setAttribute('aria-label', `${labels[group]} value`);
+      const update = () => {
+        const nextEntry = { name: name.value.trim(), data_value: createMicrocontrollerVariable(type.value).data_value };
+        if (type.value === 'bool') { nextEntry.data_value.data_value = value.checked; }
+        else { const number = Number(value.value); if (Number.isFinite(number)) nextEntry.data_value.data_value = number; }
+        const next = structuredClone(state); next[group][index] = nextEntry; applyMicrocontrollerState(object, next);
+      };
+      const updateValueControl = () => {
+        const bool = type.value === 'bool';
+        value.type = bool ? 'checkbox' : 'number';
+        if (bool) value.checked = entry.data_value.data_value === true;
+        else { value.step = 'any'; value.value = Number.isFinite(entry.data_value.data_value) ? String(entry.data_value.data_value) : '0'; }
+      };
+      updateValueControl(); type.addEventListener('change', () => { updateValueControl(); update(); }); name.addEventListener('change', update); value.addEventListener('change', update);
+      const remove = document.createElement('button'); remove.type = 'button'; remove.textContent = getLocale() === 'zh' ? '删除' : 'Remove'; remove.onclick = () => { const next = structuredClone(state); next[group].splice(index, 1); applyMicrocontrollerState(object, next); };
+      row.append(name, type, value, remove); list.append(row);
+    });
+    const add = document.createElement('button'); add.type = 'button'; add.textContent = getLocale() === 'zh' ? '添加变量' : 'Add variable'; add.onclick = () => { const next = structuredClone(state); const used = new Set(next[group].map(item => item.name)); let index = 1; while (used.has(`value_${index}`)) index++; const entry = createMicrocontrollerVariable(); entry.name = `value_${index}`; next[group].push(entry); applyMicrocontrollerState(object, next); };
+    details.append(list, add); section.append(details);
+  }
+  host.append(section);
+}
+
+function applyMicrocontrollerState(object, state) {
+  if (busy) return;
+  try {
+    object.userData.nativeProperties = updateMicrocontrollerState(object.userData.nativeProperties, state);
+    commit('编辑微控制器'); inspect();
+  } catch (error) {
+    status('微控制器状态无效：{error}', { error: error.message }); inspect();
+  }
+}
+
 function renderComponentProperties(host, object) {
   const properties = object.userData.nativeProperties || {};
-  const descriptors = componentPropertyDescriptors(object.userData.type, properties, object.userData.nativeExtension);
+  const descriptors = componentPropertyDescriptors(object.userData.type, properties, object.userData.nativeExtension)
+    .filter(descriptor => object.userData.type !== 'microcontroller' || !['script', 'global_inputs', 'global_outputs', 'global_private'].includes(descriptor.key));
   if (!descriptors.length) return;
   const section = document.createElement('section'); section.className = 'component-properties';
   const heading = document.createElement('h3'); heading.textContent = getLocale() === 'zh' ? '组件属性' : 'Component properties'; section.append(heading);
@@ -2322,11 +2632,19 @@ function pointerRay(event) {
   raycaster.setFromCamera(pointer, camera);
 }
 function placementPoint() {
-  const targets = [...objects.filter(object => object.visible), ...topologyLayer.children.filter(object => object.visible && object.userData.topology !== 'node')];
+  const targets = constructionHitTargets();
   return resolvePlacementPoint(raycaster, targets, plane, {
     adjacentTargets: objects.filter(object => object.visible),
     adjacentPadding: CELL_SIZE_WORLD / 2,
   });
+}
+function constructionHitTargets() {
+  // Components, edges and panels all participate in the same nearest-hit
+  // placement query. Nodes stay a separate high-precision endpoint target.
+  return [
+    ...objects.filter(object => object.visible),
+    ...topologyLayer.children.filter(object => object.visible && object.userData.topology !== 'node'),
+  ];
 }
 function pick() {
   if (!selectableKinds.component) return null;
@@ -2461,7 +2779,7 @@ function pickSelectionTarget() {
   }
   // Keep the existing placement-anchor affordance only when the ray missed
   // every selectable piece of geometry. A real hit above must always win so
-  // a beam or plate cannot steal selection from a closer component, nor can
+  // an edge or plate cannot steal selection from a closer component, nor can
   // an anchor select a component through any visible topology.
   const component = pick();
   return component ? {
@@ -2482,7 +2800,7 @@ function pickInteractionHover() {
     if (linkPoint) return topologyObject('link', linkPoint.linkId) || linkPointMoveMarker;
     const nodeId = pickTopologyNode();
     if (nodeId) return topologyObject('node', nodeId);
-    // A beam itself is not movable. When its body is hovered, expose the
+    // An edge itself is not movable. When its body is hovered, expose the
     // endpoint nodes instead so the move operation remains discoverable.
     const edge = pickEdgeByScreenTolerance(24);
     if (edge) return edge.object;
@@ -2567,7 +2885,7 @@ function pickPaintTopology() {
     targets.set(key, { kind, id, object, plateSide });
   }
   // Painting has an intentional semantic order, independent of ray distance:
-  // panels cover their supporting beams, and both cover ordinary components.
+  // panels cover their supporting edges, and both cover ordinary components.
   for (const kind of ['plate', 'edge']) {
     if (!selectableKinds[kind]) continue;
     const target = [...targets.values()].find(candidate => candidate.kind === kind);
@@ -2790,8 +3108,16 @@ function saveTransparencyGroup() {
 function edgePoint() {
   const nodeId = pickTopologyNode(true);
   const node = topology.nodes.find(value => value.id === nodeId);
+  // Match component placement: first use the closest renderable vehicle hit,
+  // then the expanded component envelope, and finally the fixed XZ work
+  // plane. resolveEdgePoint applies only the edge-specific endpoint and
+  // optional axis-lock rules after that common placement result.
+  const candidate = node ? null : resolvePlacementPoint(raycaster, constructionHitTargets(), plane, {
+    adjacentTargets: objects.filter(object => object.visible),
+    adjacentPadding: CELL_SIZE_WORLD / 2,
+  });
   const result = resolveEdgePoint(raycaster.ray, edgeDraft?.frame || cameraBuildFrame(camera, controls.target), {
-    axisSnap: !!edgeDraft && (edgeAxisSnap || edgeShiftSnap), node: node?.position,
+    axisSnap: !!edgeDraft && (edgeAxisSnap || edgeShiftSnap), node: node?.position, candidate,
     viewNormal: camera.getWorldDirection(new THREE.Vector3()),
   });
   if (edgeDraft) edgeDraft.axis = result?.axis || null;
@@ -2801,7 +3127,7 @@ function updateEdgePreview(point) {
   if (tool !== 'edge') return;
   if (!edgeDraft) {
     // Before the first click, show the quantized point as a translucent node
-    // ghost so the player can judge exactly where the beam will start.
+    // ghost so the player can judge exactly where the edge will start.
     edgePreview.visible = false;
     edgeRuler.hide();
     edgeAnchor.visible = !!point;
@@ -2829,9 +3155,10 @@ function nodePoint() {
   return projectBuildPoint(raycaster.ray, nodeMoveFrame || cameraBuildFrame(camera, controls.target));
 }
 function commitTopology(next, message, params = {}) {
-  const candidate = validateDocument(project(snapshot(), next), catalog.index);
+  const candidate = validateDocument(project(snapshot(), next, transparencyGroups, subgrids), catalog.index);
   const visual = buildTopologyVisual(candidate.topology, componentEntries(candidate.objects));
   topology = candidate.topology;
+  subgrids = candidate.grids || subgrids;
   replaceTopologyVisual(visual);
   history.commit(candidate, { key: message, params });
   refresh();
@@ -2866,7 +3193,7 @@ function finishPlate(type = 'plate') {
   try {
     const command = glass ? createGlassPlateFromEdges : createPlateFromEdges;
     const color = paintColorValue();
-    const result = command(topology.plates, plateEdgeIds, topology.edges, topology.nodes, { normalOffset: CELL_SIZE_WORLD / 2, ...(color ? { color_front: color, color_back: color } : {}) });
+    const result = command(topology.plates, plateEdgeIds, topology.edges, topology.nodes, { normalOffset: CELL_SIZE_WORLD / 2, gridId: activeGridId, ...(color ? { color_front: color, color_back: color } : {}) });
     const positions = new Map(topology.nodes.map(node => [node.id, new THREE.Vector3(node.position.x, node.position.y, node.position.z)]));
     result.plate.normalOffset = cameraFacingPlateOffset(result.plate.nodeIds, positions, camera.position, CELL_SIZE_WORLD / 2);
     const surfaceDirection = cameraFacingPlateDirection(result.plate.nodeIds, positions, camera.position);
@@ -2949,8 +3276,11 @@ function handleEdgeClick(event) {
     return;
   }
   const color = paintColorValue();
-  const created = createEdgeFromPoints(topology, edgeDraft.start, point, { ...(color ? { color } : {}), size: edgeSize });
-  commitTopology(addMirroredEdge(created, edgeDraft.start, point), mirrorMode.active ? '已创建实体梁及其镜像' : '已创建 1 格实体梁');
+  const existingNodeIds = new Set(topology.nodes.map(node => node.id));
+  const created = createEdgeFromPoints(topology, edgeDraft.start, point, { ...(color ? { color } : {}), size: edgeSize, gridId: activeGridId });
+  const withGridNodes = { ...created, nodes: created.nodes.map(node => existingNodeIds.has(node.id) ? node : { ...node, gridId: activeGridId }) };
+  const mirrored = addMirroredEdge(withGridNodes, edgeDraft.start, point);
+  commitTopology({ ...mirrored, nodes: mirrored.nodes.map(node => node.gridId ? node : { ...node, gridId: activeGridId }) }, mirrorMode.active ? '已创建实体梁及其镜像' : '已创建 1 格实体梁');
   cancelEdge();
 }
 function handleConnectionClick() {
@@ -3008,8 +3338,8 @@ function handleTopologyClick(point) {
       return true;
     }
     const created = createNode(topology.nodes, point);
-    let nodes = created.nodes;
-    if (created.created && mirrorMode.active) nodes = createNode(nodes, mirroredTopologyPoint(point)).nodes;
+    let nodes = created.nodes.map(node => created.created && node.id === created.node.id ? { ...node, gridId: activeGridId } : node);
+    if (created.created && mirrorMode.active) nodes = createNode(nodes, mirroredTopologyPoint(point)).nodes.map(node => node.gridId ? node : { ...node, gridId: activeGridId });
     commitTopology({ ...topology, nodes }, created.created ? mirrorMode.active ? '已创建节点及其镜像 {id}' : '已创建节点 {id}' : '已选择已有节点 {id}', { id: created.node.id });
     if (!created.created) selectTopologyNode(created.node.id);
     return true;
@@ -3031,6 +3361,14 @@ renderer.domElement.addEventListener('contextmenu', e => e.preventDefault());
 renderer.domElement.addEventListener('pointerdown', event => {
   if (event.button !== 0 || busy) return;
   pointerRay(event);
+  if (tool === 'select' && selectionAction === 'box') {
+    const viewportRect = viewport.getBoundingClientRect();
+    selectionBoxDraft = { startX: event.clientX, startY: event.clientY, viewportRect };
+    selectionBox.style.left = `${event.clientX - viewportRect.left}px`; selectionBox.style.top = `${event.clientY - viewportRect.top}px`;
+    selectionBox.style.width = '0px'; selectionBox.style.height = '0px'; selectionBox.hidden = false;
+    renderer.domElement.setPointerCapture(event.pointerId); down = null;
+    return;
+  }
   if (mirrorMode.active && mirrorGuide.visible && raycaster.intersectObject(mirrorGuideHandle, false).length) {
     mirrorGuideDrag = true;
     controls.enabled = false;
@@ -3044,6 +3382,13 @@ renderer.domElement.addEventListener('pointerdown', event => {
 });
 renderer.domElement.addEventListener('pointermove', event => {
   if (busy) return;
+  if (selectionBoxDraft) {
+    const left = Math.min(selectionBoxDraft.startX, event.clientX) - selectionBoxDraft.viewportRect.left;
+    const top = Math.min(selectionBoxDraft.startY, event.clientY) - selectionBoxDraft.viewportRect.top;
+    selectionBox.style.left = `${left}px`; selectionBox.style.top = `${top}px`;
+    selectionBox.style.width = `${Math.abs(event.clientX - selectionBoxDraft.startX)}px`; selectionBox.style.height = `${Math.abs(event.clientY - selectionBoxDraft.startY)}px`;
+    return;
+  }
   if (mirrorGuideDrag) {
     pointerRay(event);
     moveMirrorGuideFromRay();
@@ -3064,7 +3409,7 @@ renderer.domElement.addEventListener('pointermove', event => {
         : pickInteractionHover();
     if (nextHover !== hoveredObject) { hoveredObject = nextHover; updateInteractionHighlights(); }
   }
-  const rawPoint = tool === 'edge' ? edgePoint() : tool === 'connect' ? connectionPoint() : tool === 'node' ? nodePoint() : tool === 'place' ? placementPoint() : raycaster.ray.intersectPlane(plane, new THREE.Vector3());
+  const rawPoint = tool === 'edge' ? edgePoint() : tool === 'connect' ? connectionPoint() : tool === 'node' ? nodePoint() : ['place', 'subgrid-place'].includes(tool) ? placementPoint() : raycaster.ray.intersectPlane(plane, new THREE.Vector3());
   const hoveredPort = tool === 'connect' ? pickConnectionPort() : null;
   const gridPoint = rawPoint && hoveredPort?.position ? rawPoint : rawPoint && quantizeWorldVector(rawPoint);
   const point = gridPoint ? new THREE.Vector3(gridPoint.x, gridPoint.y, gridPoint.z) : null;
@@ -3073,9 +3418,19 @@ renderer.domElement.addEventListener('pointermove', event => {
   setText($('#cursor-pos'), point ? '{coordinates}' : '无法定位：射线与建造平面平行', { coordinates: point ? axes.map(axis => t('{axis} {cells} 格', { axis: axis.toUpperCase(), cells: worldToCell(point[axis]) })).join(' · ') : '' });
   updateEdgePreview(point);
   void updatePlacementPreview(point);
+  if (tool === 'subgrid-place') setImportedSubgridPreviewPoint(point);
 });
-renderer.domElement.addEventListener('pointerleave', () => { pointerInCanvas = false; hoveredObject = null; hideConnectionPortTooltip(); updateInteractionHighlights(); edgePreview.visible = false; edgeAnchor.visible = false; edgeRuler.hide(); if (placementPreview) placementPreview.visible = false; });
+renderer.domElement.addEventListener('pointerleave', () => { pointerInCanvas = false; hoveredObject = null; hideConnectionPortTooltip(); updateInteractionHighlights(); edgePreview.visible = false; edgeAnchor.visible = false; edgeRuler.hide(); if (placementPreview) placementPreview.visible = false; if (importedSubgridDraft?.preview) importedSubgridDraft.preview.visible = false; });
 renderer.domElement.addEventListener('pointerup', event => {
+  if (selectionBoxDraft) {
+    const start = selectionBoxDraft; selectionBoxDraft = null;
+    if (renderer.domElement.hasPointerCapture(event.pointerId)) renderer.domElement.releasePointerCapture(event.pointerId);
+    const rect = { minX: Math.min(start.startX, event.clientX), maxX: Math.max(start.startX, event.clientX), minY: Math.min(start.startY, event.clientY), maxY: Math.max(start.startY, event.clientY) };
+    selectionBox.hidden = true;
+    if (rect.maxX - rect.minX > 3 || rect.maxY - rect.minY > 3) finishBoxSelection(rect);
+    setSelectionAction(null);
+    return;
+  }
   if (mirrorGuideDrag) {
     mirrorGuideDrag = false;
     controls.enabled = true;
@@ -3123,6 +3478,10 @@ renderer.domElement.addEventListener('pointerup', event => {
     const point = placementPoint();
     if (!point || point.length() > 1000) return;
     transact(async () => { await place(point); if (!event.shiftKey) tool = 'select'; });
+  } else if (tool === 'subgrid-place') {
+    const point = placementPoint();
+    if (!point || point.length() > 1000) return;
+    void placeImportedSubgrid(point);
   } else if (tool === 'erase') {
     const hit = pickTopology();
     if (hit) deleteTopology(hit.kind, hit.id); else transact(async () => { await remove(pick()); });
@@ -3136,12 +3495,17 @@ renderer.domElement.addEventListener('pointerup', event => {
     if (targetNodeId) selectTopologyNode(targetNodeId);
   } else {
     const target = pickSelectionTarget();
+    if (selectionAction === 'closure') {
+      if (target?.kind === 'component') { selectClosure(target.object); setSelectionAction(null); }
+      else status('闭包选择需要点击组件。');
+      return;
+    }
     if (!target) select(null);
     else if (target.kind === 'component') select(target.object, { toggle: event.shiftKey });
     else selectTopology(target, { toggle: event.shiftKey });
   }
 });
-renderer.domElement.addEventListener('pointercancel', () => { mirrorGuideDrag = false; controls.enabled = true; down = null; cancelEdge(); });
+renderer.domElement.addEventListener('pointercancel', () => { mirrorGuideDrag = false; controls.enabled = true; down = null; selectionBoxDraft = null; selectionBox.hidden = true; cancelEdge(); });
 
 function fit({ reference = referencePreview } = {}) {
   const box = new THREE.Box3();
@@ -3190,6 +3554,7 @@ function setReferencePreview(value) {
   orientation.root.hidden = referencePreview;
   $('.view-controls').hidden = referencePreview;
   $('.top-tool-section').hidden = referencePreview;
+  selectionToolbar.hidden = referencePreview || tool !== 'select';
   paintToolbar.hidden = referencePreview || tool !== 'paint';
   connectionToolbar.hidden = referencePreview || tool !== 'connect';
   transparencyToolbar.hidden = referencePreview || tool !== 'hide';
@@ -3462,7 +3827,7 @@ function updateCatalogCardSize(value = $('#catalog-card-size').value) {
 }
 $('#catalog-card-size').addEventListener('input', () => { updateCatalogCardSize(); scheduleSettings(); });
 $('#undo-btn').onclick = undo; $('#redo-btn').onclick = redo;
-$('#new-btn').onclick = () => { if (!busy && (!objects.length || confirm(t('清空当前工程？此操作可以撤销。')))) transact(async () => { await restore([], { nodes: [], edges: [], plates: [], links: [] }, []); commit(); }); };
+$('#new-btn').onclick = () => { if (!busy && (!objects.length || confirm(t('清空当前工程？此操作可以撤销。')))) transact(async () => { activeGridId = 'grid-1'; await restore([], { nodes: [], edges: [], plates: [], links: [] }, [], [{ id: 'grid-1' }]); commit(); }); };
 
 function download(content, name, type) {
   const url = URL.createObjectURL(new Blob([content], { type }));
@@ -3471,7 +3836,7 @@ function download(content, name, type) {
 }
 function currentProject() {
   transparencyGroups = pruneTransparencyGroups();
-  return validateDocument(project(snapshot(), topology, transparencyGroups), catalog.index);
+  return validateDocument(project(snapshot(), topology, transparencyGroups, subgrids), catalog.index);
 }
 // Project snapshots remain the local recovery representation. This hidden
 // hook is intentionally not a user action: the visible save control operates
@@ -3483,7 +3848,7 @@ $('#file-input').onchange = e => {
   transact(async () => {
     if (file.size > 10 * 1024 * 1024) throw new Error('工程文件超过 10 MiB');
     const document = migrateDocument(JSON.parse(await file.text()), catalog.index);
-    await restore(document.objects, document.topology || { nodes: [], edges: [], plates: [], links: [] }, document.visibilityGroups || []); commit(); fit(); status('工程已加载');
+    await restore(document.objects, document.topology || { nodes: [], edges: [], plates: [], links: [] }, document.visibilityGroups || [], document.grids); commit(); fit(); status('工程已加载');
   });
 };
 $('#mesh-files-btn').onclick = () => $('#mesh-input').click();
@@ -3513,8 +3878,13 @@ function openNativeVehiclePicker() {
   activateSidebarTab('right', 'resources');
   $('#native-input').click();
 }
+function openNativeSubgridPicker() {
+  if (busy) return;
+  $('#native-subgrid-input').click();
+}
 $('#library-btn').onclick = openNativeVehiclePicker;
 $('#native-btn').onclick = openNativeVehiclePicker;
+$('#subgrid-import-btn').onclick = openNativeSubgridPicker;
 $('#native-input').onchange = async e => {
   const files = [...e.target.files]; e.target.value = ''; if (!files.length) return;
   nativeModel = null; importedNativeRootVehicleIds = []; nativeExportButton.disabled = false; nativeReferencePreviewButton.disabled = true;
@@ -3539,6 +3909,54 @@ $('#native-input').onchange = async e => {
   } catch (error) { setText($('#native-summary'), '无法导入原生文件：{error}', () => ({ error: t(error instanceof Error ? error.message : String(error)) })); }
 };
 
+function importedSubgridExistingIds() {
+  return {
+    grids: subgrids.map(grid => grid.id),
+    components: objects.map(object => object.userData.id),
+    nodes: topology.nodes.map(node => node.id),
+    edges: topology.edges.map(edge => edge.id),
+    plates: topology.plates.map(plate => plate.id),
+    links: (topology.links || []).map(link => link.id),
+  };
+}
+$('#native-subgrid-input').onchange = async e => {
+  const files = [...e.target.files]; e.target.value = ''; if (!files.length || busy) return;
+  clearImportedSubgridPreview();
+  try {
+    const pair = readNativePair(files);
+    status('正在读取子网格载具 {dataName} / {metaName}…', { dataName: pair.data.file.name, metaName: pair.meta.file.name });
+    const [dataText, metaText] = await Promise.all([pair.data.file.text(), pair.meta.file.text()]);
+    const data = JSON.parse(dataText); const meta = JSON.parse(metaText);
+    const importedModel = parseNativePair(data, meta);
+    const roundTrip = verifyNativePairRoundTrip(data, meta);
+    if (roundTrip.data.length || roundTrip.meta.length) throw new Error('原生配套文件的无编辑 round-trip 校验失败');
+    const vehicles = data.vehicles?.vehicles;
+    if (!Array.isArray(vehicles) || !vehicles.length) throw new Error('没有 vehicles.vehicles 数组');
+    const summaries = vehicles.map(vehicle => ({ id: vehicle.id, components: (vehicle.grids || []).reduce((count, grid) => count + (grid.components?.length || 0), 0) }));
+    const primary = summaries.reduce((best, summary) => summary.components > best.components ? summary : best, summaries[0]);
+    let staged = null;
+    const prepared = await transact(async () => {
+      const document = validateDocument(toEditorDocument(importedModel, { vehicleIds: [String(primary.id)] }), catalog.index);
+      if (document.objects.length > LIMIT) throw new Error('导入子网格超过组件上限');
+      staged = stageImportedSubgrid(document, importedSubgridExistingIds());
+      const preview = await createImportedSubgridPreview(staged);
+      importedSubgridDraft = { ...staged, ...preview, sourceName: pair.data.file.name };
+      scene.add(preview.preview);
+      // `transact()` reapplies the current tool while releasing its lock.
+      // Keep this transient placement mode so that cleanup does not dispose
+      // the preview between asynchronous Mesh loading and the next click.
+      tool = 'subgrid-place';
+    });
+    if (!prepared || !importedSubgridDraft) return;
+    setTool('subgrid-place');
+    if (cursorPoint && pointerInCanvas) setImportedSubgridPreviewPoint(cursorPoint);
+    status('已载入 {name} 作为子网格虚像；在视口点击放置，Esc 取消', { name: pair.data.file.name });
+  } catch (error) {
+    clearImportedSubgridPreview();
+    status('无法载入子网格载具：{error}', { error: error instanceof Error ? error.message : String(error) });
+  }
+};
+
 async function importNativeVehicle(vehicleIds) {
   status('正在导入配套原生载具');
   if (!nativeModel || busy) { status(!nativeModel ? '原生模型尚未加载' : '当前操作仍在进行'); return false; }
@@ -3547,7 +3965,7 @@ async function importNativeVehicle(vehicleIds) {
     try {
       const editorDocument = toEditorDocument(nativeModel, { vehicleIds });
       const document = validateDocument(editorDocument, catalog.index);
-      await restore(document.objects, document.topology || toEditorTopology(nativeModel, { vehicleIds }), []);
+      await restore(document.objects, document.topology || toEditorTopology(nativeModel, { vehicleIds }), [], document.grids);
       centerImportedVehicleGeometry();
       importedNativeRootVehicleIds = [...vehicleIds].map(String);
       renderSubgridList();
@@ -3784,10 +4202,10 @@ async function initialize() {
   localSession = await startLocalSession({
     store: localStore,
     validate: value => migrateDocument(value, catalog.index),
-    restore: async value => { await restore(value.objects, value.topology || { nodes: [], edges: [], plates: [], links: [] }, value.visibilityGroups || []); commit(); },
+    restore: async value => { await restore(value.objects, value.topology || { nodes: [], edges: [], plates: [], links: [] }, value.visibilityGroups || [], value.grids); commit(); },
     snapshot: () => {
       const committed = history.entries[history.cursor];
-      return project(committed.objects, committed.topology, committed.visibilityGroups);
+      return project(committed.objects, committed.topology, committed.visibilityGroups, committed.grids);
     },
     canSave: () => !busy && !transform.dragging,
     notify: showBackupStatus,

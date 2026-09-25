@@ -22,11 +22,14 @@ import { DEPTH_SUBLAYERS, LOG_DEPTH_LAYER_STEP, LOG_DEPTH_SUBLAYER_STEP, RENDER_
 import { t, setLocale, addMessages } from '../src/i18n.js';
 import { connectionDescriptorLabel, connectionNetworkLabel, connectionPortRoleLabel } from '../src/editor/connection-port-labels.js';
 import { logicNodePort, logicNodePortsForNetwork, logicNodeCellPosition } from '../src/editor/connection-ports.js';
-import { componentPropertyDescriptors, updateNativeProperty } from '../src/editor/component-properties.js';
+import { componentPropertyDescriptors, updateNativeProperty, validateNativeProperties } from '../src/editor/component-properties.js';
 import { nativePaintColor, nearestNativePaintIndex } from '../src/editor/native-paint.js';
 import { mirrorPoint, mirrorSurfaceDirection, sameGridPoint } from '../src/editor/mirror-mode.js';
 import { accessoryOptionsForComponent, createNativeAccessoryItem, nativeAccessoryDefinition } from '../src/editor/native-accessories.js';
 import { extensionAxes, extensionHandlePosition, extensionVector, stretchMeshPositions, updateExtension } from '../src/editor/component-extension.js';
+import { gridSelectionClosure } from '../src/editor/selection-closure.js';
+import { createMicrocontrollerVariable, microcontrollerState, updateMicrocontrollerState } from '../src/editor/microcontroller.js';
+import { stageImportedSubgrid, translateImportedSubgrid, translateSubgridTopology } from '../src/editor/imported-subgrid.js';
 
 test('mirror mode reflects integer-grid points on every plane without moving points on the plane', () => {
   assert.deepEqual(mirrorPoint({ x: cell(3), y: cell(-2), z: cell(4) }, { axis: 'x', offset: cell(1) }), { x: cell(-1), y: cell(-2), z: cell(4) });
@@ -48,6 +51,68 @@ test('native linear component extensions use definition modes, intervals and str
   const engine = { mode_z: 'tile', interval: [0, 0, 2] };
   assert.deepEqual(updateExtension(engine, undefined, 'z', 5), [0, 0, 6]);
   assert.ok(Math.abs(stretchMeshPositions(engine, [0, 0, 6], new Float32Array([0, 0, .2]), CELL_SIZE_WORLD)[2] - .2) < 1e-6);
+});
+
+test('microcontroller state preserves the observed script and typed global variable schema', () => {
+  const state = microcontrollerState({
+    script: 'on_tick\n{\n  in Light.is_illuminated = out Switch.value > 0.0\n}',
+    global_inputs: [{ name: 'enabled', data_value: { _type: 'bool', type: 'type_bool', data_value: true } }],
+    global_outputs: [{ name: 'rps', data_value: { _type: 'f64', data_value: 12.5 } }],
+    global_private: [],
+  });
+  assert.equal(state.global_inputs[0].data_value.type, 'type_bool');
+  assert.deepEqual(createMicrocontrollerVariable('f64'), { name: 'value', data_value: { _type: 'f64', data_value: 0 } });
+  const properties = updateMicrocontrollerState({ user_defined_alias: 'MC' }, state);
+  assert.deepEqual(properties.global_outputs, state.global_outputs);
+  assert.deepEqual(validateNativeProperties(properties), properties);
+  const exported = toNativePairFromEditor({
+    objects: [{ id: 'mc', type: 'microcontroller', nativeProperties: properties, position: { x: 0, y: 0, z: 0 }, rotation: { x: 0, y: 0, z: 0 }, scale: { x: 1, y: 1, z: 1 } }],
+    topology: { nodes: [], edges: [], plates: [], links: [] },
+  });
+  assert.deepEqual(exported.data.vehicles.vehicles[0].grids[0].components[0].global_inputs, state.global_inputs);
+  assert.throws(() => microcontrollerState({ script: '', global_inputs: [{ name: 'bad name', data_value: { _type: 'f64' } }], global_outputs: [], global_private: [] }), /variable name/);
+  assert.throws(() => microcontrollerState({ script: 42 }), /script/);
+});
+
+test('project grids retain empty authored grids and infer structural grid membership', () => {
+  const definitions = new Map([['engine', {}]]);
+  const object = { id: 'one', type: 'engine', gridId: 'grid-a', position: { x: 0, y: 0, z: 0 }, rotation: { x: 0, y: 0, z: 0 }, scale: { x: 1, y: 1, z: 1 } };
+  const document = validateDocument(project([object], { nodes: [], edges: [], plates: [] }, undefined, [{ id: 'grid-empty' }]), definitions);
+  assert.deepEqual(document.grids, [{ id: 'grid-empty' }, { id: 'grid-a' }]);
+  assert.throws(() => validateDocument(project([], undefined, undefined, [{ id: 'grid-a' }, { id: 'grid-a' }]), definitions), /Duplicate grid ID/);
+});
+
+test('grid closure includes touching and linked same-grid structure only', () => {
+  const bounds = (x, gridId = 'grid-a') => ({ id: `component-${x}-${gridId}`, gridId, bounds: { min: { x, y: 0, z: 0 }, max: { x: x + 1, y: 1, z: 1 } } });
+  const first = bounds(0); const second = bounds(1); const linked = bounds(20); const otherGrid = bounds(1, 'grid-b');
+  const result = gridSelectionClosure({
+    components: [first, second, linked, otherGrid], startComponentId: first.id, padding: 0,
+    topology: { nodes: [{ id: 'node-a', gridId: 'grid-a', position: { x: 0, y: 0, z: 0 } }], edges: [{ id: 'edge-a', gridId: 'grid-a', a: 'node-a', b: 'node-a' }], plates: [], links: [{ from: { componentId: second.id }, to: { componentId: linked.id } }] },
+  });
+  assert.deepEqual(new Set(result.components), new Set([first.id, second.id, linked.id]));
+  assert.equal(result.components.includes(otherGrid.id), false);
+  assert.deepEqual(result.topology, [{ kind: 'node', id: 'node-a' }, { kind: 'edge', id: 'edge-a' }]);
+});
+
+test('an imported vehicle stages as one collision-free subgrid and keeps its internal offsets', () => {
+  const source = {
+    objects: [{ id: 'component', type: 'engine', gridId: 'source', position: { x: 1, y: 2, z: 3 }, rotation: { x: 0, y: 0, z: 0 }, scale: { x: 1, y: 1, z: 1 } }],
+    topology: {
+      nodes: [{ id: 'node-a', gridId: 'source', position: { x: 0, y: 0, z: 0 } }, { id: 'node-b', gridId: 'source', position: { x: 1, y: 0, z: 0 } }],
+      edges: [{ id: 'edge', a: 'node-a', b: 'node-b', gridId: 'source' }], plates: [],
+      links: [{ id: 'data', kind: 'data', from: { componentId: 'component' }, to: { componentId: 'component-2' }, points: [] }],
+    },
+  };
+  source.objects.push({ ...source.objects[0], id: 'component-2' });
+  const staged = stageImportedSubgrid(source, { grids: ['imported-vehicle-1'], components: ['imported-vehicle-2-component-1'] });
+  assert.equal(staged.gridId, 'imported-vehicle-2');
+  assert.equal(new Set(staged.objects.map(object => object.gridId)).size, 1);
+  assert.equal(staged.topology.links[0].from.componentId, staged.objects[0].id);
+  const placed = translateImportedSubgrid(staged, { x: 5, y: -2, z: 4 });
+  assert.deepEqual(placed.objects[0].position, { x: 6, y: 0, z: 7 });
+  const moved = translateSubgridTopology({ ...placed.topology, nodes: [...placed.topology.nodes, { id: 'outside', gridId: 'grid-1', position: { x: 0, y: 0, z: 0 } }] }, placed.objects.map(object => object.id), staged.gridId, { x: 1, y: 0, z: 0 });
+  assert.equal(moved.nodes.find(node => node.id === 'outside').position.x, 0);
+  assert.equal(moved.nodes[0].position.x, 6);
 });
 
 test('reference vehicle input files match the registered rendering baseline', () => {
@@ -1128,6 +1193,21 @@ test('edge axis snapping preserves aligned nodes and rejects invalid grid coordi
   assert.deepEqual(resolveEdgePoint(ray, frame, { node: { x: .1, y: 0, z: 0 }, axisSnap: true }).point.toArray(), resolveEdgePoint(ray, frame, { axisSnap: true }).point.toArray());
   const far = resolveEdgePoint(new THREE.Ray(new THREE.Vector3(20000, 0, 10), new THREE.Vector3(0, 0, -1)), frame, { axisSnap: true });
   assert.ok(far); assertGridVector(far.point);
+});
+test('edge placement follows the shared nearest-hit and XZ work-plane rules', () => {
+  const frame = {
+    origin: new THREE.Vector3(),
+    plane: new THREE.Plane(new THREE.Vector3(0, 0, 1), 0),
+  };
+  const ray = new THREE.Ray(new THREE.Vector3(.17, 1, .17), new THREE.Vector3(0, -1, 0));
+  const hitCandidate = new THREE.Vector3(cell(2), cell(6), cell(2));
+  assert.deepEqual(resolveEdgePoint(ray, frame, { candidate: hitCandidate }).point.toArray(), hitCandidate.toArray());
+  // The item-placement fallback is the y=0 XZ plane, so an edge receives the
+  // same candidate instead of an arbitrary camera-facing construction plane.
+  const workPlaneCandidate = new THREE.Vector3(cell(2), 0, cell(2));
+  assert.deepEqual(resolveEdgePoint(ray, frame, { candidate: workPlaneCandidate }).point.toArray(), workPlaneCandidate.toArray());
+  const locked = resolveEdgePoint(ray, frame, { candidate: new THREE.Vector3(cell(5), cell(2), cell(1)), axisSnap: true });
+  assert.equal(locked.axis, 'x'); assert.deepEqual(locked.point.toArray(), [cell(5), 0, 0]);
 });
 test('XYZ edge rulers measure integer grid components without mutating endpoints', () => {
   const start = new THREE.Vector3(cell(10), cell(20), cell(30)); const end = new THREE.Vector3(cell(-10), cell(20), cell(60));

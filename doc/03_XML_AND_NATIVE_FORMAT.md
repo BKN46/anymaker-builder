@@ -8,6 +8,7 @@
 {
   "format": "anymaker-web-project",
   "version": 1,
+  "grids": [{"id": "grid-1"}],
   "objects": [
     {
       "id": "instance-uuid",
@@ -20,7 +21,11 @@
 }
 ```
 
+可选的 `grids` 是编辑器子网格目录。每项仅包含唯一的字母、数字、`_` 或 `-` 组成的 `id`；它允许空的手动子网格在保存、撤销和本地恢复后继续存在。组件和结构节点、梁、面板可用同一 `gridId` 归属到该目录；缺失归属的旧工程按 `grid-1` 处理。此目录是编辑器状态，当前不代表已验证的原生载具子网格导出语义。
+
 组件可选的 `nativeProperties` 保存 Properties Tool 的可序列化原生字段。它只接受有限数值、布尔值、文本及有大小/层级限制的 JSON 状态；组件/载具连接引用不会作为该字段写入。导入时会保留可安全验证的原生属性，Inspector 可编辑已有属性及已通过游戏说明和 GCL 符号确认的默认项（例如换挡杆档位数、变速箱各档齿比、机械偏移/缩放）。保存 `.data/.meta` 时这些字段回写到对应组件记录。复杂运行状态只读展示；该映射尚未通过真实游戏加载验证。
+
+`microcontroller` 使用已在 `test-vehicle/vehicle.data` 中观察到的 `script`、`global_inputs`、`global_outputs` 与 `global_private` 字段。每个变量为 `{ name, data_value }`，其中 `data_value` 目前按样本支持 `f64` 和 `bool`（布尔值包含原生 `type: "type_bool"` 标记）。Inspector 提供这些字段的专用编辑器；浏览器从不解析或执行用户脚本，也不模拟数据网络或游戏运行时。字段回写只是原生结构研究的一部分，尚未获得游戏加载验收。
 
 导入时检查格式版本、组件 ID 唯一性、定义存在性、有限数值、变换范围和缩放正值。工程不保存本地绝对路径，不保存用户选择的文件对象。
 

@@ -230,7 +230,9 @@ export function splitEdge(nodes, edges, edgeId, point, plates = []) {
     if (index < 0) return plate;
     return { ...plate, nodeIds: [...nodeIds.slice(0, index + 1), created.node.id, ...nodeIds.slice(index + 1)] };
   });
-  return { nodes: created.nodes, edges: second, plates: nextPlates, node: created.node, replaced: edge };
+  const nextNodes = created.nodes.map(node => node.id === created.node.id && edge.gridId !== undefined ? { ...node, gridId: edge.gridId } : node);
+  const node = nextNodes.find(value => value.id === created.node.id);
+  return { nodes: nextNodes, edges: second, plates: nextPlates, node, replaced: edge };
 }
 
 export function validatePlate(nodeIds, nodes, normalOffset = 0) {

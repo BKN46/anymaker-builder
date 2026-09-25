@@ -160,6 +160,29 @@ test('native JSON maps through the domain model and imports components', async (
   await expect(page.locator('#native-summary')).toContainText('请同时选择一份 .data 和一份 .meta 文件');
 });
 
+test('native vehicle can be staged as a ghost subgrid and placed into the current project', async ({ page }) => {
+  await page.goto('./');
+  await expect(page.locator('#viewport')).toHaveAttribute('data-ready', 'true');
+  await page.locator('#language-select').selectOption('en');
+  const native = {
+    definitions: { components: ['engine'] },
+    vehicles: { vehicles: [{ id: 12, transform: { m: [1, 0, 0, 0, 1, 0, 0, 0, 1], t: [0, 0, 0] }, nodes: [], edges: [], plates: [], grids: [{ components: [{ def: 0, id: 3, pos: [0, 0, 0] }, { def: 0, id: 4, pos: [2, 0, 0] }] }], electric_links: [], mechanical_links: [], liquid_links: [], gas_links: [], belt_links: [], data_links: [] }] },
+  };
+  const meta = { bounds: { min: [0, 0, 0], max: [1, 1, 1] } };
+  await page.locator('#subgrid-import-btn').click();
+  await page.locator('#native-subgrid-input').setInputFiles([
+    { name: 'addon.data', mimeType: 'application/json', buffer: Buffer.from(JSON.stringify(native)) },
+    { name: 'addon.meta', mimeType: 'application/json', buffer: Buffer.from(JSON.stringify(meta)) },
+  ]);
+  await expect(page.locator('#save-status')).toContainText('Loaded addon.data as a subgrid ghost', { timeout: 30000 });
+  await page.locator('canvas').click({ position: { x: 620, y: 440 } });
+  await expect(page.locator('#object-count')).toHaveText('2 components');
+  await expect(page.locator('#tools [data-tool="translate"]')).toHaveClass(/active/);
+  const saved = await saveProject(page);
+  expect(new Set(saved.objects.map(object => object.gridId))).toEqual(new Set(['imported-vehicle-1']));
+  expect(saved.grids).toContainEqual({ id: 'imported-vehicle-1' });
+});
+
 test('extendable components expose native linear dimensions instead of transform scale', async ({ page }) => {
   await page.goto('./');
   await expect(page.locator('#viewport')).toHaveAttribute('data-ready', 'true');
@@ -180,6 +203,36 @@ test('extendable components expose native linear dimensions instead of transform
     return JSON.parse(localStorage.getItem('anymaker:' + location.pathname + ':autosave:v1')).document;
   });
   expect(document.objects[0].nativeExtension).toEqual([0, 0, 3]);
+});
+
+test('microcontroller saves script and typed global variables without executing code', async ({ page }) => {
+  await page.goto('./');
+  await expect(page.locator('#viewport')).toHaveAttribute('data-ready', 'true');
+  await page.locator('#language-select').selectOption('en');
+  await page.locator('#component-search').fill('microcontroller');
+  await page.locator('[data-id="microcontroller"]').click();
+  await page.locator('canvas').click({ position: { x: 500, y: 420 } });
+  await openRightSidebar(page); await page.locator('#right-tab-inspector').click();
+  const inspector = page.locator('#inspector-content');
+  const script = inspector.getByRole('textbox', { name: 'Microcontroller script' });
+  await expect(script).toBeVisible();
+  await script.fill('on_tick\n{\n  out Display.value = 1.0\n}');
+  await script.press('Tab');
+  const privateVariables = inspector.locator('details.microcontroller-variables').nth(2);
+  await privateVariables.locator('summary').click();
+  await privateVariables.getByRole('button', { name: 'Add variable' }).click();
+  await privateVariables.locator('summary').click();
+  const name = privateVariables.getByRole('textbox', { name: 'Private variables name' });
+  await name.fill('fuel_ratio'); await name.press('Tab');
+  const saved = await page.evaluate(() => {
+    window.dispatchEvent(new Event('pagehide'));
+    return JSON.parse(localStorage.getItem('anymaker:' + location.pathname + ':autosave:v1')).document;
+  });
+  expect(saved.objects[0].nativeProperties).toEqual({
+    script: 'on_tick\n{\n  out Display.value = 1.0\n}',
+    global_inputs: [], global_outputs: [],
+    global_private: [{ name: 'fuel_ratio', data_value: { _type: 'f64', data_value: 0 } }],
+  });
 });
 
 test('history drawer restores a committed snapshot and viewport reports vehicle size', async ({ page }) => {
@@ -480,7 +533,7 @@ test('catalog uses compact square cards and category icons with accessible label
   await expect(page.locator('.catalog-empty')).toContainText('没有匹配组件');
 });
 
-test('camera-plane edge creation previews, cancels and commits both endpoints atomically', async ({ page }) => {
+test('ray-placed edge creation previews, cancels and commits both endpoints atomically', async ({ page }) => {
   const errors = []; page.on('pageerror', error => errors.push(error.message));
   await page.goto('./');
   await expect(page.locator('#viewport')).toHaveAttribute('data-ready', 'true');
@@ -505,7 +558,9 @@ test('camera-plane edge creation previews, cancels and commits both endpoints at
   await expect(page.locator('#topology-count')).toHaveText('2 节点 · 1 梁 · 0 面板');
   await expect(page.locator('#object-count')).toHaveText('0 个组件');
   const built = await saveProject(page);
-  expect(built.topology.nodes.some(node => Math.abs(node.position.y) > .01)).toBe(true);
+  // With no geometry under the pointer, beams now share component placement's
+  // fixed XZ work-plane fallback rather than using an arbitrary camera plane.
+  expect(built.topology.nodes.every(node => Math.abs(node.position.y) < .01)).toBe(true);
   await page.locator('#nodes-btn').click();
   await expect(page.locator('#nodes-btn')).toHaveAttribute('aria-pressed', 'false');
   expect(await saveProject(page)).toEqual(built);
@@ -640,7 +695,7 @@ test('XYZ rulers follow axis snapping, language, cancellation and committed endp
   await page.locator('#language-select').selectOption('en');
   await canvas.hover({ position: { x: 750, y: 340 } });
   await expect(page.locator('#edge-ruler-mode')).toHaveText('Snap to X axis');
-  await expect(ruler.locator('output').first()).toContainText('cells');
+  await expect(ruler.locator('output').first()).toContainText('blocks');
   await canvas.click({ position: { x: 750, y: 340 } });
   await expect(ruler).toBeHidden();
   const built = await saveProject(page);
@@ -730,7 +785,7 @@ test('sidebars resize, collapse with scoped Tab shortcut, and keep editor contro
   await openRightSidebar(page);
   await expect(page.locator('#right-sidebar-toggle')).toHaveAttribute('aria-expanded', 'true');
   await expect(page.locator('#right-tab-editor')).toHaveAttribute('aria-selected', 'true');
-  await expect(page.locator('#grid-settings')).toContainText(/1 (格|cell) = 8 cm/); await expect(page.locator('#grid-btn')).toBeVisible();
+  await expect(page.locator('#grid-settings')).toContainText(/1 (格|block) = 8 cm/); await expect(page.locator('#grid-btn')).toBeVisible();
   const right = page.locator('#right-sidebar'); const rightResizer = page.locator('#right-sidebar-resizer');
   await expect(rightResizer).toBeVisible();
   const rightBefore = await right.boundingBox(); const rightSeparator = await rightResizer.boundingBox();

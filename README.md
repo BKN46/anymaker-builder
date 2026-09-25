@@ -10,8 +10,8 @@ The editor currently provides:
 
 - A searchable published component catalog with lazy-loaded Mesh assets.
 - Component placement, selection, transform controls, copy, mirror, grid split/merge, hiding, history, and local recovery.
-- Integer-grid construction tools for nodes, beams, panels, glass panels, and six connection families.
-- Beam previews, axis snapping, node and beam interaction aids, panel construction from closed beam loops, and diagnostic painting.
+- Integer-grid construction tools for nodes, edges, panels, glass panels, and six connection families.
+- Edge previews, axis snapping, node and edge interaction aids, panel construction from closed edge loops, and diagnostic painting.
 - Import of paired native `.data` / `.meta` vehicle files for inspection and editing.
 - Export of a paired native JSON `.data` / `.meta` representation, plus a clearly non-game-compatible debug XML export.
 - English UI by default, with a persisted Chinese language option.
@@ -29,12 +29,12 @@ Likewise, successful Mesh parsing, import, export, or a passing build does not d
 Manual editor operations use a fixed world grid:
 
 ```text
-1 cell = 8 cm = 0.08 world units
+1 block = 8 cm = 0.08 world units
 ```
 
-Component origins, manually created nodes, beam endpoints, panel boundaries, and transform translations are quantized to integer world cells. Scale remains dimensionless. Native vehicle imports may retain fractional projected positions where required by their decoded rigid transforms.
+Component origins, manually created nodes, edge endpoints, panel boundaries, and transform translations are quantized to integer world blocks. Scale remains dimensionless. Native vehicle imports may retain fractional projected positions where required by their decoded rigid transforms.
 
-Beam endpoints are represented by world-axis-aligned cell cubes. Beam geometry uses their projected silhouette, including diagonal cases. When a panel is created, it records the camera-facing direction and connects actual vertices of the corresponding node-cube faces; it does not fabricate a plane-wide mitered expansion. These are editor diagnostics informed by observed behavior and screenshots, not a claim that the original game mesh algorithm has been reproduced.
+Edge endpoints are represented by world-axis-aligned block cubes. Edge geometry uses their projected silhouette, including diagonal cases. When a panel is created, it records the camera-facing direction and connects actual vertices of the corresponding node-cube faces; it does not fabricate a plane-wide mitered expansion. These are editor diagnostics informed by observed behavior and screenshots, not a claim that the original game mesh algorithm has been reproduced.
 
 ## Getting started
 

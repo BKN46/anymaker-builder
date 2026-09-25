@@ -12,6 +12,28 @@ const own = (object, key) => Object.hasOwn(object, key);
 const MAX_DEFINITION_OVERRIDE_BYTES = 512 * 1024;
 const MAX_DEFINITION_OVERRIDE_DEPTH = 32;
 const MAX_DEFINITION_OVERRIDE_VALUES = 20000;
+const GRID_ID = /^[A-Za-z0-9_-]{1,80}$/;
+
+function normalizedGrids(input, objects, topology) {
+  if (input !== undefined && (!Array.isArray(input) || input.length > LIMIT)) throw new Error('Invalid grids');
+  const ids = new Set();
+  const add = value => {
+    if (typeof value !== 'string' || !GRID_ID.test(value)) throw new Error('Invalid grid ID');
+    ids.add(value);
+  };
+  for (const grid of input || []) {
+    if (!grid || typeof grid !== 'object' || Array.isArray(grid) || Object.keys(grid).some(key => key !== 'id')) throw new Error('Invalid grid');
+    if (ids.has(grid.id)) throw new Error('Duplicate grid ID');
+    add(grid.id);
+  }
+  for (const object of objects) if (object.gridId) add(object.gridId);
+  for (const item of [...(topology?.nodes || []), ...(topology?.edges || []), ...(topology?.plates || [])]) {
+    if (item.gridId !== undefined) add(item.gridId);
+  }
+  if (!ids.size) ids.add('grid-1');
+  if (input === undefined && ids.size === 1 && ids.has('grid-1')) return undefined;
+  return [...ids].map(id => ({ id }));
+}
 
 function validateDefinitionOverride(value, type) {
   if (!value || typeof value !== 'object' || Array.isArray(value)) throw new Error('Invalid component definition override');
@@ -67,7 +89,7 @@ export function validateDocument(input, definitions) {
     ids.add(o.id);
     if (!definitions.has(o.type)) throw new Error('Unknown component definition: ' + String(o.type));
     const result = { id: o.id, type: o.type };
-    if (o.gridId !== undefined && (typeof o.gridId !== 'string' || !/^[A-Za-z0-9_-]{1,80}$/.test(o.gridId))) throw new Error('Invalid grid ID at ' + index);
+    if (o.gridId !== undefined && (typeof o.gridId !== 'string' || !GRID_ID.test(o.gridId))) throw new Error('Invalid grid ID at ' + index);
     if (o.gridId !== undefined) result.gridId = o.gridId;
     if (o.mirror !== undefined) {
       if (!o.mirror || !['x', 'y', 'z'].includes(o.mirror.axis)) throw new Error('Invalid mirror data at ' + index);
@@ -109,6 +131,8 @@ export function validateDocument(input, definitions) {
   });
   const result = { format: FORMAT, version: VERSION, objects };
   if (input.topology !== undefined) result.topology = validateTopologyState(input.topology, new Set(objects.map(object => object.id)));
+  const grids = normalizedGrids(input.grids, objects, result.topology);
+  if (grids) result.grids = grids;
   const visibilityGroups = validateVisibilityGroups(input.visibilityGroups, new Set(objects.map(object => object.id)), result.topology);
   if (visibilityGroups?.length) result.visibilityGroups = visibilityGroups;
   // Run the renderer-independent model adapter as a second boundary check.
@@ -130,13 +154,14 @@ export function migrateDocument(input, definitions) {
     rotation: value.rotation || { x: 0, y: 0, z: 0 },
     scale: value.scale || { x: 1, y: 1, z: 1 },
   }));
-  return validateDocument({ format: FORMAT, version: VERSION, objects, topology: input.topology, visibilityGroups: input.visibilityGroups }, definitions);
+  return validateDocument({ format: FORMAT, version: VERSION, objects, topology: input.topology, visibilityGroups: input.visibilityGroups, grids: input.grids }, definitions);
 }
 
-export function project(objects, topology, visibilityGroups) {
+export function project(objects, topology, visibilityGroups, grids) {
   const result = { format: FORMAT, version: VERSION, objects: structuredClone(objects) };
   if (topology !== undefined) result.topology = validateTopologyState(topology, new Set(objects.map(object => object.id)));
   if (visibilityGroups?.length) result.visibilityGroups = structuredClone(visibilityGroups);
+  if (grids !== undefined) result.grids = structuredClone(grids);
   return result;
 }
 

@@ -8,6 +8,10 @@ const blockedKeys = new Set([
   'connected_vehicle', 'connected_component',
 ]);
 const keyPattern = /^[A-Za-z][A-Za-z0-9_]{0,79}$/;
+// Native typed values use `_type` (for example a microcontroller's f64 or
+// bool global variable). It is valid only inside a property value, never as
+// a top-level component-property key.
+const nestedKey = key => keyPattern.test(key) || key === '_type';
 const own = (value, key) => Object.hasOwn(value, key);
 
 function validateValue(value, depth = 0) {
@@ -26,7 +30,7 @@ function validateValue(value, depth = 0) {
     return value.map(item => validateValue(item, depth + 1));
   }
   const keys = Object.keys(value);
-  if (keys.length > 128 || keys.some(key => !keyPattern.test(key))) throw new Error('Invalid native component property object');
+  if (keys.length > 128 || keys.some(key => !nestedKey(key))) throw new Error('Invalid native component property object');
   return Object.fromEntries(keys.map(key => [key, validateValue(value[key], depth + 1)]));
 }
 

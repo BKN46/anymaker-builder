@@ -24,7 +24,7 @@ button:focus-visible, input:focus-visible, select:focus-visible { outline: 2px s
 .status { color: var(--muted); font-size: 11px; line-height: 1.5; }
 .top-actions { display: flex; flex: none; gap: 5px; align-items: center; margin-left: auto; }
 .top-actions button { padding: 7px 9px; font-size: 11px; }
-.top-actions #library-btn { color: var(--accent); }
+.top-actions #library-btn, .top-actions #subgrid-import-btn { color: var(--accent); }
 .icon-action { width: 30px; height: 30px; padding: 0 !important; font-size: 17px !important; color: #475467; }
 .icon-action:hover { color: var(--accent); }
 .icon-action.active { color: var(--accent); border-color: #97bcef; background: var(--accent-soft); }
@@ -50,6 +50,8 @@ button:focus-visible, input:focus-visible, select:focus-visible { outline: 2px s
 .context-toolbar strong { color: #475467; font-size: 11px; white-space: nowrap; }
 .context-toolbar input { width: 58px; padding: 5px; border: 1px solid #d0d5dd; border-radius: 5px; }
 .context-toolbar button { min-height: 28px; padding: 4px 7px; font-size: 11px; }
+.selection-toolbar button.active, .subgrid-select[aria-pressed="true"] { color: var(--accent); border-color: #97bcef; background: var(--accent-soft); box-shadow: inset 0 0 0 1px #97bcef; }
+#selection-box { position: absolute; z-index: 9; pointer-events: none; box-sizing: border-box; border: 1px dashed var(--accent); background: color-mix(in srgb, var(--accent) 16%, transparent); }
 .mirror-toolbar { position: static; z-index: auto; max-width: min(760px, 48vw); margin-left: 7px; padding: 0 0 0 8px; transform: none; border: 0; border-left: 1px solid var(--line); border-radius: 0; background: transparent; box-shadow: none; backdrop-filter: none; }
 .mirror-plane-buttons, .mirror-offset { display: inline-flex; align-items: center; gap: 4px; }
 .mirror-plane-buttons button.active { color: var(--accent); border-color: #97bcef; background: var(--accent-soft); box-shadow: inset 0 0 0 1px #97bcef; }
@@ -63,6 +65,15 @@ button:focus-visible, input:focus-visible, select:focus-visible { outline: 2px s
 .definition-editor { margin-top: 12px; }
 .definition-editor summary { cursor: pointer; color: #475467; font-size: 12px; font-weight: 650; }
 .definition-json { display: block; width: 100%; min-height: 260px; margin-top: 8px; resize: vertical; padding: 8px; border: 1px solid var(--line); border-radius: 6px; background: #fbfcfe; color: #243247; font: 11px/1.45 ui-monospace, SFMono-Regular, Consolas, monospace; tab-size: 2; }
+.microcontroller-editor { display: grid; gap: 8px; }
+.microcontroller-editor > label { display: grid; gap: 5px; font-size: 12px; font-weight: 650; }
+.microcontroller-script { width: 100%; min-height: 220px; resize: vertical; padding: 8px; border: 1px solid var(--line); border-radius: 6px; background: #101827; color: #d9e6ff; font: 11px/1.5 ui-monospace, SFMono-Regular, Consolas, monospace; tab-size: 2; }
+.microcontroller-variables { border: 1px solid var(--line); border-radius: 6px; padding: 6px; }
+.microcontroller-variables summary { cursor: pointer; color: #475467; font-size: 12px; font-weight: 650; }
+.microcontroller-variable-list { display: grid; gap: 5px; margin: 7px 0; }
+.microcontroller-variable { display: grid; grid-template-columns: minmax(0, 1fr) 58px 78px auto; gap: 4px; align-items: center; }
+.microcontroller-variable input, .microcontroller-variable select { min-width: 0; padding: 4px; }
+.microcontroller-variable input[type="checkbox"] { justify-self: start; width: auto; }
 .definition-editor-actions { display: flex; gap: 6px; margin-top: 8px; }
 .definition-editor-actions button { padding: 5px 7px; font-size: 11px; }
 .selection-filter-toolbar { top: 8px; left: calc(var(--left-sidebar-width) + var(--left-resizer-width) + 14px); width: 132px; flex-direction: column; align-items: stretch; gap: 5px; padding: 6px; transform: none; z-index: 4; pointer-events: none; }
@@ -144,7 +155,9 @@ button:focus-visible, input:focus-visible, select:focus-visible { outline: 2px s
 .catalog-panel > .section { min-height: 0; height: 100%; display: flex; flex-direction: column; overflow: hidden; }
 #component-list { --component-card-size: 72px; --component-thumbnail-size: 54px; --component-icon-size: 23px; --component-text-size: 10px; height: 0; min-height: 0; flex: 1 1 auto; display: grid; grid-template-columns: repeat(auto-fill, minmax(var(--component-card-size), 1fr)); align-content: start; gap: 6px; overflow-x: hidden; overflow-y: scroll; margin-top: 10px; padding: 3px; scrollbar-gutter: stable; }
 .subgrid-list { display: grid; gap: 7px; }
-.subgrid-row { display: grid; grid-template-columns: minmax(0, 1fr) auto; align-items: center; gap: 8px; padding: 8px; border: 1px solid var(--line); border-radius: 7px; background: var(--panel-soft); }
+.subgrid-create { display: flex; gap: 6px; margin: 7px 0; }
+.subgrid-create input { min-width: 0; flex: 1; }
+.subgrid-row { display: grid; grid-template-columns: minmax(0, 1fr) auto auto; align-items: center; gap: 8px; padding: 8px; border: 1px solid var(--line); border-radius: 7px; background: var(--panel-soft); }
 .subgrid-detail { min-width: 0; display: grid; gap: 2px; }
 .subgrid-detail strong { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; font-size: 12px; }
 .subgrid-detail span { color: var(--muted); font-size: 10px; }

@@ -85,7 +85,7 @@ export function resolvePlacementPoint(pointerRaycaster, targets, workPlane, { ad
   return planeGridPoint ? vector(planeGridPoint) : null;
 }
 
-export function resolveEdgePoint(ray, frame, { axisSnap = false, node = null, viewNormal = frame.plane.normal } = {}) {
+export function resolveEdgePoint(ray, frame, { axisSnap = false, node = null, candidate = null, viewNormal = frame.plane.normal } = {}) {
   const origin = quantizeWorldVector(frame.origin);
   if (!origin) return null;
   const start = vector(origin);
@@ -96,13 +96,29 @@ export function resolveEdgePoint(ray, frame, { axisSnap = false, node = null, vi
   if (validPoint(node)) {
     try { gridNode = assertGridVector(node, '节点坐标'); } catch { /* Projected native node: no grid snap target. */ }
   }
+  const gridCandidate = validPoint(candidate) ? quantizeWorldVector(candidate) : null;
   if (!axisSnap) {
-    const point = gridNode || projectBuildPoint(ray, frame);
+    // Component placement and edge placement share the same ray-hit point.
+    // A selected node remains the most precise endpoint, then an actual scene
+    // collision wins, with the camera-plane projection retained as a fallback
+    // for callers that do not provide a work-plane candidate.
+    const point = gridNode || gridCandidate || projectBuildPoint(ray, frame);
     return point ? { point: vector(point), axis: null } : null;
   }
   if (gridNode) {
     const changed = AXES.filter(axis => worldToCell(gridNode[axis]) !== worldToCell(origin[axis]));
     if (changed.length <= 1) return { point: vector(gridNode), axis: changed[0] || null };
+  }
+  if (gridCandidate) {
+    const changed = AXES.filter(axis => worldToCell(gridCandidate[axis]) !== worldToCell(origin[axis]));
+    if (changed.length <= 1) return { point: vector(gridCandidate), axis: changed[0] || null };
+    // When an axis lock is active, retain the candidate's strongest movement
+    // from the start node instead of falling back to a camera-facing plane.
+    // This keeps Shift-constrained edges attached to the surface under the
+    // cursor while reducing the endpoint to one valid world axis.
+    const axis = changed.reduce((best, current) => Math.abs(gridCandidate[current] - origin[current]) > Math.abs(gridCandidate[best] - origin[best]) ? current : best);
+    const point = start.clone(); point[axis] = gridCandidate[axis];
+    return { point, axis };
   }
   let best = null;
   const offset = ray.origin.clone().sub(start);

@@ -99,7 +99,7 @@ export function createEdgeLengthLabels(viewport, camera) {
         if (!measurements.length) return [];
         const label = document.createElement('output'); label.className = 'edge-length-label';
         label.textContent = measurements.map(({ axis, cells }) => `${axis.toUpperCase()} ${formatCells(cells)}`).join(' · ');
-        label.title = measurements.map(({ axis, cells }) => `${axis.toUpperCase()} ${formatCells(cells)} cells / ${formatCm(cells)} cm`).join(' · ');
+        label.title = measurements.map(({ axis, cells }) => `${axis.toUpperCase()} ${formatCells(cells)} blocks / ${formatCm(cells)} cm`).join(' · ');
         root.append(label);
         return [{ label, midpoint: new THREE.Vector3(a.x, a.y, a.z).add(new THREE.Vector3(b.x, b.y, b.z)).multiplyScalar(.5) }];
       });

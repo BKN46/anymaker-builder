@@ -12,6 +12,8 @@ test('English default, language switching, axis views, grid and panel preference
   await expect(page.locator('html')).toHaveAttribute('lang', 'en');
   await expect(page.locator('#save-btn')).toHaveText('Save vehicle');
   await expect(page.locator('#language-select')).toHaveValue('en');
+  await expect(page.locator('#copy-action')).toHaveAttribute('aria-label', 'Copy');
+  await expect(page.locator('#mirror-action')).toHaveAttribute('aria-label', 'Mirror');
   await expect(page.locator('.brand')).toHaveText('ANYMAKERbuilder by BKN');
   await expect(page.locator('.notice')).toHaveCount(0);
   expect(await page.locator('#tools').evaluate(element => !!element.closest('.topbar'))).toBe(false);
@@ -55,7 +57,7 @@ test('English default, language switching, axis views, grid and panel preference
   await projectionButton.click();
   await expect(page.locator('#orthographic-view')).toBeChecked();
   await expect(page.locator('#node-size-value')).toHaveText('0.120');
-  await expect(page.locator('#grid-settings')).toContainText('1 cell = 8 cm');
+  await expect(page.locator('#grid-settings')).toContainText('1 block = 8 cm');
   await expect(page.locator('#axis-snap-btn')).toContainText('Axis snap');
   await expect(page.locator('#axis-snap-btn')).toContainText('Shift');
   await expect(page.locator('#axis-snap-btn')).toHaveAttribute('aria-pressed', 'false');
@@ -98,7 +100,7 @@ test('English default, language switching, axis views, grid and panel preference
   await expect(page.locator('#camera-light-intensity')).toHaveValue('5.5');
   await expect(page.locator('#show-building-furniture')).toBeChecked();
   await expect(page.locator('#use-model-thumbnails')).toBeChecked();
-  await expect(page.locator('#grid-settings')).toContainText('1 cell = 8 cm');
+  await expect(page.locator('#grid-settings')).toContainText('1 block = 8 cm');
   await expect(page.locator('#axis-snap-btn')).toHaveAttribute('aria-pressed', 'true');
   await expect(page.locator('#nodes-btn')).toHaveAttribute('aria-pressed', 'false');
   await page.locator('#right-sidebar-toggle').click();
