@@ -283,6 +283,10 @@ test('project validation, finite domain and unique IDs', () => {
   const invalid = structuredClone(object); invalid.scale.z = -1;
   assert.throws(() => validateDocument(project([invalid]), definitions));
   assert.throws(() => validateDocument(project([{ ...object, type: 'unknown' }]), definitions));
+  const overridden = validateDocument(project([{ ...object, definitionOverride: { id: 'engine', display_name: 'Custom engine', settings: { power: 2 } } }]), definitions);
+  assert.deepEqual(overridden.objects[0].definitionOverride, { id: 'engine', display_name: 'Custom engine', settings: { power: 2 } });
+  assert.throws(() => validateDocument(project([{ ...object, definitionOverride: { id: 'wheel' } }]), definitions), /override ID/);
+  assert.throws(() => validateDocument(project([{ ...object, definitionOverride: JSON.parse('{"id":"engine","__proto__":{"polluted":true}}') }]), definitions), /override key/);
   const grouped = validateDocument(project([object], { nodes: [], edges: [], plates: [] }, [{ id: 'visibility-group-1', name: 'Cabin', components: ['1'], edges: [], plates: [] }]), definitions);
   assert.deepEqual(grouped.visibilityGroups, [{ id: 'visibility-group-1', name: 'Cabin', components: ['1'], edges: [], plates: [] }]);
   assert.throws(() => validateDocument(project([object], { nodes: [], edges: [], plates: [] }, [{ id: 'visibility-group-1', name: 'Bad', components: ['missing'], edges: [], plates: [] }]), definitions), /visibility group members/);

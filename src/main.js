@@ -1220,6 +1220,7 @@ function snapshot() {
     ...(o.userData.hidden ? { hidden: true } : {}),
     ...(Array.isArray(o.userData.nativeExtension) ? { nativeExtension: [...o.userData.nativeExtension] } : {}),
     ...(o.userData.nativeProperties ? { nativeProperties: structuredClone(o.userData.nativeProperties) } : {}),
+    ...(o.userData.definitionOverride ? { definitionOverride: structuredClone(o.userData.definitionOverride) } : {}),
     ...(o.userData.nativeProjected ? { nativeProjected: true } : {}),
     position: o.userData.nativeProjected
       ? Object.fromEntries(axes.map(a => [a, o.position[a]]))
@@ -1386,10 +1387,11 @@ async function transact(operation) {
   return completed;
 }
 async function createObject(data) {
-  const def = await catalog.definition(data.type);
-  definitions.set(data.type, def);
+  const catalogDefinition = await catalog.definition(data.type);
+  definitions.set(data.type, catalogDefinition);
+  const def = data.definitionOverride || catalogDefinition;
   const object = await library.instantiate(def, { nativeExtension: data.nativeExtension });
-  object.userData = { ...object.userData, id: data.id, type: data.type, gridId: data.gridId, mirror: data.mirror, colors: data.colors, paintColor: data.paintColor, nativeExtension: data.nativeExtension, nativeProperties: data.nativeProperties ? structuredClone(data.nativeProperties) : undefined, nativeProjected: data.nativeProjected === true, hidden: data.hidden === true };
+  object.userData = { ...object.userData, id: data.id, type: data.type, gridId: data.gridId, mirror: data.mirror, colors: data.colors, paintColor: data.paintColor, nativeExtension: data.nativeExtension, nativeProperties: data.nativeProperties ? structuredClone(data.nativeProperties) : undefined, definitionOverride: data.definitionOverride ? structuredClone(data.definitionOverride) : undefined, nativeProjected: data.nativeProjected === true, hidden: data.hidden === true };
   if (paintColorValue(data.paintColor) || Number.isInteger(data.colors?.[0])) applyComponentPaint(object, data.paintColor || nativePaintColor(data.colors[0]));
   for (const field of ['position', 'rotation', 'scale']) object[field].set(...axes.map(a => data[field][a]));
   if (data.mirror?.axis) reflectObject(object, data.mirror.axis);
@@ -1839,7 +1841,7 @@ function inspect() {
     return;
   }
   const object = selected;
-  const def = definitions.get(object.userData.type);
+  const def = object.userData.definitionOverride || definitions.get(object.userData.type);
   const title = document.createElement('strong'); title.textContent = componentName(def); host.append(title);
   const metadata = document.createElement('p'); metadata.className = 'status';
   metadata.textContent = def.id + ' · ' + t('资源诊断：{reason}', { reason: t(object.userData.reason || '') }) + (object.userData.vertices ? ' · ' + t('{vertices} 顶点 / {triangles} 三角形', { vertices: object.userData.vertices, triangles: object.userData.triangles }) : '') + ' · ' + t('子网格 {gridId} · 动态部件 {count}（按需装配）', { gridId: object.userData.gridId || t('未分配'), count: def.meshes_dynamic?.length || 0 });
@@ -1868,10 +1870,48 @@ function inspect() {
     row.append(group); host.append(row);
   }
   renderComponentProperties(host, object);
-  const details = document.createElement('details');
-  const summary = document.createElement('summary'); summary.textContent = t('原始定义 / 端口 / 动态部件'); details.append(summary);
-  const pre = document.createElement('pre'); pre.textContent = JSON.stringify(def, null, 2); details.append(pre); host.append(details);
+  renderDefinitionEditor(host, object, def);
   const button = document.createElement('button'); button.className = 'full'; button.textContent = t('删除组件'); button.id = 'delete-selected'; button.onclick = () => transact(async () => { await remove(object); }); host.append(button);
+}
+
+function renderDefinitionEditor(host, object, definition) {
+  const details = document.createElement('details'); details.className = 'definition-editor';
+  const summary = document.createElement('summary'); summary.textContent = t('原始定义 JSON'); details.append(summary);
+  const hint = document.createElement('p'); hint.className = 'status'; hint.textContent = t('定义 JSON 编辑说明'); details.append(hint);
+  const editor = document.createElement('textarea'); editor.className = 'definition-json'; editor.spellcheck = false;
+  editor.value = JSON.stringify(definition, null, 2); editor.setAttribute('aria-label', t('原始定义 JSON')); details.append(editor);
+  const actions = document.createElement('div'); actions.className = 'definition-editor-actions';
+  const apply = document.createElement('button'); apply.type = 'button'; apply.textContent = t('应用定义 JSON');
+  apply.onclick = () => { void transact(() => applyDefinitionOverride(object.userData.id, editor.value)); };
+  const reset = document.createElement('button'); reset.type = 'button'; reset.textContent = t('重置为目录定义'); reset.disabled = !object.userData.definitionOverride;
+  reset.onclick = () => { void transact(() => resetDefinitionOverride(object.userData.id)); };
+  actions.append(apply, reset); details.append(actions); host.append(details);
+}
+
+async function applyDefinitionOverride(id, source) {
+  let definition;
+  try { definition = JSON.parse(source); }
+  catch (error) { throw new Error(t('原始定义 JSON 无效：{error}', { error: error.message })); }
+  const items = snapshot().map(item => item.id === id ? { ...item, definitionOverride: definition } : item);
+  const candidate = validateDocument(project(items, topology, transparencyGroups), catalog.index);
+  await restore(candidate.objects, candidate.topology, candidate.visibilityGroups || []);
+  const restored = objects.find(object => object.userData.id === id);
+  select(restored || null);
+  commit('已应用原始定义 JSON');
+  status('已应用原始定义 JSON');
+}
+
+async function resetDefinitionOverride(id) {
+  const items = snapshot().map(item => {
+    if (item.id !== id) return item;
+    const { definitionOverride, ...restored } = item;
+    return restored;
+  });
+  await restore(items, topology, transparencyGroups);
+  const restored = objects.find(object => object.userData.id === id);
+  select(restored || null);
+  commit('已重置为目录定义');
+  status('已重置为目录定义');
 }
 
 function componentPropertyLabel(key) {

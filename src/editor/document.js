@@ -8,6 +8,34 @@ export const VERSION = 1;
 export const LIMIT = 2000;
 const axes = ['x', 'y', 'z'];
 const own = (object, key) => Object.hasOwn(object, key);
+const MAX_DEFINITION_OVERRIDE_BYTES = 512 * 1024;
+const MAX_DEFINITION_OVERRIDE_DEPTH = 32;
+const MAX_DEFINITION_OVERRIDE_VALUES = 20000;
+
+function validateDefinitionOverride(value, type) {
+  if (!value || typeof value !== 'object' || Array.isArray(value)) throw new Error('Invalid component definition override');
+  let values = 0;
+  const validateValue = (current, depth = 0) => {
+    if (depth > MAX_DEFINITION_OVERRIDE_DEPTH || ++values > MAX_DEFINITION_OVERRIDE_VALUES) throw new Error('Component definition override is too large');
+    if (current === null || typeof current === 'string' || typeof current === 'boolean') return current;
+    if (typeof current === 'number') {
+      if (!Number.isFinite(current)) throw new Error('Invalid component definition override value');
+      return current;
+    }
+    if (Array.isArray(current)) return current.map(item => validateValue(item, depth + 1));
+    if (!current || typeof current !== 'object' || (Object.getPrototypeOf(current) !== Object.prototype && Object.getPrototypeOf(current) !== null)) throw new Error('Invalid component definition override value');
+    const result = {};
+    for (const [key, item] of Object.entries(current)) {
+      if (key === '__proto__' || key === 'constructor' || key === 'prototype') throw new Error('Invalid component definition override key');
+      result[key] = validateValue(item, depth + 1);
+    }
+    return result;
+  };
+  const result = validateValue(value);
+  if (result.id !== type) throw new Error('Component definition override ID does not match the component type');
+  if (JSON.stringify(result).length > MAX_DEFINITION_OVERRIDE_BYTES) throw new Error('Component definition override is too large');
+  return result;
+}
 
 function validateVisibilityGroups(input, componentIds, topology) {
   if (input === undefined) return undefined;
@@ -52,6 +80,7 @@ export function validateDocument(input, definitions) {
       if (typeof o.paintColor !== 'string' || !/^#[\da-f]{6}$/i.test(o.paintColor)) throw new Error('Invalid component paint color at ' + index);
       result.paintColor = o.paintColor.toLowerCase();
     }
+    if (o.definitionOverride !== undefined) result.definitionOverride = validateDefinitionOverride(o.definitionOverride, o.type);
     if (o.hidden !== undefined) {
       if (typeof o.hidden !== 'boolean') throw new Error('Invalid component visibility at ' + index);
       if (o.hidden) result.hidden = true;
