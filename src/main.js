@@ -5,11 +5,11 @@ import { AssetLibrary, disposeObject } from './assets/library.js';
 import { PublishedAssetLibrary } from './assets/published-library.js';
 import { reflectObject } from './assets/geometry-ops.js';
 import { History, LIMIT, project, validateDocument, migrateDocument, toIntermediateXml } from './editor/document.js';
-import { copyObjects, mirrorObjects, moveObjects, removeObjects, splitGrid, mergeGrids, gridIds } from './editor/operations.js';
-import { createNode, moveNodeAndMerge, mergeNodes, removeNode, removeEdge, removePlate, createEdgeFromPoints, edgeSplitPoints, splitEdge, createPlateFromEdges, createGlassPlateFromEdges } from './editor/topology.js';
+import { copyObjects, moveObjects, removeObjects, splitGrid, mergeGrids, gridIds } from './editor/operations.js';
+import { createNode, moveNodeAndMerge, mergeNodes, removeNode, removeEdge, removePlate, createEdgeFromPoints, edgeSplitPoints, splitEdge, createPlate, createPlateFromEdges, createGlassPlateFromEdges } from './editor/topology.js';
 import { LINK_COLORS, createLink, moveLinkPoint, removeLink } from './editor/connections.js';
 import { CELL_SIZE_WORLD, assertGridVector, cellToWorld, quantizeWorldVector, worldToCell } from './editor/grid.js';
-import { GRID_SIZE, GRID_DIVISIONS, STRUCTURE_COLOR, cameraBuildFrame, projectBuildPoint, resolveEdgePoint, resolvePlacementPoint, createEdgeMesh, createEdgeJointMesh, createConnectionRoute, updateEdgeMesh, setEdgeOutline, plateSurfaceBoundary, plateSurfaceVertices, cameraFacingPlateOffset, rayFacingPlateSide } from './editor/construction-view.js';
+import { GRID_SIZE, GRID_DIVISIONS, STRUCTURE_COLOR, cameraBuildFrame, projectBuildPoint, resolveEdgePoint, resolvePlacementPoint, createEdgeMesh, createEdgeJointMesh, createConnectionRoute, updateEdgeMesh, setEdgeOutline, plateSurfaceBoundary, plateSurfaceVertices, cameraFacingPlateOffset, cameraFacingPlateDirection, rayFacingPlateSide } from './editor/construction-view.js';
 import { createEdgeRuler, createEdgeLengthLabels } from './editor/edge-ruler.js';
 import { parseNativePair, nativeStats, toNativePairFromEditor, verifyNativePairRoundTrip } from './native/anymaker-data.js';
 import { toEditorDocument, toEditorTopology } from './editor/model.js';
@@ -21,9 +21,11 @@ import { createLocalStore, normalizeSettings } from './editor/local-storage.js';
 import { startLocalSession } from './editor/local-session.js';
 import { createOrientationIndicator, orientCamera, applyGridStyle } from './editor/view-settings.js';
 import { RENDER_DEPTH_LAYERS, assignOpaqueDepthOrder, configureOpaqueDepth, configureOpaqueDepthLayer } from './editor/render-depth.js';
-import { nativePaintColor, isGlassPlate } from './editor/native-paint.js';
+import { nativePaintColor, nearestNativePaintIndex, isGlassPlate } from './editor/native-paint.js';
 import { editorMessages } from './editor/ui-messages.js';
 import { connectionNetworkLabel, connectionPortRoleLabel } from './editor/connection-port-labels.js';
+import { logicNodePort, logicNodePortsForNetwork, logicNodeCellPosition } from './editor/connection-ports.js';
+import { mirrorPoint, mirrorSurfaceDirection, sameGridPoint } from './editor/mirror-mode.js';
 import './style.css';
 
 addMessages(editorMessages);
@@ -88,8 +90,12 @@ const thumbnailLargeRequests = new Map();
 let modelPreviewCard = null;
 let modelPreviewRequestId = 0;
 let hoveredConnectionPort = null;
+let mirrorMode = { active: false, axis: 'x', offset: 0 };
+let mirrorGuideDrag = false;
+let latestPagesBuildTime = null;
+const GITHUB_PAGES_WORKFLOW_RUNS = 'https://api.github.com/repos/BKN46/anymaker-builder/actions/workflows/pages.yml/runs?status=completed&per_page=1';
 
-$('#app').innerHTML = '<header class="topbar"><div class="brand" aria-label="ANYMAKER builder by BKN"><strong>ANYMAKER</strong><small>builder by BKN</small></div><a id="github-link" class="github-link" href="https://github.com/BKN46/anymaker-builder" target="_blank" rel="noopener noreferrer" data-i18n-aria-label="GitHub 仓库" data-i18n-title="GitHub 仓库"><svg viewBox="0 0 24 24" aria-hidden="true"><path d="M12 .7a11.3 11.3 0 0 0-3.57 22c.56.1.77-.24.77-.54v-2.1c-3.14.68-3.8-1.33-3.8-1.33-.51-1.3-1.25-1.65-1.25-1.65-1.02-.7.08-.69.08-.69 1.13.08 1.73 1.16 1.73 1.16 1 .1.75 2.02 2.92 1.41.1-.73.39-1.22.71-1.5-2.51-.29-5.15-1.25-5.15-5.58 0-1.23.44-2.24 1.16-3.03-.12-.29-.5-1.44.11-2.99 0 0 .95-.3 3.11 1.16a10.8 10.8 0 0 1 5.66 0c2.16-1.46 3.1-1.16 3.1-1.16.62 1.55.23 2.7.12 2.99.72.79 1.16 1.8 1.16 3.03 0 4.34-2.65 5.29-5.17 5.57.4.35.76 1.04.76 2.1v3.11c0 .3.2.65.78.54A11.3 11.3 0 0 0 12 .7Z"></path></svg></a><select id="language-select" data-i18n-aria-label="界面语言"><option value="en">English</option><option value="zh">中文</option></select><span class="status" id="save-status" role="status" data-i18n="正在加载定义…"></span><section class="section top-tool-section"><h2 data-i18n="编辑工具"></h2><div class="tool-grid" id="tools"></div></section><nav class="top-actions"><button id="library-btn" data-i18n="导入本地载具"></button><button id="new-btn" data-i18n="新建"></button><button id="undo-btn" data-i18n="撤销"></button><button id="redo-btn" data-i18n="重做"></button><button id="save-btn" data-i18n="保存载具"></button><button id="export-btn" class="primary" data-i18n="中间格式 XML"></button></nav></header>' +
+$('#app').innerHTML = '<header class="topbar"><div class="brand" aria-label="ANYMAKER builder by BKN"><strong>ANYMAKER</strong><small>builder by BKN</small></div><a id="github-link" class="github-link" href="https://github.com/BKN46/anymaker-builder" target="_blank" rel="noopener noreferrer" data-i18n-aria-label="GitHub 仓库" data-i18n-title="GitHub 仓库"><svg viewBox="0 0 24 24" aria-hidden="true"><path d="M12 .7a11.3 11.3 0 0 0-3.57 22c.56.1.77-.24.77-.54v-2.1c-3.14.68-3.8-1.33-3.8-1.33-.51-1.3-1.25-1.65-1.25-1.65-1.02-.7.08-.69.08-.69 1.13.08 1.73 1.16 1.73 1.16 1 .1.75 2.02 2.92 1.41.1-.73.39-1.22.71-1.5-2.51-.29-5.15-1.25-5.15-5.58 0-1.23.44-2.24 1.16-3.03-.12-.29-.5-1.44.11-2.99 0 0 .95-.3 3.11 1.16a10.8 10.8 0 0 1 5.66 0c2.16-1.46 3.1-1.16 3.1-1.16.62 1.55.23 2.7.12 2.99.72.79 1.16 1.8 1.16 3.03 0 4.34-2.65 5.29-5.17 5.57.4.35.76 1.04.76 2.1v3.11c0 .3.2.65.78.54A11.3 11.3 0 0 0 12 .7Z"></path></svg></a><span id="github-build-time" class="github-build-time" hidden aria-live="polite"></span><select id="language-select" data-i18n-aria-label="界面语言"><option value="en">English</option><option value="zh">中文</option></select><span class="status" id="save-status" role="status" data-i18n="正在加载定义…"></span><section class="section top-tool-section"><h2 data-i18n="编辑工具"></h2><div class="tool-grid" id="tools"></div></section><nav class="top-actions"><button id="library-btn" data-i18n="导入本地载具"></button><button id="new-btn" data-i18n="新建"></button><button id="undo-btn" data-i18n="撤销"></button><button id="redo-btn" data-i18n="重做"></button><button id="save-btn" data-i18n="保存载具"></button><button id="export-btn" class="primary" data-i18n="中间格式 XML"></button></nav></header>' +
   '<main class="workspace" id="workspace"><button id="left-sidebar-toggle" class="sidebar-toggle left-toggle" aria-controls="left-sidebar" aria-expanded="true" aria-keyshortcuts="Tab" data-i18n-title="收起方块库（在视口按 Tab 也可切换）" data-i18n="收起方块库"></button><aside id="left-sidebar" class="sidebar left-sidebar" data-i18n-aria-label="方块库"><div class="sidebar-tabs" role="tablist" data-i18n-aria-label="方块库"><button id="left-tab-catalog" type="button" role="tab" aria-controls="catalog-panel" aria-selected="true" data-sidebar-tab="catalog" data-i18n="方块库"></button><button id="left-tab-subgrids" type="button" role="tab" aria-controls="subgrid-panel" aria-selected="false" tabindex="-1" data-sidebar-tab="subgrids" data-i18n="子网格"></button></div><section id="catalog-panel" class="sidebar-tab-panel catalog-panel" role="tabpanel" aria-labelledby="left-tab-catalog"><section class="section"><h2><span data-i18n="组件定义"></span> <span id="catalog-count"></span></h2><input class="search" id="component-search" data-i18n-aria-label="搜索组件" data-i18n-placeholder="搜索中文、原始 ID、类别…"><select id="category-filter" data-i18n-aria-label="组件分类"><option value="" data-i18n="全部分类"></option></select><div class="catalog-visibility-options"><label class="catalog-visibility"><input id="show-building-furniture" type="checkbox"><span data-i18n="显示建材与家具"></span></label><label class="catalog-visibility"><input id="use-model-thumbnails" type="checkbox"><span data-i18n="使用模型缩略图"></span></label><input id="catalog-card-size" class="catalog-card-size" type="range" min="64" max="156" step="4" data-i18n-aria-label="组件卡片大小" data-i18n-title="组件卡片大小"></div><div id="component-list"></div></section></section><section id="subgrid-panel" class="sidebar-tab-panel" role="tabpanel" aria-labelledby="left-tab-subgrids" hidden><section class="section"><h2 data-i18n="当前载具子网格"></h2><p id="subgrid-summary" class="status"></p><div id="subgrid-list" class="subgrid-list"></div></section></section></aside><div id="left-sidebar-resizer" role="separator" aria-orientation="vertical" aria-controls="left-sidebar" data-i18n-aria-label="调整方块库宽度" aria-valuemin="240" aria-valuemax="720" tabindex="0"></div>' +
   '<section id="viewport" tabindex="0" data-i18n-aria-label="三维建造视口"><button id="right-sidebar-toggle" class="sidebar-toggle right-toggle" aria-controls="right-sidebar" aria-expanded="false" data-i18n="打开右侧面板"></button><div class="view-controls"><button data-view="iso" data-i18n="正交"></button><button data-view="top" data-i18n="顶视"></button><button data-view="front" data-i18n="前视"></button><button id="fit-btn" data-i18n="回到中心"></button></div><div class="hud"><span class="badge" id="object-count"></span><span class="badge" id="vehicle-size"></span><span id="topology-count" hidden></span><span class="badge" id="cursor-pos" data-i18n="工作平面 Y = 0"></span></div></section><div id="right-sidebar-resizer" role="separator" aria-orientation="vertical" aria-controls="right-sidebar" data-i18n-aria-label="调整右侧面板宽度" aria-valuemin="240" aria-valuemax="720" aria-valuenow="304" tabindex="0" hidden></div>' +
   '<aside id="right-sidebar" class="sidebar right-sidebar" data-i18n-aria-label="编辑器面板" hidden><div class="sidebar-tabs" role="tablist" data-i18n-aria-label="编辑器面板"><button id="right-tab-editor" type="button" role="tab" aria-controls="editor-tab-panel" aria-selected="true" data-sidebar-tab="editor" data-i18n="编辑器参数"></button><button id="right-tab-inspector" type="button" role="tab" aria-controls="inspector-tab-panel" aria-selected="false" tabindex="-1" data-sidebar-tab="inspector" data-i18n="选中方块属性"></button><button id="right-tab-resources" type="button" role="tab" aria-controls="resources-tab-panel" aria-selected="false" tabindex="-1" data-sidebar-tab="resources" data-i18n="资源与校验"></button><button id="right-tab-history" type="button" role="tab" aria-controls="history-tab-panel" aria-selected="false" tabindex="-1" data-sidebar-tab="history" data-i18n="历史记录"></button></div><section id="editor-tab-panel" class="sidebar-tab-panel" role="tabpanel" aria-labelledby="right-tab-editor"><section id="grid-settings" class="section"><h2 data-i18n="工作网格 · 编辑器参数"></h2><p class="status" data-i18n="固定单位网格：1 格 = 8 cm；手动编辑位置为整数格，原生子网格投影可保留小数。"></p><button id="grid-btn" aria-pressed="true" data-i18n="隐藏网格"></button><p class="status"><span data-i18n="左键：当前工具 · 右键拖动：旋转视角"></span><br><span data-i18n="中键：平移 · 滚轮：缩放 · F：聚焦"></span><br><span data-i18n="Shift + 点击连续放置 · Ctrl / ⌘ + Z：撤销"></span></p></section></section><section id="inspector-tab-panel" class="sidebar-tab-panel" role="tabpanel" aria-labelledby="right-tab-inspector" hidden><section class="section"><div id="inspector-content" class="empty"></div></section></section><section id="resources-tab-panel" class="sidebar-tab-panel" role="tabpanel" aria-labelledby="right-tab-resources" hidden><section class="section"><h2 data-i18n="资源状态"></h2><p class="status" id="asset-status" data-i18n="尚未导入 Mesh。橙色线框仅是缺失资源标记，不代表游戏尺寸。"></p><button id="mesh-files-btn" class="full" data-i18n="选择 .mesh 文件"></button><p class="status" data-i18n="推荐选择游戏的 rom/meshes 文件夹。只在浏览器读取，不上传、不执行 EXE。仅渲染静态 Mesh，动态部件数量会单独提示。"></p></section><section class="section"><h2 data-i18n="本地原生载具"></h2><button id="native-btn" class="full" data-i18n="选择配套 .data / .meta"></button><p class="status" id="native-summary" data-i18n="选择同名的 .data 与 .meta JSON 文件。浏览器只读取，不上传；校验后立即替换当前场景。"></p></section><section class="section"><h2 data-i18n="校验"></h2><div id="validation" class="status"></div></section></section><section id="history-tab-panel" class="sidebar-tab-panel" role="tabpanel" aria-labelledby="right-tab-history" hidden><section class="section"><p class="status" data-i18n="最近 50 次已提交操作。选择任一项即可恢复到该状态。"></p><div id="history-list" class="history-list"></div></section></section></aside></main>' +
@@ -124,7 +130,7 @@ applyTranslations(connectionSettings);
 
 const paintToolbar = document.createElement('section');
 paintToolbar.id = 'paint-toolbar'; paintToolbar.className = 'context-toolbar'; paintToolbar.hidden = true;
-paintToolbar.innerHTML = '<strong data-i18n="涂色色板"></strong><div id="paint-quick-colors" class="quick-colors"></div><label><input id="paint-toolbar-color" type="color" value="#bd2636" aria-label="Hex RGB color"><input id="paint-toolbar-hex" type="text" value="#bd2636" maxlength="7" spellcheck="false" aria-label="Hex RGB color"></label><button id="pick-paint-color" type="button" aria-pressed="false" data-i18n="取色" data-i18n-aria-label="取色"></button><button id="save-paint-quick-color" type="button" data-i18n="保存快捷颜色"></button>';
+paintToolbar.innerHTML = '<strong data-i18n="涂色色板"></strong><div id="paint-quick-colors" class="quick-colors"></div><label><input id="paint-toolbar-color" type="color" value="#dddddd" aria-label="Hex RGB color"><input id="paint-toolbar-hex" type="text" value="#dddddd" maxlength="7" spellcheck="false" aria-label="Hex RGB color"></label><button id="pick-paint-color" type="button" aria-pressed="false" data-i18n="取色" data-i18n-aria-label="取色"></button><button id="save-paint-quick-color" type="button" data-i18n="保存快捷颜色"></button>';
 applyTranslations(paintToolbar);
 
 const connectionToolbar = document.createElement('section');
@@ -141,6 +147,11 @@ const transparencyToolbar = document.createElement('section');
 transparencyToolbar.id = 'transparency-toolbar'; transparencyToolbar.className = 'context-toolbar'; transparencyToolbar.hidden = true;
 transparencyToolbar.innerHTML = '<strong data-i18n="隐藏组"></strong><label class="transparency-group-save"><input id="transparency-group-name" type="text" maxlength="80" data-i18n-placeholder="组名称" placeholder="Group name"><button id="save-transparency-group" type="button" data-i18n="保存当前隐藏为组"></button></label><div id="transparency-groups" class="transparency-groups"></div>';
 applyTranslations(transparencyToolbar);
+
+const mirrorToolbar = document.createElement('section');
+mirrorToolbar.id = 'mirror-toolbar'; mirrorToolbar.className = 'context-toolbar mirror-toolbar'; mirrorToolbar.hidden = true;
+mirrorToolbar.innerHTML = '<strong data-i18n="镜像模式"></strong><div class="mirror-plane-buttons" role="group" data-i18n-aria-label="镜像平面"><button type="button" data-mirror-axis="x">YZ · X</button><button type="button" data-mirror-axis="y">XZ · Y</button><button type="button" data-mirror-axis="z">XY · Z</button></div><label class="mirror-offset"><span data-i18n="平面位置"></span><input id="mirror-offset-range" type="range" min="-500" max="500" step="1" value="0" data-i18n-aria-label="镜像平面位置"><input id="mirror-offset-input" type="number" min="-125000" max="125000" step="1" value="0" data-i18n-aria-label="镜像平面位置"> <small data-i18n="格"></small></label><span class="context-help" data-i18n="拖动蓝色手柄或滑块，沿镜像平面法向移动。"></span>';
+applyTranslations(mirrorToolbar);
 
 const selectionFilterToolbar = document.createElement('section');
 selectionFilterToolbar.id = 'selection-filter-toolbar'; selectionFilterToolbar.className = 'context-toolbar selection-filter-toolbar';
@@ -170,7 +181,7 @@ function setConnectionVisibilityCollapsed(collapsed) {
 connectionVisibilityToggle.addEventListener('click', () => setConnectionVisibilityCollapsed(!connectionVisibilityOptions.hidden));
 
 const workspace = $('#workspace');
-workspace.append(selectionFilterToolbar, paintToolbar, connectionToolbar, transparencyToolbar);
+workspace.append(selectionFilterToolbar, paintToolbar, connectionToolbar, transparencyToolbar, mirrorToolbar);
 for (const input of selectionFilterToolbar.querySelectorAll('[data-selectable-kind]')) {
   input.addEventListener('change', () => {
     selectableKinds[input.dataset.selectableKind] = input.checked;
@@ -353,7 +364,7 @@ for (const [id, name, key] of tools) {
 // snapshot and can be undone as a complete copy/mirror/split/merge operation.
 const structuralActions = [
   ['copy-action', '⧉', '复制选中'],
-  ['mirror-action', '⇋', '镜像 X'],
+  ['mirror-action', '⇋', '打开镜像模式'],
   ['split-action', '⌘', '拆分子网格'],
   ['merge-action', '⊕', '合并子网格'],
 ];
@@ -470,6 +481,23 @@ const grid = new THREE.GridHelper(GRID_SIZE, GRID_DIVISIONS, 0x426780, 0x203345)
 // visual boundaries by half a cell so edges of one-cell width land on cell
 // edges instead of straddling a grid-line intersection.
 grid.position.set(-CELL_SIZE_WORLD / 2, -.002, -CELL_SIZE_WORLD / 2); scene.add(grid);
+const mirrorGuide = new THREE.Group();
+mirrorGuide.name = 'mirror-plane-guide'; mirrorGuide.visible = false;
+const mirrorGuideSurface = new THREE.Mesh(
+  new THREE.PlaneGeometry(8, 8),
+  new THREE.MeshBasicMaterial({ color: 0x2787f5, transparent: true, opacity: .09, depthTest: false, depthWrite: false, side: THREE.DoubleSide }),
+);
+const mirrorGuideOutline = new THREE.LineLoop(
+  new THREE.BufferGeometry().setFromPoints([new THREE.Vector3(-4, -4, 0), new THREE.Vector3(4, -4, 0), new THREE.Vector3(4, 4, 0), new THREE.Vector3(-4, 4, 0)]),
+  new THREE.LineBasicMaterial({ color: 0x2787f5, transparent: true, opacity: .85, depthTest: false, depthWrite: false }),
+);
+const mirrorGuideHandle = new THREE.Mesh(
+  new THREE.SphereGeometry(.1, 14, 10),
+  new THREE.MeshBasicMaterial({ color: 0x2787f5, transparent: true, opacity: .95, depthTest: false, depthWrite: false }),
+);
+mirrorGuideHandle.userData.mirrorGuideHandle = true;
+mirrorGuideSurface.renderOrder = 6; mirrorGuideOutline.renderOrder = 7; mirrorGuideHandle.renderOrder = 8;
+mirrorGuide.add(mirrorGuideSurface, mirrorGuideOutline, mirrorGuideHandle); scene.add(mirrorGuide);
 let gridSize = GRID_SIZE;
 let gridCenterX = 0;
 let gridCenterZ = 0;
@@ -599,10 +627,15 @@ function connectionPortOffset(component, endpoint, linkKind = null) {
   const definition = definitions.get(component?.type);
   const port = endpoint?.port ?? 0;
   const kind = linkKind || $('#connection-kind')?.value;
-  const logicNodes = Array.isArray(definition?.logic_nodes) ? definition.logic_nodes.filter(node => node.type === kind || (kind === 'mechanical' && typeof node.type === 'string' && node.type.startsWith('mechanical_'))) : [];
-  const candidate = logicNodes[port] || (kind === 'mechanical' ? (definition?.surfaces || []).filter(surface => typeof surface.type === 'string' && surface.type.startsWith('torque'))[port] : null);
-  const pos = candidate?.pos;
-  if (!Array.isArray(pos) || pos.length !== 3 || !pos.every(Number.isFinite)) return new THREE.Vector3();
+  // `endpoint.port` comes directly from native p0.pos/p1.pos.  The game uses
+  // it as the original logic_nodes index, not a filtered network-local index.
+  // Filtering first put wheel.mechanical_in #2 (brake) at the wrong location
+  // as soon as a definition mixed connection types.
+  const candidate = logicNodePort(definition, port) || (kind === 'mechanical'
+    ? (definition?.surfaces || []).filter(surface => typeof surface.type === 'string' && surface.type.startsWith('torque'))[port]
+    : null);
+  if (!candidate) return new THREE.Vector3();
+  const pos = logicNodeCellPosition(candidate, component.nativeExtension, definition?.center_stretch);
   const scale = component.scale || { x: 1, y: 1, z: 1 };
   return new THREE.Vector3(pos[0] * CELL_SIZE_WORLD, pos[1] * CELL_SIZE_WORLD, pos[2] * CELL_SIZE_WORLD)
     .multiply(new THREE.Vector3(scale.x ?? 1, scale.y ?? 1, scale.z ?? 1))
@@ -645,7 +678,8 @@ function buildTopologyVisual(state, components = new Map()) {
       const depthKey = `plate:${plate.id}`;
       const positions = new Map(state.nodes.map(node => [node.id, new THREE.Vector3(node.position.x, node.position.y, node.position.z)]));
       const offset = plate.normalOffset ?? CELL_SIZE_WORLD / 2;
-      const vertices = plateSurfaceVertices(plate.nodeIds, positions, offset);
+      const surface = { normalOffset: offset, surfaceDirection: plate.surfaceDirection };
+      const vertices = plateSurfaceVertices(plate.nodeIds, positions, surface);
       const geometry = new THREE.BufferGeometry();
       geometry.setAttribute('position', new THREE.Float32BufferAttribute(vertices, 3));
       geometry.computeVertexNormals();
@@ -674,6 +708,7 @@ function buildTopologyVisual(state, components = new Map()) {
       const mesh = new THREE.Mesh(geometry, material);
       mesh.userData.topology = 'plate'; mesh.userData.plateId = plate.id;
       mesh.userData.nodeIds = [...plate.nodeIds]; mesh.userData.normalOffset = offset;
+      mesh.userData.surfaceDirection = plate.surfaceDirection;
       mesh.visible = !plate.hidden;
       if (glass) mesh.renderOrder = 4;
       else configureOpaqueDepthLayer(mesh, RENDER_DEPTH_LAYERS.plate, { key: depthKey });
@@ -722,7 +757,10 @@ function updateTopologyPreview(nodeId, value) {
     }
     if (object.userData.topology === 'plate') {
       const nodeIds = object.userData.nodeIds;
-      const vertices = plateSurfaceVertices(nodeIds, positions, object.userData.normalOffset);
+      const vertices = plateSurfaceVertices(nodeIds, positions, {
+        normalOffset: object.userData.normalOffset,
+        surfaceDirection: object.userData.surfaceDirection,
+      });
       const attribute = object.geometry.getAttribute('position');
       if (attribute.count === vertices.length / 3) attribute.set(vertices);
       else object.geometry.setAttribute('position', new THREE.Float32BufferAttribute(vertices, 3));
@@ -949,10 +987,7 @@ function refreshConnectionPorts() {
   const kind = $('#connection-kind').value;
   const color = LINK_COLORS[kind];
   const portsForKind = definition => {
-    const logicNodes = Array.isArray(definition?.logic_nodes) ? definition.logic_nodes : [];
-    const logicPorts = logicNodes
-      .filter(node => node.type === kind || (kind === 'mechanical' && typeof node.type === 'string' && node.type.startsWith('mechanical_')))
-      .map((node, port) => ({ ...node, port, source: 'logic' }));
+    const logicPorts = logicNodePortsForNetwork(definition, kind);
     if (logicPorts.length || kind !== 'mechanical') return logicPorts;
     // Torque surfaces are the only definition-backed mechanical endpoints
     // currently available. Their exact game compatibility is still unknown.
@@ -965,8 +1000,7 @@ function refreshConnectionPorts() {
     if (!ports.length) continue;
     object.updateWorldMatrix(true, false);
     ports.forEach(portDefinition => {
-      const nativePosition = Array.isArray(portDefinition.pos) && portDefinition.pos.length === 3 ? portDefinition.pos : [0, 0, 0];
-      if (!nativePosition.every(Number.isFinite)) return;
+      const nativePosition = logicNodeCellPosition(portDefinition, object.userData.nativeExtension, definition?.center_stretch);
       const port = portDefinition.port;
       const marker = new THREE.Mesh(new THREE.SphereGeometry(.055, 10, 8), new THREE.MeshBasicMaterial({ color, transparent: settings.nodeOpacity < 1, opacity: settings.nodeOpacity, depthTest: false, depthWrite: false }));
       marker.position.set(nativePosition[0] * CELL_SIZE_WORLD, nativePosition[1] * CELL_SIZE_WORLD, nativePosition[2] * CELL_SIZE_WORLD);
@@ -1049,7 +1083,10 @@ function updateInteractionHighlights(hovered = hoveredObject) {
     }
     if (kind === 'plate') {
       const positions = new Map(topology.nodes.map(node => [node.id, new THREE.Vector3(node.position.x, node.position.y, node.position.z)]));
-      const boundary = plateSurfaceBoundary(object.userData.nodeIds, positions, object.userData.normalOffset);
+      const boundary = plateSurfaceBoundary(object.userData.nodeIds, positions, {
+        normalOffset: object.userData.normalOffset,
+        surfaceDirection: object.userData.surfaceDirection,
+      });
       if (boundary.length >= 3) {
         const geometry = new THREE.BufferGeometry().setFromPoints([...boundary, boundary[0]]);
         const material = new THREE.LineBasicMaterial({ color, transparent: true, opacity: .95, depthTest: false, depthWrite: false });
@@ -1097,6 +1134,7 @@ function setTool(value) {
   paintToolbar.hidden = value !== 'paint' || referencePreview;
   connectionToolbar.hidden = value !== 'connect' || referencePreview;
   transparencyToolbar.hidden = value !== 'hide' || referencePreview;
+  mirrorToolbar.hidden = !mirrorMode.active || referencePreview;
   transform.detach();
   if (value !== 'place') clearPlacementPreview();
   else if (cursorPoint && pointerInCanvas) void updatePlacementPreview(cursorPoint);
@@ -1162,6 +1200,7 @@ function snapshot() {
     ...(o.userData.gridId ? { gridId: o.userData.gridId } : {}),
     ...(o.userData.mirror ? { mirror: { ...o.userData.mirror } } : {}),
     ...(Array.isArray(o.userData.colors) ? { colors: [...o.userData.colors] } : {}),
+    ...(paintColorValue(o.userData.paintColor) ? { paintColor: o.userData.paintColor } : {}),
     ...(o.userData.hidden ? { hidden: true } : {}),
     ...(Array.isArray(o.userData.nativeExtension) ? { nativeExtension: [...o.userData.nativeExtension] } : {}),
     ...(o.userData.nativeProperties ? { nativeProperties: structuredClone(o.userData.nativeProperties) } : {}),
@@ -1334,17 +1373,23 @@ async function createObject(data) {
   const def = await catalog.definition(data.type);
   definitions.set(data.type, def);
   const object = await library.instantiate(def, { nativeExtension: data.nativeExtension });
-  object.userData = { ...object.userData, id: data.id, type: data.type, gridId: data.gridId, mirror: data.mirror, colors: data.colors, nativeExtension: data.nativeExtension, nativeProperties: data.nativeProperties ? structuredClone(data.nativeProperties) : undefined, nativeProjected: data.nativeProjected === true, hidden: data.hidden === true };
-  if (Number.isInteger(data.colors?.[0])) object.traverse(child => {
-    if (!child.isMesh) return;
-    if (child.userData.source?.includes('/car_wheel')) return;
-    for (const material of Array.isArray(child.material) ? child.material : [child.material]) material.color.set(nativePaintColor(data.colors[0]));
-  });
+  object.userData = { ...object.userData, id: data.id, type: data.type, gridId: data.gridId, mirror: data.mirror, colors: data.colors, paintColor: data.paintColor, nativeExtension: data.nativeExtension, nativeProperties: data.nativeProperties ? structuredClone(data.nativeProperties) : undefined, nativeProjected: data.nativeProjected === true, hidden: data.hidden === true };
+  if (paintColorValue(data.paintColor) || Number.isInteger(data.colors?.[0])) applyComponentPaint(object, data.paintColor || nativePaintColor(data.colors[0]));
   for (const field of ['position', 'rotation', 'scale']) object[field].set(...axes.map(a => data[field][a]));
   if (data.mirror?.axis) reflectObject(object, data.mirror.axis);
   configureOpaqueDepthLayer(object, RENDER_DEPTH_LAYERS.component, { key: `component:${data.id}` });
   object.visible = !data.hidden;
   return object;
+}
+function applyComponentPaint(object, color) {
+  const value = paintColorValue(color);
+  if (!value) return false;
+  object.traverse(child => {
+    if (!child.isMesh) return;
+    if (child.userData.source?.includes('/car_wheel')) return;
+    for (const material of Array.isArray(child.material) ? child.material : [child.material]) material.color.set(value);
+  });
+  return true;
 }
 function disposePlacementPreview() {
   if (!placementPreview) return;
@@ -1461,14 +1506,27 @@ function centerImportedVehicleGeometry() {
 async function place(point) {
   if (!catalog.has(selectedType)) throw new Error('请先选择组件');
   if (objects.length >= LIMIT) throw new Error('达到组件上限');
-  const object = await createObject({ id: crypto.randomUUID(), type: selectedType, gridId: 'grid-1', position: { x: 0, y: 0, z: 0 }, rotation: { x: 0, y: 0, z: 0 }, scale: { x: 1, y: 1, z: 1 } });
+  if (mirrorMode.active && objects.length >= LIMIT - 1) throw new Error('镜像放置会超过组件上限');
+  const color = paintColorValue();
+  const colorIndex = nearestNativePaintIndex(color);
+  const object = await createObject({ id: crypto.randomUUID(), type: selectedType, gridId: 'grid-1', ...(color ? { paintColor: color } : {}), ...(colorIndex !== null ? { colors: [colorIndex] } : {}), position: { x: 0, y: 0, z: 0 }, rotation: { x: 0, y: 0, z: 0 }, scale: { x: 1, y: 1, z: 1 } });
   const gridPoint = quantizeWorldVector(point);
   if (!gridPoint) throw new Error('放置位置超出整数格范围');
   const box = new THREE.Box3().setFromObject(object);
   object.position.set(gridPoint.x, cellToWorld(Math.ceil((gridPoint.y - box.min.y) / CELL_SIZE_WORLD)), gridPoint.z);
-  scene.add(object); objects.push(object); reconcileOpaqueDepthOrder(); select(object);
+  scene.add(object); objects.push(object);
+  const source = snapshot().find(item => item.id === object.userData.id);
+  const reflectedPosition = mirrorMode.active ? mirrorPoint(source.position, mirrorMode) : null;
+  if (reflectedPosition && !sameGridPoint(source.position, reflectedPosition)) {
+    if (objects.length >= LIMIT) throw new Error('镜像放置会超过组件上限');
+    const mirror = await createObject({ ...source, id: crypto.randomUUID(), position: reflectedPosition, mirror: { axis: mirrorMode.axis, offset: mirrorMode.offset } });
+    scene.add(mirror); objects.push(mirror);
+  }
+  reconcileOpaqueDepthOrder(); select(object);
   commit('放置组件'); inspect();
-  status(object.userData.visual === 'mesh' ? '已放置真实静态 Mesh' : '已放置缺失资源标记');
+  status(reflectedPosition && !sameGridPoint(source.position, reflectedPosition)
+    ? '已放置组件及其镜像'
+    : object.userData.visual === 'mesh' ? '已放置真实静态 Mesh' : '已放置缺失资源标记');
 }
 async function remove(object) {
   if (!object) return;
@@ -1494,12 +1552,106 @@ function structuralCopy() {
     await applyStructural(result, result.created, '已复制 {count} 个组件', { count: result.created.length });
   });
 }
-function structuralMirror() {
-  if (!selectedIds.size || busy) return;
-  transact(async () => {
-    const result = mirrorObjects(snapshot(), selectedObjectIds(), { axis: 'x', offset: 0 });
-    await applyStructural(result, result.created, '已镜像 {count} 个组件（X 平面）', { count: result.created.length });
+function updateMirrorGuide() {
+  mirrorGuide.visible = mirrorMode.active && !referencePreview;
+  mirrorGuide.position.set(0, 0, 0);
+  mirrorGuide.rotation.set(0, 0, 0);
+  mirrorGuide.position[mirrorMode.axis] = mirrorMode.offset;
+  if (mirrorMode.axis === 'x') mirrorGuide.rotation.y = Math.PI / 2;
+  if (mirrorMode.axis === 'y') mirrorGuide.rotation.x = -Math.PI / 2;
+  mirrorGuideHandle.position.set(0, 0, 0);
+}
+function mirroredTopologyPoint(point) {
+  return mirrorPoint({ x: point.x, y: point.y, z: point.z }, mirrorMode);
+}
+function hasTopologyEdgeAtPoints(state, a, b) {
+  const byId = new Map(state.nodes.map(node => [node.id, node.position]));
+  return state.edges.some(edge => {
+    const first = byId.get(edge.a); const second = byId.get(edge.b);
+    return (sameGridPoint(first, a) && sameGridPoint(second, b)) || (sameGridPoint(first, b) && sameGridPoint(second, a));
   });
+}
+function addMirroredEdge(state, start, end) {
+  if (!mirrorMode.active) return state;
+  const reflectedStart = mirroredTopologyPoint(start);
+  const reflectedEnd = mirroredTopologyPoint(end);
+  if (sameGridPoint(reflectedStart, reflectedEnd) || hasTopologyEdgeAtPoints(state, reflectedStart, reflectedEnd)) return state;
+  const source = state.edges.at(-1);
+  return createEdgeFromPoints(state, reflectedStart, reflectedEnd, source?.color ? { color: source.color } : {});
+}
+function addMirroredPlate(state, plate) {
+  if (!mirrorMode.active) return state;
+  const sourceNodes = new Map(state.nodes.map(node => [node.id, node]));
+  let nodes = state.nodes;
+  const nodeIds = [];
+  for (const id of plate.nodeIds) {
+    const source = sourceNodes.get(id);
+    if (!source) return state;
+    const created = createNode(nodes, mirroredTopologyPoint(source.position));
+    nodes = created.nodes; nodeIds.push(created.node.id);
+  }
+  if (new Set(nodeIds).size !== nodeIds.length) return state;
+  const properties = {
+    ...(plate.type ? { type: plate.type } : {}),
+    ...(Number.isFinite(plate.normalOffset) ? { normalOffset: plate.normalOffset } : {}),
+    ...(plate.surfaceDirection ? { surfaceDirection: mirrorSurfaceDirection(plate.surfaceDirection, mirrorMode) } : {}),
+    ...(paintColorValue(plate.color_front) ? { color_front: plate.color_front } : {}),
+    ...(paintColorValue(plate.color_back) ? { color_back: plate.color_back } : {}),
+  };
+  try {
+    const result = createPlate(state.plates, [...nodeIds].reverse(), nodes, properties);
+    return { ...state, nodes, plates: result.plates };
+  } catch (error) {
+    if (error.message !== '该闭合梁环已有面板或玻璃') throw error;
+    return { ...state, nodes };
+  }
+}
+function mirroredComponentId(componentId, items = snapshot()) {
+  if (!mirrorMode.active) return null;
+  const source = items.find(item => item.id === componentId);
+  if (!source || source.nativeProjected) return null;
+  const position = mirroredTopologyPoint(source.position);
+  const match = items.find(item => item.type === source.type && item.gridId === source.gridId && sameGridPoint(item.position, position));
+  return match?.id || null;
+}
+function addMirroredLink(links, link, items = snapshot()) {
+  if (!mirrorMode.active) return links;
+  const fromId = mirroredComponentId(link.from.componentId, items);
+  const toId = mirroredComponentId(link.to.componentId, items);
+  if (!fromId || !toId) return links;
+  const points = (link.points || []).map(mirroredTopologyPoint);
+  if (fromId === link.from.componentId && toId === link.to.componentId && points.every((point, index) => sameGridPoint(point, link.points[index]))) return links;
+  return createLink(links, {
+    kind: link.kind,
+    from: { ...link.from, componentId: fromId },
+    to: { ...link.to, componentId: toId },
+    points,
+  }, new Set(items.map(item => item.id))).links;
+}
+function updateMirrorToolbar() {
+  const cells = worldToCell(mirrorMode.offset) ?? 0;
+  mirrorToolbar.hidden = !mirrorMode.active || referencePreview;
+  $('#mirror-action').classList.toggle('active', mirrorMode.active);
+  $('#mirror-action').setAttribute('aria-pressed', String(mirrorMode.active));
+  $('#mirror-action').dataset.i18nTitle = mirrorMode.active ? '关闭镜像模式' : '打开镜像模式';
+  $('#mirror-action').dataset.i18nAriaLabel = $('#mirror-action').dataset.i18nTitle;
+  for (const button of mirrorToolbar.querySelectorAll('[data-mirror-axis]')) button.classList.toggle('active', button.dataset.mirrorAxis === mirrorMode.axis);
+  $('#mirror-offset-input').value = String(cells);
+  $('#mirror-offset-range').value = String(Math.max(-500, Math.min(500, cells)));
+  applyTranslations($('#mirror-action'));
+  updateMirrorGuide();
+}
+function setMirrorOffsetCells(value) {
+  const cells = Number(value);
+  if (!Number.isSafeInteger(cells) || Math.abs(cells) > 125000) return;
+  mirrorMode = { ...mirrorMode, offset: cellToWorld(cells) };
+  updateMirrorToolbar();
+}
+function structuralMirror() {
+  if (busy) return;
+  mirrorMode = { ...mirrorMode, active: !mirrorMode.active };
+  updateMirrorToolbar();
+  status(mirrorMode.active ? '镜像模式已开启：后续建造将在镜像平面另一侧同步创建' : '镜像模式已关闭');
 }
 function structuralSplit() {
   if (!selectedIds.size || busy) return;
@@ -1525,6 +1677,19 @@ $('#copy-action').onclick = structuralCopy;
 $('#mirror-action').onclick = structuralMirror;
 $('#split-action').onclick = structuralSplit;
 $('#merge-action').onclick = structuralMerge;
+for (const button of mirrorToolbar.querySelectorAll('[data-mirror-axis]')) {
+  button.addEventListener('click', () => {
+    mirrorMode = { ...mirrorMode, axis: button.dataset.mirrorAxis };
+    updateMirrorToolbar();
+  });
+}
+$('#mirror-offset-range').addEventListener('input', event => setMirrorOffsetCells(event.target.value));
+$('#mirror-offset-input').addEventListener('change', event => setMirrorOffsetCells(event.target.value));
+function moveMirrorGuideFromRay() {
+  const nearest = raycaster.ray.closestPointToPoint(mirrorGuide.position, new THREE.Vector3());
+  const cells = Math.round(nearest[mirrorMode.axis] / CELL_SIZE_WORLD);
+  setMirrorOffsetCells(cells);
+}
 restoreTransparencyButton.onclick = () => {
   if (!busy) void transact(restoreTransparency);
 };
@@ -1613,13 +1778,14 @@ function inspect() {
 
 function componentPropertyLabel(key) {
   const labels = {
-    audio_radius: ['音频范围', 'Audio radius'], sound_effect: ['音效', 'Sound effect'],
-    sensitivity_steering: ['转向灵敏度', 'Steering sensitivity'], sensitivity_pedal_l: ['左踏板灵敏度', 'Left pedal sensitivity'], sensitivity_pedal_r: ['右踏板灵敏度', 'Right pedal sensitivity'], light_activation: ['灯光激活', 'Light activation'],
+    audio_radius: ['音频范围', 'Audio radius'], sound_effect: ['音效', 'Sound effect'], fov: ['视野角度', 'FOV'],
+    sensitivity_steering: ['转向灵敏度', 'Steering sensitivity'], sensitivity_pedal_l: ['左踏板灵敏度', 'Left pedal sensitivity'], sensitivity_pedal_r: ['右踏板灵敏度', 'Right pedal sensitivity'], light_activation: ['照明', 'Illuminated'],
+    sensitivity_yaw: ['偏航灵敏度', 'Yaw sensitivity'], sensitivity_pitch: ['俯仰灵敏度', 'Pitch sensitivity'], sensitivity_roll: ['滚转灵敏度', 'Roll sensitivity'], seat_pose: ['座椅姿态', 'Seat pose'], sticky: ['保持位置', 'Sticky'], stiffness: ['刚度', 'Stiffness'], damping: ['阻尼', 'Damping'],
     traverse_limit_left: ['左水平限位（弧度）', 'Left traverse limit (radians)'], traverse_limit_right: ['右水平限位（弧度）', 'Right traverse limit (radians)'], elevation_limit_down: ['下俯仰限位（弧度）', 'Down elevation limit (radians)'], elevation_limit_up: ['上俯仰限位（弧度）', 'Up elevation limit (radians)'],
     user_defined_alias: ['自定义别名', 'Custom alias'], gear_count: ['档位数', 'Gear count'], count: ['档位数量', 'Position count'],
     offset: ['偏移', 'Offset'], scale: ['缩放', 'Scale'], min: ['最小角度（弧度）', 'Minimum angle (radians)'], max: ['最大角度（弧度）', 'Maximum angle (radians)'],
     tilt_x: ['水平倾角（弧度）', 'Horizontal tilt (radians)'], tilt_y: ['垂直倾角（弧度）', 'Vertical tilt (radians)'],
-    input_ratio: ['输入齿比', 'Input ratio'], output_ratio: ['输出齿比', 'Output ratio'], gear_ratio: ['齿比', 'Gear ratio'], reverse: ['反转方向', 'Reverse direction'],
+    input: ['输入', 'Input'], output: ['输出', 'Output'], input_ratio: ['输入齿比', 'Input ratio'], output_ratio: ['输出齿比', 'Output ratio'], gear_ratio: ['齿比', 'Gear ratio'], reverse: ['反转方向', 'Reverse direction'],
     flow_factor: ['流量系数', 'Flow factor'], power: ['功率系数', 'Power factor'], range: ['范围', 'Range'],
   };
   return labels[key] ? labels[key][getLocale() === 'zh' ? 0 : 1] : key.replaceAll('_', ' ').replace(/\b\w/g, letter => letter.toUpperCase());
@@ -1910,7 +2076,10 @@ function pickTopologySurface() {
       const positions = new Map(topology.nodes.map(node => [node.id, new THREE.Vector3(node.position.x, node.position.y, node.position.z)]));
       for (const plate of topology.plates) {
         if (plate.hidden) continue;
-        const boundary = plateSurfaceBoundary(plate.nodeIds, positions, plate.normalOffset ?? CELL_SIZE_WORLD / 2).map(project);
+        const boundary = plateSurfaceBoundary(plate.nodeIds, positions, {
+          normalOffset: plate.normalOffset ?? CELL_SIZE_WORLD / 2,
+          surfaceDirection: plate.surfaceDirection,
+        }).map(project);
         if (boundary.length < 3) continue;
         let inside = false;
         for (let i = 0, j = boundary.length - 1; i < boundary.length; j = i++) {
@@ -2065,8 +2234,8 @@ function pickPaintTarget() {
 }
 function pickedPaintColor(target) {
   if (target.kind === 'component') {
-    const index = target.object.userData.colors?.[0];
-    return Number.isInteger(index) ? nativePaintColor(index) : null;
+    return paintColorValue(target.object.userData.paintColor)
+      || (Number.isInteger(target.object.userData.colors?.[0]) ? nativePaintColor(target.object.userData.colors[0]) : null);
   }
   if (target.kind === 'edge') {
     const edge = topology.edges.find(value => value.id === target.id);
@@ -2092,9 +2261,21 @@ function pickPaintColor() {
 function paintTopology() {
   const target = pickPaintTarget();
   if (!target) { status('涂色工具需要点击组件、梁或面板'); return; }
-  if (target.kind === 'component') { status('组件涂色槽尚未接入；当前可涂色梁和面板'); return; }
   const color = paintColorValue();
   if (!color) { status('颜色必须是 #RRGGBB 格式'); return; }
+  if (target.kind === 'component') {
+    const colorIndex = nearestNativePaintIndex(color);
+    if (colorIndex === null) { status('颜色必须是 #RRGGBB 格式'); return; }
+    const currentSlots = target.object.userData.colors;
+    target.object.userData.colors = Array.isArray(currentSlots) && currentSlots.length
+      ? currentSlots.map(() => colorIndex)
+      : [colorIndex];
+    target.object.userData.paintColor = color;
+    applyComponentPaint(target.object, color);
+    commit('已为组件设置颜色 {color}', { color });
+    hoveredObject = null; updateInteractionHighlights();
+    return;
+  }
   if (target.kind === 'edge') {
     commitTopology({ ...topology, edges: topology.edges.map(edge => edge.id === target.id ? { ...edge, color } : edge) }, '已为梁设置颜色 {color}', { color });
     hoveredObject = null; updateInteractionHighlights();
@@ -2295,10 +2476,14 @@ function finishPlate(type = 'plate') {
   if (plateEdgeIds.length < 3) { status(glass ? '玻璃至少需要选择三根梁' : '面板至少需要选择三根梁'); return; }
   try {
     const command = glass ? createGlassPlateFromEdges : createPlateFromEdges;
-    const result = command(topology.plates, plateEdgeIds, topology.edges, topology.nodes, { normalOffset: CELL_SIZE_WORLD / 2 });
+    const color = paintColorValue();
+    const result = command(topology.plates, plateEdgeIds, topology.edges, topology.nodes, { normalOffset: CELL_SIZE_WORLD / 2, ...(color ? { color_front: color, color_back: color } : {}) });
     const positions = new Map(topology.nodes.map(node => [node.id, new THREE.Vector3(node.position.x, node.position.y, node.position.z)]));
     result.plate.normalOffset = cameraFacingPlateOffset(result.plate.nodeIds, positions, camera.position, CELL_SIZE_WORLD / 2);
-    commitTopology({ ...topology, plates: result.plates }, glass ? '已创建玻璃面板' : '已创建面板');
+    const surfaceDirection = cameraFacingPlateDirection(result.plate.nodeIds, positions, camera.position);
+    result.plate.surfaceDirection = { x: surfaceDirection.x, y: surfaceDirection.y, z: surfaceDirection.z };
+    const next = addMirroredPlate({ ...topology, plates: result.plates }, result.plate);
+    commitTopology(next, glass ? '已创建玻璃面板' : '已创建面板');
     plateEdgeIds = [];
     hoveredObject = null;
     updateInteractionHighlights();
@@ -2374,7 +2559,9 @@ function handleEdgeClick(event) {
     status('起点已定位；移动鼠标预览实体梁，再次点击完成');
     return;
   }
-  commitTopology(createEdgeFromPoints(topology, edgeDraft.start, point), '已创建 1 格实体梁');
+  const color = paintColorValue();
+  const created = createEdgeFromPoints(topology, edgeDraft.start, point, color ? { color } : {});
+  commitTopology(addMirroredEdge(created, edgeDraft.start, point), mirrorMode.active ? '已创建实体梁及其镜像' : '已创建 1 格实体梁');
   cancelEdge();
 }
 function handleConnectionClick() {
@@ -2391,10 +2578,12 @@ function handleConnectionClick() {
   if (connectionDraft.componentId === endpoint.componentId && connectionDraft.port === endpoint.port) { status('请选择另一个组件端口作为连接终点'); return; }
   $('#connection-to-port').value = String(endpoint.port);
   const kind = $('#connection-kind').value;
-  const result = createLink(topology.links || [], { kind, from: connectionDraft, to: endpoint, points: connectionDraft.points || [] }, new Set(snapshot().map(item => item.id)));
+  const componentIds = new Set(snapshot().map(item => item.id));
+  const result = createLink(topology.links || [], { kind, from: connectionDraft, to: endpoint, points: connectionDraft.points || [] }, componentIds);
+  const links = addMirroredLink(result.links, result.link);
   connectionDraft = null;
   clearConnectionDraftPreview();
-  commitTopology({ ...topology, links: result.links }, '已创建 {kind} 连接', { kind });
+  commitTopology({ ...topology, links }, mirrorMode.active && links.length > result.links.length ? '已创建 {kind} 连接及其镜像' : '已创建 {kind} 连接', { kind });
   refreshConnectionPorts();
 }
 function addConnectionRoutePoint(point) {
@@ -2430,7 +2619,9 @@ function handleTopologyClick(point) {
       return true;
     }
     const created = createNode(topology.nodes, point);
-    commitTopology({ ...topology, nodes: created.nodes }, created.created ? '已创建节点 {id}' : '已选择已有节点 {id}', { id: created.node.id });
+    let nodes = created.nodes;
+    if (created.created && mirrorMode.active) nodes = createNode(nodes, mirroredTopologyPoint(point)).nodes;
+    commitTopology({ ...topology, nodes }, created.created ? mirrorMode.active ? '已创建节点及其镜像 {id}' : '已创建节点 {id}' : '已选择已有节点 {id}', { id: created.node.id });
     if (!created.created) selectTopologyNode(created.node.id);
     return true;
   }
@@ -2450,12 +2641,25 @@ function handleTopologyClick(point) {
 renderer.domElement.addEventListener('contextmenu', e => e.preventDefault());
 renderer.domElement.addEventListener('pointerdown', event => {
   if (event.button !== 0 || busy) return;
+  pointerRay(event);
+  if (mirrorMode.active && mirrorGuide.visible && raycaster.intersectObject(mirrorGuideHandle, false).length) {
+    mirrorGuideDrag = true;
+    controls.enabled = false;
+    down = null;
+    renderer.domElement.setPointerCapture(event.pointerId);
+    return;
+  }
   viewport.focus({ preventScroll: true });
   dragOccurred = transform.dragging;
   down = { x: event.clientX, y: event.clientY };
 });
 renderer.domElement.addEventListener('pointermove', event => {
   if (busy) return;
+  if (mirrorGuideDrag) {
+    pointerRay(event);
+    moveMirrorGuideFromRay();
+    return;
+  }
   pointerInCanvas = true;
   edgePointer = { clientX: event.clientX, clientY: event.clientY };
   pointerRay(event);
@@ -2483,6 +2687,12 @@ renderer.domElement.addEventListener('pointermove', event => {
 });
 renderer.domElement.addEventListener('pointerleave', () => { pointerInCanvas = false; hoveredObject = null; hideConnectionPortTooltip(); updateInteractionHighlights(); edgePreview.visible = false; edgeAnchor.visible = false; edgeRuler.hide(); if (placementPreview) placementPreview.visible = false; });
 renderer.domElement.addEventListener('pointerup', event => {
+  if (mirrorGuideDrag) {
+    mirrorGuideDrag = false;
+    controls.enabled = true;
+    if (renderer.domElement.hasPointerCapture(event.pointerId)) renderer.domElement.releasePointerCapture(event.pointerId);
+    return;
+  }
   if (!down || event.button !== 0) return;
   const moved = Math.hypot(event.clientX - down.x, event.clientY - down.y); down = null;
   if (busy || dragOccurred || moved > 5 || (transform.axis && ['translate', 'rotate', 'scale'].includes(tool))) return;
@@ -2546,7 +2756,7 @@ renderer.domElement.addEventListener('pointerup', event => {
     else select(pick(), { toggle: event.shiftKey });
   }
 });
-renderer.domElement.addEventListener('pointercancel', () => { down = null; cancelEdge(); });
+renderer.domElement.addEventListener('pointercancel', () => { mirrorGuideDrag = false; controls.enabled = true; down = null; cancelEdge(); });
 
 function fit({ reference = referencePreview } = {}) {
   const box = new THREE.Box3();
@@ -2598,6 +2808,7 @@ function setReferencePreview(value) {
   paintToolbar.hidden = referencePreview || tool !== 'paint';
   connectionToolbar.hidden = referencePreview || tool !== 'connect';
   transparencyToolbar.hidden = referencePreview || tool !== 'hide';
+  updateMirrorToolbar();
   $('.hud').hidden = referencePreview;
   leftSidebarToggle.hidden = referencePreview;
   rightSidebarToggle.hidden = referencePreview;
@@ -2613,7 +2824,7 @@ nativeReferencePreviewButton.onclick = () => {
   status(referencePreview ? '已开启参考预览：编辑辅助已隐藏，可对照 vehicle.png；相机、光照和游戏材质尚未验证' : '已退出参考预览');
 };
 const gridFields = document.createElement('div');
-gridFields.innerHTML = '<div class="property"><label for="grid-color" data-i18n="网格颜色"></label><input id="grid-color" type="color"></div><div class="property"><label for="grid-opacity" data-i18n="网格透明度"></label><input id="grid-opacity" type="range" min="0" max="1" step="0.05"></div><div class="property"><label for="grid-style" data-i18n="网格线型"></label><select id="grid-style"><option value="solid" data-i18n="实线"></option><option value="dashed" data-i18n="虚线"></option></select></div><h2 data-i18n="节点显示"></h2><div class="property"><label for="node-color" data-i18n="节点颜色"></label><input id="node-color" type="color"></div><div class="property"><label for="node-size" data-i18n="节点大小"></label><input id="node-size" type="range" min="0.02" max="0.25" step="0.005"><output id="node-size-value"></output></div><div class="property"><label for="node-opacity" data-i18n="节点透明度"></label><input id="node-opacity" type="range" min="0" max="1" step="0.05"></div><h2 data-i18n="结构显示"></h2><div class="property"><label for="edge-lengths-visible" data-i18n="显示梁 XYZ 长度（格）"></label><input id="edge-lengths-visible" type="checkbox"></div><div class="property"><label for="edge-outlines-visible" data-i18n="显示梁描边"></label><input id="edge-outlines-visible" type="checkbox"></div><h2 data-i18n="涂色"></h2><div class="property"><label for="paint-color" data-i18n="颜色（Hex RGB）"></label><input id="paint-color" type="color" value="#bd2636"><input id="paint-color-hex" type="text" value="#bd2636" maxlength="7" spellcheck="false"><output id="paint-color-preview" class="paint-color-preview"></output></div><div class="property"><label for="paint-side" data-i18n="面板涂色面"></label><select id="paint-side"><option value="front" data-i18n="前面"></option><option value="back" data-i18n="背面"></option></select></div>';
+gridFields.innerHTML = '<div class="property"><label for="grid-color" data-i18n="网格颜色"></label><input id="grid-color" type="color"></div><div class="property"><label for="grid-opacity" data-i18n="网格透明度"></label><input id="grid-opacity" type="range" min="0" max="1" step="0.05"></div><div class="property"><label for="grid-style" data-i18n="网格线型"></label><select id="grid-style"><option value="solid" data-i18n="实线"></option><option value="dashed" data-i18n="虚线"></option></select></div><h2 data-i18n="节点显示"></h2><div class="property"><label for="node-color" data-i18n="节点颜色"></label><input id="node-color" type="color"></div><div class="property"><label for="node-size" data-i18n="节点大小"></label><input id="node-size" type="range" min="0.02" max="0.25" step="0.005"><output id="node-size-value"></output></div><div class="property"><label for="node-opacity" data-i18n="节点透明度"></label><input id="node-opacity" type="range" min="0" max="1" step="0.05"></div><h2 data-i18n="结构显示"></h2><div class="property"><label for="edge-lengths-visible" data-i18n="显示梁 XYZ 长度（格）"></label><input id="edge-lengths-visible" type="checkbox"></div><div class="property"><label for="edge-outlines-visible" data-i18n="显示梁描边"></label><input id="edge-outlines-visible" type="checkbox"></div><h2 data-i18n="涂色"></h2><div class="property"><label for="paint-color" data-i18n="颜色（Hex RGB）"></label><input id="paint-color" type="color" value="#dddddd"><input id="paint-color-hex" type="text" value="#dddddd" maxlength="7" spellcheck="false"><output id="paint-color-preview" class="paint-color-preview"></output></div><div class="property"><label for="paint-side" data-i18n="面板涂色面"></label><select id="paint-side"><option value="front" data-i18n="前面"></option><option value="back" data-i18n="背面"></option></select></div>';
 const renderSettingsFields = document.createElement('div');
 renderSettingsFields.innerHTML = '<h2 data-i18n="视图与光照"></h2><div class="property"><label for="background-color" data-i18n="背景颜色"></label><input id="background-color" type="color"></div><div class="property"><label for="orthographic-view" data-i18n="正交镜头"></label><input id="orthographic-view" type="checkbox"></div><div class="property"><label for="light-azimuth" data-i18n="光照方位角"></label><input id="light-azimuth" type="range" min="-180" max="180" step="1"><output id="light-azimuth-value"></output></div><div class="property"><label for="light-elevation" data-i18n="光照高度角"></label><input id="light-elevation" type="range" min="5" max="90" step="1"><output id="light-elevation-value"></output></div><div class="property"><label for="light-intensity" data-i18n="光照强度"></label><input id="light-intensity" type="range" min="0" max="8" step="0.1"><output id="light-intensity-value"></output></div><div class="property"><label for="shadow-strength" data-i18n="阴影强度"></label><input id="shadow-strength" type="range" min="0" max="1" step="0.05"><output id="shadow-strength-value"></output></div><div class="property"><label for="light-softness" data-i18n="光照柔和度"></label><input id="light-softness" type="range" min="0" max="8" step="0.25"><output id="light-softness-value"></output></div>';
 const cameraLightSettings = document.createElement('div');
@@ -2726,7 +2937,9 @@ function setPaintColor(value) {
   $('#paint-color-hex').value = color;
   $('#paint-toolbar-color').value = color;
   $('#paint-toolbar-hex').value = color;
+  settings.paintColor = color;
   updatePaintPreview();
+  scheduleSettings();
   return true;
 }
 function selectLinkPoint(linkId, pointIndex) {
@@ -2781,7 +2994,7 @@ $('#save-paint-quick-color').onclick = () => {
 };
 $('#connection-kind').addEventListener('change', updateConnectionToolbar);
 $('#save-transparency-group').onclick = saveTransparencyGroup;
-renderPaintQuickColors(); updateConnectionToolbar();
+setPaintColor(settings.paintColor); renderPaintQuickColors(); updateConnectionToolbar();
 updatePaintPreview();
 function updateGridButton() {
   setText($('#grid-btn'), gridPreferenceVisible ? '隐藏网格' : '显示网格');
@@ -3037,7 +3250,7 @@ function collectSettings() {
     version: 1, language: getLocale(), leftWidth: leftSidebarWidth, rightWidth: rightSidebarWidth, leftCollapsed: leftSidebar.hidden, rightOpen: !rightSidebar.hidden,
     gridColor: $('#grid-color').value, gridOpacity: Number($('#grid-opacity').value), gridStyle: $('#grid-style').value, gridVisible: gridPreferenceVisible,
     nodesVisible: showNodes, nodeColor: $('#node-color').value, nodeSize: Number($('#node-size').value), nodeOpacity: Number($('#node-opacity').value), edgeAxisSnap, connectionVisibility: { ...connectionVisibility }, edgeLengthsVisible: settings.edgeLengthsVisible, edgeOutlinesVisible: settings.edgeOutlinesVisible, tool, selectedType,
-    backgroundColor: settings.backgroundColor, lightAzimuth: settings.lightAzimuth, lightElevation: settings.lightElevation, lightIntensity: settings.lightIntensity, shadowStrength: settings.shadowStrength, lightSoftness: settings.lightSoftness, cameraLightEnabled: settings.cameraLightEnabled, cameraLightIntensity: settings.cameraLightIntensity, paintQuickColors: settings.paintQuickColors, orthographic: settings.orthographic,
+    backgroundColor: settings.backgroundColor, lightAzimuth: settings.lightAzimuth, lightElevation: settings.lightElevation, lightIntensity: settings.lightIntensity, shadowStrength: settings.shadowStrength, lightSoftness: settings.lightSoftness, cameraLightEnabled: settings.cameraLightEnabled, cameraLightIntensity: settings.cameraLightIntensity, paintColor: settings.paintColor, paintQuickColors: settings.paintQuickColors, orthographic: settings.orthographic,
     showBuildingFurniture: $('#show-building-furniture').checked, modelThumbnails: $('#use-model-thumbnails').checked, catalogCardSize: settings.catalogCardSize, query: $('#component-search').value, category: $('#category-filter').value,
     sidebarTabs: { left: settings.sidebarTabs.left, right: settings.sidebarTabs.right },
     camera: { position: camera.position.toArray(), target: controls.target.toArray() },
@@ -3064,6 +3277,7 @@ export function changeLanguage(locale) {
   document.documentElement.lang = getLocale() === 'zh' ? 'zh-CN' : 'en';
   $('#language-select').value = getLocale();
   applyTranslations(document);
+  renderLatestPagesBuildTime();
   renderCategories(); renderCatalog(); inspect(); refresh();
   if (definitionOpen && $('#inspector-content details')) $('#inspector-content details').open = true;
   leftSidebar.scrollTop = scrollTop;
@@ -3081,6 +3295,39 @@ activateSidebarTab('left', settings.sidebarTabs.left);
 activateSidebarTab('right', settings.sidebarTabs.right);
 changeLanguage(getLocale());
 setGridConstraints(); refresh(); resize();
+function renderLatestPagesBuildTime() {
+  const element = $('#github-build-time');
+  if (!latestPagesBuildTime || Number.isNaN(latestPagesBuildTime.getTime())) {
+    element.hidden = true;
+    return;
+  }
+  const language = getLocale() === 'zh' ? 'zh-CN' : 'en-US';
+  const formatted = new Intl.DateTimeFormat(language, { dateStyle: 'medium', timeStyle: 'short' }).format(latestPagesBuildTime);
+  setText(element, '版本 {time}', { time: formatted });
+  element.title = latestPagesBuildTime.toISOString();
+  element.hidden = false;
+}
+async function loadLatestPagesBuildTime() {
+  const controller = new AbortController();
+  const timer = setTimeout(() => controller.abort(), 8000);
+  try {
+    const response = await fetch(GITHUB_PAGES_WORKFLOW_RUNS, {
+      headers: { Accept: 'application/vnd.github+json' },
+      signal: controller.signal,
+    });
+    if (!response.ok) return;
+    const payload = await response.json();
+    const updatedAt = payload?.workflow_runs?.[0]?.updated_at;
+    const time = typeof updatedAt === 'string' ? new Date(updatedAt) : null;
+    if (!time || Number.isNaN(time.getTime())) return;
+    latestPagesBuildTime = time;
+    renderLatestPagesBuildTime();
+  } catch {
+    // GitHub API availability and rate limits must not delay the editor.
+  } finally {
+    clearTimeout(timer);
+  }
+}
 async function initialize() {
   await loadCatalog();
   $('#component-search').value = settings.query;
@@ -3106,9 +3353,10 @@ async function initialize() {
     camera.position.fromArray(settings.camera.position); controls.target.fromArray(settings.camera.target); controls.update();
   } else if (objects.length || topology.nodes.length) fit();
   busy = false;
-  setTool(settings.tool); refresh();
+  setTool(settings.tool); updateMirrorToolbar(); refresh();
   preferencesReady = true;
   viewport.dataset.ready = 'true';
+  void loadLatestPagesBuildTime();
   if (storedSettings.error) status('设置保存失败：{detail}', { detail: storedSettings.error.message });
 }
 initialize().catch(error => reportError('组件目录加载失败：{error}', error));

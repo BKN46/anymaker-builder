@@ -48,6 +48,10 @@ export function validateDocument(input, definitions) {
       if (!Array.isArray(o.colors) || o.colors.length > 10 || o.colors.some(color => !Number.isInteger(color) || color < 0 || color > 255)) throw new Error('Invalid component color slots at ' + index);
       result.colors = [...o.colors];
     }
+    if (o.paintColor !== undefined) {
+      if (typeof o.paintColor !== 'string' || !/^#[\da-f]{6}$/i.test(o.paintColor)) throw new Error('Invalid component paint color at ' + index);
+      result.paintColor = o.paintColor.toLowerCase();
+    }
     if (o.hidden !== undefined) {
       if (typeof o.hidden !== 'boolean') throw new Error('Invalid component visibility at ' + index);
       if (o.hidden) result.hidden = true;

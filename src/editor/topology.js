@@ -15,6 +15,14 @@ const edgeKey = (a, b) => [a, b].sort().join('::');
 const validColorIndex = value => value === undefined || (Number.isInteger(value) && value >= 0 && value <= 255);
 const validColor = value => value === undefined || (typeof value === 'string' && /^#[\da-f]{6}$/i.test(value));
 
+function normalizedSurfaceDirection(value) {
+  if (value === undefined) return undefined;
+  if (!value || AXES.some(axis => !Number.isFinite(value[axis]) || Math.abs(value[axis]) > 1)) throw new Error('面板镜头方向无效');
+  const magnitude = Math.hypot(value.x, value.y, value.z);
+  if (magnitude <= EPSILON) throw new Error('面板镜头方向无效');
+  return Object.fromEntries(AXES.map(axis => [axis, value[axis] / magnitude]));
+}
+
 function sameBoundary(a, b) {
   if (a.length !== b.length) return false;
   return a.some((start, index) => {
@@ -56,6 +64,7 @@ export function validateTopologyState(state = {}, componentIds = null) {
     edgeIds.add(edge.id);
   }
   const plateIds = new Set();
+  const normalizedPlates = [];
   for (const plate of plates) {
     if (!plate || typeof plate.id !== 'string' || !plate.id || plateIds.has(plate.id)) throw new Error('面板 ID 无效或重复');
     validatePlate(plate.nodeIds, nodes, plate.normalOffset);
@@ -64,8 +73,10 @@ export function validateTopologyState(state = {}, componentIds = null) {
     if (plate.type !== undefined && plate.type !== 'window') throw new Error('面板类型无效');
     if (plate.hidden !== undefined && typeof plate.hidden !== 'boolean') throw new Error('面板可见性无效');
     plateIds.add(plate.id);
+    const surfaceDirection = normalizedSurfaceDirection(plate.surfaceDirection);
+    normalizedPlates.push({ ...clone(plate), ...(surfaceDirection ? { surfaceDirection } : {}) });
   }
-  return { nodes: normalizedNodes, edges: clone(edges), plates: clone(plates), ...(state.links !== undefined ? { links } : {}) };
+  return { nodes: normalizedNodes, edges: clone(edges), plates: normalizedPlates, ...(state.links !== undefined ? { links } : {}) };
 }
 
 function newId(values, prefix) {
@@ -159,11 +170,11 @@ export function createEdge(edges, a, b, properties = {}) {
   return { edges: [...clone(edges), edge], edge };
 }
 
-export function createEdgeFromPoints(state, start, end) {
+export function createEdgeFromPoints(state, start, end, properties = {}) {
   const next = validateTopologyState(state);
   const a = createNode(next.nodes, start);
   const b = createNode(a.nodes, end);
-  const result = createEdge(next.edges, a.node.id, b.node.id);
+  const result = createEdge(next.edges, a.node.id, b.node.id, properties);
   return validateTopologyState({ ...next, nodes: b.nodes, edges: result.edges });
 }
 
@@ -238,8 +249,9 @@ export function validatePlate(nodeIds, nodes, normalOffset = 0) {
 
 export function createPlate(plates, nodeIds, nodes, properties = {}) {
   validatePlate(nodeIds, nodes, properties.normalOffset);
+  const surfaceDirection = normalizedSurfaceDirection(properties.surfaceDirection);
   if (plates.some(plate => Array.isArray(plate.nodeIds) && sameBoundary(plate.nodeIds, nodeIds))) throw new Error('该闭合梁环已有面板或玻璃');
-  const plate = { id: newId(plates, 'plate'), nodeIds: [...nodeIds], ...clone(properties) };
+  const plate = { id: newId(plates, 'plate'), nodeIds: [...nodeIds], ...clone(properties), ...(surfaceDirection ? { surfaceDirection } : {}) };
   return { plates: [...clone(plates), plate], plate };
 }
 

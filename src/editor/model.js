@@ -60,6 +60,7 @@ export class Component {
     };
     this.mirror = data.mirror ? { axis: data.mirror.axis, offset: data.mirror.offset } : undefined;
     this.colors = Array.isArray(data.colors) ? [...data.colors] : undefined;
+    this.paintColor = typeof data.paintColor === 'string' ? data.paintColor : undefined;
     this.hidden = data.hidden === true ? true : undefined;
     this.extras = clone(data.extras || {});
   }
@@ -333,6 +334,7 @@ export function toEditorDocument(model, { vehicleIds = null } = {}) {
       gridId: grid.id,
       ...(component.mirror ? { mirror: clone(component.mirror) } : {}),
       ...(Array.isArray(sourceColors) && sourceColors.length <= 10 && sourceColors.every(color => Number.isInteger(color) && color >= 0 && color <= 255) ? { colors: [...sourceColors] } : {}),
+      ...(typeof component.paintColor === 'string' ? { paintColor: component.paintColor } : {}),
       ...(component.hidden ? { hidden: true } : {}),
       ...(nativeExtension(component) ? { nativeExtension: nativeExtension(component) } : {}),
       ...(nativePropertiesFromState(component.extras?.native?.state) ? { nativeProperties: nativePropertiesFromState(component.extras.native.state) } : {}),

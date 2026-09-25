@@ -53,9 +53,10 @@ export function normalizeSettings(input = {}) {
     lightSoftness: finite(s.lightSoftness, 0, 8, 2),
     cameraLightEnabled: bool(s.cameraLightEnabled, true),
     cameraLightIntensity: finite(s.cameraLightIntensity, 0, 8, 2),
+    paintColor: hexColor(s.paintColor) || '#dddddd',
     // Older preferences kept diagnostic native palette indices. Convert them
     // once on read so the visible palette and all newly saved colors are RGB.
-    paintQuickColors: paintColors(s.paintQuickColors, ['#bd2636', '#631a24', '#2b3440', '#20252c', '#a16a30']),
+    paintQuickColors: paintColors(s.paintQuickColors, ['#dddddd', '#bd2636', '#631a24', '#2b3440', '#20252c']),
     orthographic: bool(s.orthographic, false),
     showBuildingFurniture: bool(s.showBuildingFurniture, false),
     modelThumbnails: bool(s.modelThumbnails, false),

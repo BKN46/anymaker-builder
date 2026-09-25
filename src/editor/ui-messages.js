@@ -1,4 +1,12 @@
 export const editorMessages = {
+  '版本 {time}': 'Build {time}',
+  '镜像模式': 'Mirror mode', '镜像平面': 'Mirror plane', '平面位置': 'Plane position', '镜像平面位置': 'Mirror plane position', '格': 'cells',
+  '拖动蓝色手柄或滑块，沿镜像平面法向移动。': 'Drag the blue handle or slider to move along the plane normal.',
+  '打开镜像模式': 'Enable mirror mode', '关闭镜像模式': 'Disable mirror mode',
+  '镜像模式已开启：后续建造将在镜像平面另一侧同步创建': 'Mirror mode enabled: future construction will also be created across the mirror plane.',
+  '镜像模式已关闭': 'Mirror mode disabled', '镜像放置会超过组件上限': 'Mirrored placement would exceed the component limit.',
+  '已放置组件及其镜像': 'Placed component and its mirror', '已创建实体梁及其镜像': 'Created beam and its mirror',
+  '已创建节点及其镜像 {id}': 'Created node and its mirror {id}', '已创建 {kind} 连接及其镜像': 'Created {kind} connection and its mirror',
   'GitHub 仓库': 'GitHub repository',
   '可选择对象': 'Selectable objects', '收起可选择对象': 'Collapse selectable objects', '展开可选择对象': 'Expand selectable objects', '显示连接': 'Show connections', '收起显示连接': 'Collapse show connections', '展开显示连接': 'Expand show connections', '组件': 'Components', '节点': 'Nodes', '梁': 'Beams', '面板': 'Panels', '连接': 'Connections', '正交': 'Orthographic', '回到中心': 'Recenter',
   '隐藏': 'Hide',

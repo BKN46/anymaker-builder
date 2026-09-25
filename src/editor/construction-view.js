@@ -316,99 +316,63 @@ function plateNormal(points) {
   return normal;
 }
 
-function planeBasis(points, normal) {
-  // Use the first non-zero edge as a stable in-plane axis.  The second axis
-  // is chosen so that (u, v) has the same winding as the supplied normal.
-  let u = null;
-  for (let index = 1; index < points.length; index++) {
-    const edge = points[index].clone().sub(points[0]);
-    if (edge.lengthSq() > EPSILON) { u = edge.normalize(); break; }
-  }
-  if (!u) return null;
-  const v = normal.clone().cross(u);
-  if (v.lengthSq() <= EPSILON) return null;
-  return { u, v: v.normalize() };
+function plateSurfaceOptions(points, surface) {
+  const normal = plateNormal(points);
+  if (normal.lengthSq() <= EPSILON) return null;
+  const normalOffset = typeof surface === 'number' ? surface : surface?.normalOffset;
+  const rawDirection = typeof surface === 'object' && surface?.surfaceDirection
+    ? vector(surface.surfaceDirection)
+    : normal.clone().multiplyScalar((normalOffset ?? EDGE_WIDTH / 2) < 0 ? -1 : 1);
+  if (rawDirection.lengthSq() <= EPSILON) return null;
+  return {
+    normal,
+    direction: rawDirection.normalize(),
+    halfWidth: typeof surface === 'object' && Number.isFinite(surface?.halfWidth) ? Math.abs(surface.halfWidth) : EDGE_WIDTH / 2,
+  };
 }
 
-function lineIntersection2d(firstPoint, firstDirection, secondPoint, secondDirection) {
-  const denominator = firstDirection.x * secondDirection.y - firstDirection.y * secondDirection.x;
-  if (Math.abs(denominator) <= EPSILON) return null;
-  const delta = secondPoint.clone().sub(firstPoint);
-  const scale = (delta.x * secondDirection.y - delta.y * secondDirection.x) / denominator;
-  return firstPoint.clone().addScaledVector(firstDirection, scale);
+function nodeOutwardDirection(points, index, normal) {
+  const previous = points[(index + points.length - 1) % points.length];
+  const current = points[index];
+  const next = points[(index + 1) % points.length];
+  const incoming = current.clone().sub(previous);
+  const outgoing = next.clone().sub(current);
+  const outward = new THREE.Vector3();
+  if (incoming.lengthSq() > EPSILON) outward.add(incoming.normalize().cross(normal));
+  if (outgoing.lengthSq() > EPSILON) outward.add(outgoing.normalize().cross(normal));
+  if (outward.lengthSq() <= EPSILON) {
+    const center = points.reduce((sum, point) => sum.add(point), new THREE.Vector3()).multiplyScalar(1 / points.length);
+    outward.copy(current).sub(center);
+  }
+  return outward.lengthSq() > EPSILON ? outward.normalize() : new THREE.Vector3();
 }
 
-function expandedPlateBoundary(points, windingNormal, halfWidth) {
-  const basis = planeBasis(points, windingNormal);
-  if (!basis) return [];
-  const coordinates = points.map(point => new THREE.Vector2(
-    point.dot(basis.u), point.dot(basis.v),
-  ));
-  let signedArea = 0;
-  for (let index = 0; index < coordinates.length; index++) {
-    const current = coordinates[index];
-    const next = coordinates[(index + 1) % coordinates.length];
-    signedArea += current.x * next.y - next.x * current.y;
-  }
-  if (Math.abs(signedArea) <= EPSILON) return [];
-  const winding = signedArea < 0 ? -1 : 1;
-  const shiftedLines = coordinates.map((start, index) => {
-    const end = coordinates[(index + 1) % coordinates.length];
-    const direction = end.clone().sub(start);
-    if (direction.lengthSq() <= EPSILON) return null;
-    direction.normalize();
-    // For a counter-clockwise polygon the outside is the right-hand side;
-    // reverse it for the opposite winding.
-    const outward = new THREE.Vector2(direction.y, -direction.x).multiplyScalar(winding);
-    // The beam profile is an axis-aligned cube. Its support distance along
-    // the plane's outward direction is h * (|nx| + |ny| + |nz|), which grows
-    // naturally for diagonal beams and matches their projected silhouette.
-    const outwardWorld = basis.u.clone().multiplyScalar(outward.x)
-      .addScaledVector(basis.v, outward.y);
-    const offsetDistance = halfWidth * (Math.abs(outwardWorld.x)
-      + Math.abs(outwardWorld.y) + Math.abs(outwardWorld.z));
-    const shifted = start.clone().addScaledVector(outward, offsetDistance);
-    return { point: shifted, direction, normal: outward, offsetDistance };
-  });
-  if (shiftedLines.some(line => !line)) return [];
-
-  const result = [];
-  for (let index = 0; index < shiftedLines.length; index++) {
-    const previous = shiftedLines[(index + shiftedLines.length - 1) % shiftedLines.length];
-    const current = shiftedLines[index];
-    const intersection = lineIntersection2d(previous.point, previous.direction, current.point, current.direction);
-    const finiteIntersection = intersection && Number.isFinite(intersection.x) && Number.isFinite(intersection.y);
-    // A full offset-line miter tends towards infinity at an acute corner.
-    // That creates a panel spike outside the supporting beam cubes. Keep a
-    // normal square-corner miter, but turn excessively long joins into a
-    // bevel made from the two actual beam-strip ends.
-    const maximumMiter = Math.max(previous.offsetDistance, current.offsetDistance) * Math.SQRT2 + EPSILON;
-    const useMiter = finiteIntersection && intersection.distanceTo(coordinates[index]) <= maximumMiter;
-    const worldPoint = coordinate => points[index].clone()
-      .addScaledVector(basis.u, coordinate.x - coordinates[index].x)
-      .addScaledVector(basis.v, coordinate.y - coordinates[index].y);
-    if (useMiter) { result.push(worldPoint(intersection)); continue; }
-    const previousLength = coordinates[index].distanceTo(coordinates[(index + coordinates.length - 1) % coordinates.length]);
-    result.push(worldPoint(previous.point.clone().addScaledVector(previous.direction, previousLength)));
-    result.push(worldPoint(current.point));
-  }
-  return result;
+// The panel must be made from vertices that actually exist on the endpoint
+// cubes.  A plane-wide mitered expansion can produce points outside those
+// cubes, especially on spatial diagonals.  Select the cube face nearest the
+// camera direction first; if that face has several equally near vertices,
+// select its local outside corner so the panel still meets its boundary beam.
+function cameraFacingNodeCorner(points, index, direction, normal, halfWidth) {
+  const outward = nodeOutwardDirection(points, index, normal);
+  const corners = cubeCornerOffsets(halfWidth);
+  const scores = corners.map(corner => corner.dot(direction));
+  const maximum = Math.max(...scores);
+  const candidates = corners.filter((corner, cornerIndex) => maximum - scores[cornerIndex] <= EPSILON);
+  return candidates.reduce((best, corner) => corner.dot(outward) > best.dot(outward) ? corner : best).clone();
 }
 
-export function plateSurfaceBoundary(nodeIds, positions, normalOffset = EDGE_WIDTH / 2) {
+export function plateSurfaceBoundary(nodeIds, positions, surface = EDGE_WIDTH / 2) {
   const points = nodeIds.map(id => positions.get(id));
   if (points.some(point => !point)) return [];
-  const windingNormal = plateNormal(points);
-  if (windingNormal.lengthSq() <= EPSILON) return [];
-  // A plate occupies the beam envelope, not just the inner corners of the
-  // node cubes. Expand the centre-line closure by half the beam width in its
-  // own plane, then apply the signed normal offset as a separate depth layer.
-  const boundary = expandedPlateBoundary(points, windingNormal, EDGE_WIDTH / 2);
-  return boundary.map(point => point.addScaledVector(windingNormal, normalOffset));
+  const options = plateSurfaceOptions(points, surface);
+  if (!options) return [];
+  return points.map((point, index) => point.clone().add(cameraFacingNodeCorner(
+    points, index, options.direction, options.normal, options.halfWidth,
+  )));
 }
 
-export function plateSurfaceVertices(nodeIds, positions, normalOffset = EDGE_WIDTH / 2) {
-  const corners = plateSurfaceBoundary(nodeIds, positions, normalOffset);
+export function plateSurfaceVertices(nodeIds, positions, surface = EDGE_WIDTH / 2) {
+  const corners = plateSurfaceBoundary(nodeIds, positions, surface);
   const vertices = [];
   for (let index = 1; index < corners.length - 1; index++) {
     for (const point of [corners[0], corners[index], corners[index + 1]]) vertices.push(...point.toArray());
@@ -423,6 +387,16 @@ export function cameraFacingPlateOffset(nodeIds, positions, cameraPosition, magn
   if (normal.lengthSq() <= EPSILON) return magnitude;
   const center = points.reduce((sum, point) => sum.add(point), new THREE.Vector3()).multiplyScalar(1 / points.length);
   return normal.dot(vector(cameraPosition).sub(center)) < 0 ? -Math.abs(magnitude) : Math.abs(magnitude);
+}
+
+export function cameraFacingPlateDirection(nodeIds, positions, cameraPosition) {
+  const points = nodeIds.map(id => positions.get(id));
+  if (points.some(point => !point)) return new THREE.Vector3(0, 0, 1);
+  const center = points.reduce((sum, point) => sum.add(point), new THREE.Vector3()).multiplyScalar(1 / points.length);
+  const direction = vector(cameraPosition).sub(center);
+  if (direction.lengthSq() > EPSILON) return direction.normalize();
+  const normal = plateNormal(points);
+  return normal.lengthSq() > EPSILON ? normal : new THREE.Vector3(0, 0, 1);
 }
 
 // Three.js stores the face normal with the geometry's front winding. A ray

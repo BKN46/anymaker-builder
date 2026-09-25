@@ -59,7 +59,11 @@ test('structural commands create independent components and remain undoable', as
   await page.locator('#copy-action').click();
   await expect(page.locator('#object-count')).toHaveText('2 个组件');
   await page.locator('#mirror-action').click();
-  await expect(page.locator('#object-count')).toHaveText('3 个组件');
+  await expect(page.locator('#mirror-toolbar')).toBeVisible();
+  await expect(page.locator('#mirror-action')).toHaveAttribute('aria-pressed', 'true');
+  await page.locator('[data-id="engine"]').click();
+  await page.locator('canvas').click({ position: { x: 540, y: 400 } });
+  await expect(page.locator('#object-count')).toHaveText('4 个组件');
   await page.locator('#undo-btn').click();
   await expect(page.locator('#object-count')).toHaveText('2 个组件');
 });

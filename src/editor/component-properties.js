@@ -57,10 +57,11 @@ export function nativePropertiesFromState(state) {
 const descriptor = (key, type, options = {}) => ({ key, type, ...options });
 const integer = (key, options) => descriptor(key, 'integer', { step: 1, ...options });
 const number = (key, options) => descriptor(key, 'number', { step: .01, ...options });
+const forTypes = (types, descriptors) => Object.fromEntries(types.map(type => [type, descriptors]));
 
-// These names and bounds are evidenced by the current game's component
-// descriptions and Properties Tool symbols. The values are native save values;
-// fields not listed here are only shown when present in an imported vehicle.
+// These fields are cross-checked against the game's Properties Tool labels,
+// component descriptions, and the native component records used by shipped
+// vehicle/building samples. Values are native save keys, not UI-only state.
 const known = {
   gear_stick: [integer('gear_count', { min: 2, max: 10, defaultValue: 2 })],
   turnable_knob_a: [integer('count', { min: 2, max: 12, defaultValue: 2 })],
@@ -71,18 +72,18 @@ const known = {
   mechanical_junction_offset: [number('offset', { min: -1, max: 1, defaultValue: 0 })],
   mechanical_junction_scale: [number('scale', { min: -1, max: 1, defaultValue: 1 })],
   hinge_pin: [number('min', { min: 0, max: Math.PI, step: .01, defaultValue: 0 }), number('max', { min: 0, max: Math.PI, step: .01, defaultValue: Math.PI })],
-  round_headlight_a: [number('tilt_x', { min: -Math.PI, max: Math.PI, step: .01, defaultValue: 0 }), number('tilt_y', { min: -Math.PI, max: Math.PI, step: .01, defaultValue: 0 })],
-  round_headlight_b: [number('tilt_x', { min: -Math.PI, max: Math.PI, step: .01, defaultValue: 0 }), number('tilt_y', { min: -Math.PI, max: Math.PI, step: .01, defaultValue: 0 })],
-  round_headlight_c: [number('tilt_x', { min: -Math.PI, max: Math.PI, step: .01, defaultValue: 0 }), number('tilt_y', { min: -Math.PI, max: Math.PI, step: .01, defaultValue: 0 })],
-  square_headlight: [number('tilt_x', { min: -Math.PI, max: Math.PI, step: .01, defaultValue: 0 }), number('tilt_y', { min: -Math.PI, max: Math.PI, step: .01, defaultValue: 0 })],
-  differential_gearbox_a: [integer('gear_ratio_input', { min: 1, max: 8, defaultValue: 1, label: 'input_ratio' }), integer('gear_ratio', { min: 1, max: 8, defaultValue: 1, label: 'output_ratio' })],
-  differential_gearbox_b: [integer('gear_ratio_input', { min: 1, max: 8, defaultValue: 1, label: 'input_ratio' }), integer('gear_ratio', { min: 1, max: 8, defaultValue: 1, label: 'output_ratio' })],
-  gearbox_fixed_ratio: [integer('gear_ratio_input', { min: 1, max: 8, defaultValue: 1, label: 'input_ratio' }), integer('gear_ratio', { min: 1, max: 8, defaultValue: 1, label: 'output_ratio' }), descriptor('reverse', 'boolean', { defaultValue: false })],
+  ...forTypes(['round_headlight_a', 'round_headlight_b', 'round_headlight_c', 'square_headlight'], [
+    number('tilt_x', { min: -Math.PI, max: Math.PI, step: .01, defaultValue: 0 }),
+    number('tilt_y', { min: -Math.PI, max: Math.PI, step: .01, defaultValue: 0 }),
+    number('fov', { min: .01, max: Math.PI, step: .01, defaultValue: .3 }),
+  ]),
+  differential_gearbox_a: [integer('input', { min: 1, max: 8, defaultValue: 1 }), integer('output', { min: 1, max: 8, defaultValue: 1 })],
+  differential_gearbox_b: [integer('input', { min: 1, max: 8, defaultValue: 1 }), integer('output', { min: 1, max: 8, defaultValue: 1 })],
+  gearbox_fixed_ratio: [integer('input', { min: 1, max: 8, defaultValue: 1 }), integer('output', { min: 1, max: 8, defaultValue: 1 }), descriptor('reverse', 'boolean', { defaultValue: false })],
   jet_accessory_gearbox_a: [integer('gear_ratio', { min: 1, max: 128, defaultValue: 1 })],
   jet_nosecone_gearbox: [integer('gear_ratio', { min: 1, max: 128, defaultValue: 1 })],
-  hydraulic_pump: [descriptor('reverse', 'boolean', { defaultValue: false }), number('flow_factor', { min: 0, max: 1, defaultValue: 1 })],
-  liquid_pump: [descriptor('reverse', 'boolean', { defaultValue: false }), number('flow_factor', { min: 0, max: 1, defaultValue: 1 })],
-  gas_pump: [descriptor('reverse', 'boolean', { defaultValue: false }), number('flow_factor', { min: 0, max: 1, defaultValue: 1 })],
+  ...forTypes(['hydraulic_pump', 'liquid_pump', 'gas_pump'], [descriptor('is_reverse', 'boolean', { defaultValue: false, label: 'reverse' }), number('flow_factor', { min: 0, max: 1, defaultValue: 1 })]),
+  pulley_wheel: [descriptor('reverse', 'boolean', { defaultValue: false })],
   electric_motor_a: [descriptor('reverse', 'boolean', { defaultValue: false }), number('power', { min: 0, max: 1, defaultValue: 1 })],
   electric_motor_b: [descriptor('reverse', 'boolean', { defaultValue: false }), number('power', { min: 0, max: 1, defaultValue: 1 })],
   electric_motor_c: [descriptor('reverse', 'boolean', { defaultValue: false }), number('power', { min: 0, max: 1, defaultValue: 1 })],
@@ -93,8 +94,11 @@ const known = {
   speaker_b: [integer('audio_radius', { min: 8, max: 64, defaultValue: 8 })],
   speaker_c: [integer('audio_radius', { min: 8, max: 64, defaultValue: 8 })],
   steering_wheel: [number('sensitivity_steering', { min: 0, max: 1, defaultValue: .5 }), number('sensitivity_pedal_l', { min: 0, max: 1, defaultValue: .5 }), number('sensitivity_pedal_r', { min: 0, max: 1, defaultValue: .5 })],
-  circular_dial_a: [descriptor('light_activation', 'boolean', { defaultValue: false })],
-  circular_dial_small_a: [descriptor('light_activation', 'boolean', { defaultValue: false })],
+  ...forTypes(['throttle_collective', 'throttle', 'multi_throttle', 'trim_throttle', 'fighter_jet_throttle'], [descriptor('sticky', 'boolean', { defaultValue: false })]),
+  ...forTypes(['flight_yoke', 'flight_stick', 'flight_stick_jet'], [number('sensitivity_yaw', { min: 0, max: 1, defaultValue: .5 }), number('sensitivity_pitch', { min: 0, max: 1, defaultValue: .5 }), number('sensitivity_roll', { min: 0, max: 1, defaultValue: .5 })]),
+  ...forTypes(['bench_seat', 'high_back_car_seat', 'low_back_car_seat', 'flight_seat'], [integer('seat_pose', { min: 0, max: 255, defaultValue: 0 })]),
+  ...forTypes(['circular_dial_a', 'circular_dial_small_a', 'circular_dial_b', 'circular_dial_small_b', 'circular_dial_small_c', 'circular_dial_small_d', 'circular_dial_c', 'circular_dial_d', 'circular_dial_e', 'circular_dial_f', 'circular_dial_g', 'circular_dial_h'], [descriptor('light_activation', 'boolean', { defaultValue: false })]),
+  ...forTypes(['roller_wheel_suspension_a', 'roller_wheel_suspension_b', 'roller_wheel_suspension_c', 'roller_wheel_suspension_d', 'roller_wheel_suspension_e', 'roller_wheel_suspension_f'], [number('stiffness', { min: 0, defaultValue: 1 }), number('damping', { min: 0, defaultValue: 1 })]),
   pintle_mount: [number('traverse_limit_left', { min: -Math.PI / 2, max: 0, step: .01, defaultValue: -Math.PI / 2 }), number('traverse_limit_right', { min: 0, max: Math.PI / 2, step: .01, defaultValue: Math.PI / 2 }), number('elevation_limit_down', { min: -Math.PI / 4, max: 0, step: .01, defaultValue: -Math.PI / 4 }), number('elevation_limit_up', { min: 0, max: Math.PI / 4, step: .01, defaultValue: Math.PI / 4 })],
 };
 

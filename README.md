@@ -34,7 +34,7 @@ Manual editor operations use a fixed world grid:
 
 Component origins, manually created nodes, beam endpoints, panel boundaries, and transform translations are quantized to integer world cells. Scale remains dimensionless. Native vehicle imports may retain fractional projected positions where required by their decoded rigid transforms.
 
-Beam endpoints are represented by world-axis-aligned cell cubes. Beam geometry uses their projected silhouette, including diagonal cases. Panels expand over the surrounding beam envelope instead of stopping at their inner corners, so panel painting can cover the supporting perimeter correctly. These are editor diagnostics informed by observed behavior and screenshots, not a claim that the original game mesh algorithm has been reproduced.
+Beam endpoints are represented by world-axis-aligned cell cubes. Beam geometry uses their projected silhouette, including diagonal cases. When a panel is created, it records the camera-facing direction and connects actual vertices of the corresponding node-cube faces; it does not fabricate a plane-wide mitered expansion. These are editor diagnostics informed by observed behavior and screenshots, not a claim that the original game mesh algorithm has been reproduced.
 
 ## Getting started
 
