@@ -14,6 +14,7 @@ const same = (a, b) => length(sub(a, b)) <= EPSILON;
 const edgeKey = (a, b) => [a, b].sort().join('::');
 const validColorIndex = value => value === undefined || (Number.isInteger(value) && value >= 0 && value <= 255);
 const validColor = value => value === undefined || (typeof value === 'string' && /^#[\da-f]{6}$/i.test(value));
+const validEdgeSize = value => value === undefined || value === 1 || value === 3;
 
 function normalizedSurfaceDirection(value) {
   if (value === undefined) return undefined;
@@ -60,6 +61,7 @@ export function validateTopologyState(state = {}, componentIds = null) {
     if (same(points.get(edge.a), points.get(edge.b))) throw new Error('梁长度必须大于零');
     if (!validColorIndex(edge.col)) throw new Error('梁颜色编号无效');
     if (!validColor(edge.color)) throw new Error('梁 RGB 颜色无效');
+    if (!validEdgeSize(edge.size)) throw new Error('梁截面尺寸无效');
     if (edge.hidden !== undefined && typeof edge.hidden !== 'boolean') throw new Error('梁可见性无效');
     edgeIds.add(edge.id);
   }

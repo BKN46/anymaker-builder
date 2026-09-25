@@ -42,7 +42,7 @@ button:focus-visible, input:focus-visible, select:focus-visible { outline: 2px s
 .right-sidebar { grid-column: 5; grid-row: 1; border-left: 1px solid var(--line); }
 .section { padding: 13px 15px; border-bottom: 1px solid var(--line); }
 .section h2 { margin: 0 0 10px; font-size: 11px; font-weight: 700; letter-spacing: .08em; color: #667085; text-transform: uppercase; }
-.top-tool-section { position: absolute; top: 8px; left: 50%; transform: translateX(-50%); z-index: 5; width: max-content; max-width: calc(100% - 32px); padding: 5px 9px; overflow: visible; border: 1px solid var(--line); border-radius: 12px; background: rgba(255,255,255,.94); box-shadow: 0 4px 18px #20334518; backdrop-filter: blur(10px); }
+.top-tool-section { position: absolute; top: 8px; left: 50%; transform: translateX(-50%); z-index: 5; display: flex; align-items: center; width: max-content; max-width: calc(100% - 32px); padding: 5px 9px; overflow: visible; border: 1px solid var(--line); border-radius: 12px; background: rgba(255,255,255,.94); box-shadow: 0 4px 18px #20334518; backdrop-filter: blur(10px); }
 .top-tool-section[hidden], .sidebar-toggle[hidden], .view-controls[hidden], .hud[hidden], #orientation-indicator[hidden] { display: none; }
 .top-tool-section h2 { display: none; }
 .context-toolbar { position: absolute; top: 68px; left: 50%; z-index: 5; display: flex; align-items: center; gap: 7px; max-width: calc(100% - 32px); padding: 6px 9px; transform: translateX(-50%); border: 1px solid var(--line); border-radius: 10px; background: rgba(255,255,255,.94); box-shadow: 0 4px 18px #20334518; backdrop-filter: blur(10px); }
@@ -50,13 +50,16 @@ button:focus-visible, input:focus-visible, select:focus-visible { outline: 2px s
 .context-toolbar strong { color: #475467; font-size: 11px; white-space: nowrap; }
 .context-toolbar input { width: 58px; padding: 5px; border: 1px solid #d0d5dd; border-radius: 5px; }
 .context-toolbar button { min-height: 28px; padding: 4px 7px; font-size: 11px; }
-.mirror-toolbar { max-width: min(760px, calc(100% - 32px)); }
+.mirror-toolbar { position: static; z-index: auto; max-width: min(760px, 48vw); margin-left: 7px; padding: 0 0 0 8px; transform: none; border: 0; border-left: 1px solid var(--line); border-radius: 0; background: transparent; box-shadow: none; backdrop-filter: none; }
 .mirror-plane-buttons, .mirror-offset { display: inline-flex; align-items: center; gap: 4px; }
 .mirror-plane-buttons button.active { color: var(--accent); border-color: #97bcef; background: var(--accent-soft); box-shadow: inset 0 0 0 1px #97bcef; }
 .mirror-offset { color: #475467; font-size: 11px; white-space: nowrap; }
 .mirror-offset input[type="range"] { width: 110px; padding: 0; }
 .mirror-offset input[type="number"] { width: 64px; }
 .mirror-offset small { color: var(--muted); }
+.edge-size-buttons { display: inline-flex; align-items: center; gap: 3px; }
+.edge-size-buttons button.active { color: var(--accent); border-color: #97bcef; background: var(--accent-soft); box-shadow: inset 0 0 0 1px #97bcef; }
+.subgrid-toolbar.has-primary-context { top: 108px; }
 .selection-filter-toolbar { top: 8px; left: calc(var(--left-sidebar-width) + var(--left-resizer-width) + 14px); width: 132px; flex-direction: column; align-items: stretch; gap: 5px; padding: 6px; transform: none; z-index: 4; pointer-events: none; }
 .selection-filter-toolbar > * { pointer-events: auto; }
 .selection-filter-toggle { display: flex; align-items: center; justify-content: space-between; width: 100%; min-height: 26px; padding: 4px 6px !important; color: #475467; font-size: 11px !important; font-weight: 650; text-align: left; }
@@ -108,6 +111,8 @@ button:focus-visible, input:focus-visible, select:focus-visible { outline: 2px s
 .workspace.is-resizing * { cursor: col-resize !important; }
 #left-sidebar-resizer[hidden], #right-sidebar-resizer[hidden] { display: none; }
 .tool-grid { display: flex; gap: 3px; align-items: center; }
+.structural-action { flex: none; }
+.structural-action .tool-icon { font-size: 16px; line-height: 16px; }
 .tool { width: 46px; height: 44px; padding: 3px; display: grid; place-items: center; gap: 0; border-color: transparent; background: transparent; }
 .tool-icon { display: block; font-size: 20px; line-height: 20px; color: #4b5870; }
 .tool-label { font-size: 9px; line-height: 12px; color: #667085; }

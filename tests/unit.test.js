@@ -6,7 +6,7 @@ import { meshFixture } from './fixtures.js';
 import { parseMesh } from '../src/assets/mesh.js';
 import { History, project, validateDocument, migrateDocument, toIntermediateXml } from '../src/editor/document.js';
 import { copyObjects, mirrorObjects, moveObjects, removeObjects, splitGrid, mergeGrids, gridIds } from '../src/editor/operations.js';
-import { Project, Vehicle, Grid, Component, Node, Edge, Plate, Link, fromEditorDocument, toEditorDocument, toEditorTopology, validateProject } from '../src/editor/model.js';
+import { Project, Vehicle, Grid, Component, Node, Edge, Plate, Link, fromEditorDocument, toEditorDocument, toEditorTopology, validateProject, nativeGridFrame, nativeGridLocalDelta } from '../src/editor/model.js';
 import { parseNativePair, nativeStats, toNativeData, toNativePair, toNativePairFromEditor, verifyNativePairRoundTrip } from '../src/native/anymaker-data.js';
 import { createNode, moveNode, moveNodeAndMerge, mergeNodes, removeNode, removeEdge, removePlate, createEdge, createEdgeFromPoints, splitEdge, createPlate, createPlateFromEdges, createGlassPlateFromEdges, triangulatePlate, validateTopologyState } from '../src/editor/topology.js';
 import { LINK_COLORS, LINK_KINDS, createLink, moveLinkPoint, removeLink, validateLinks } from '../src/editor/connections.js';
@@ -116,8 +116,8 @@ test('reference primary vehicle converts every renderable record into an editor 
   const dashboardDisplay = document.objects.find(object => object.id === '553:grid-553-2:180');
   assert.equal(dashboardDisplay?.nativeProjected, true);
   assert.ok(Math.abs(dashboardDisplay.position.x - 5.28) < 1e-12);
-  assert.ok(Math.abs(dashboardDisplay.position.y - 2.173596961679118) < 1e-12);
-  assert.ok(Math.abs(dashboardDisplay.position.z - 19.32679848083956) < 1e-12);
+  assert.ok(Math.abs(dashboardDisplay.position.y - 2.2314855054991165) < 1e-12);
+  assert.ok(Math.abs(dashboardDisplay.position.z - 19.25102139319956) < 1e-12);
   const primaryBounds = JSON.parse(meta).vehicles.vehicles.find(vehicle => vehicle.id === 553).bounds;
   assert.ok(dashboard.every(object => ['x', 'y', 'z'].every((axis, index) => object.position[axis] >= primaryBounds.min[index] && object.position[axis] <= primaryBounds.max[index])));
   const validated = validateDocument(document, catalogDefinitions);
@@ -156,6 +156,9 @@ test('UI preferences default to English and reject unsafe or unsupported values'
     assert.equal(normalized.nodeColor, defaults.nodeColor); assert.equal(normalized.nodeSize, defaults.nodeSize); assert.equal(normalized.nodeOpacity, defaults.nodeOpacity);
   }
   assert.equal(defaults.edgeAxisSnap, false);
+  assert.equal(defaults.edgeSize, 1);
+  assert.equal(normalizeSettings({ version: 1, edgeSize: 3 }).edgeSize, 3);
+  assert.equal(normalizeSettings({ version: 1, edgeSize: 2 }).edgeSize, 1);
   assert.deepEqual(defaults.connectionVisibility, { electric: true, mechanical: true, liquid: true, gas: true, belt: true, data: true });
   assert.equal(defaults.paintColor, '#dddddd');
   assert.deepEqual(defaults.paintQuickColors, ['#dddddd', '#bd2636', '#631a24', '#2b3440', '#20252c']);
@@ -507,9 +510,9 @@ test('native export preserves combined XYZ component rotations', () => {
   const actual = restored.objects[0].rotation;
   for (const axis of ['x', 'y', 'z']) assert.ok(Math.abs(actual[axis] - rotation[axis]) < 1e-12, `${axis}: ${actual[axis]} !== ${rotation[axis]}`);
 });
-test('native grid origin and dir form a complete position and rotation frame without links', () => {
+test('native surface grids use the game basis and mounting offset without moving vehicle topology', () => {
   const native = { definitions: { components: ['engine'] }, vehicles: { vehicles: [
-    { id: 1, grids: [{ origin: [10, 20, 30], dir: [0, 3, 4], components: [{ def: 0, id: 1, pos: [2, 5, 7], rot: [1, 0, 0, 0, 1, 0, 0, 0, 1], connected_vehicle: 2, connected_component: 2 }] }] },
+    { id: 1, nodes: [{ id: 1, pos: [2, 5, 7] }], grids: [{ origin: [10, 20, 30], dir: [0, 3, 4], components: [{ def: 0, id: 1, pos: [2, 5, 7], rot: [1, 0, 0, 0, 1, 0, 0, 0, 1], connected_vehicle: 2, connected_component: 2 }] }], mechanical_links: [{ p0: { comp: 1, pos: 0 }, p1: { comp: 1, pos: 1 }, points: [[2, 5, 7]] }] },
     { id: 2, grids: [{ components: [{ def: 0, id: 2, pos: [3, 4, 5], rot: [1, 0, 0, 0, 1, 0, 0, 0, 1] }] }] },
   ] } };
   const model = parseNativePair(native, {});
@@ -517,18 +520,68 @@ test('native grid origin and dir form a complete position and rotation frame wit
   const parent = document.objects.find(object => object.id === '1:grid-1-1:1');
   const childAnchor = document.objects.find(object => object.id === '2:grid-2-1:2');
 
-  // dir normalizes to local Y = (0, .6, .8). World X is the stable local X,
-  // and local Z is X × Y = (0, -.8, .6).
+  // GCL get_grid_axis_normals: X = normalize(dir × up) = (-1, 0, 0),
+  // Y = (0, .6, .8), Z = X × Y = (0, .8, -.6).
+  // get_transform adds node edge midpoint (0, .5, .5) + normal * .5.
   assert.equal(parent.nativeProjected, true);
-  assert.ok(Math.abs(parent.position.x - .96) < 1e-12);
-  assert.ok(Math.abs(parent.position.y - 1.392) < 1e-12);
-  assert.ok(Math.abs(parent.position.z - 3.056) < 1e-12);
-  assert.ok(Math.abs(parent.rotation.x - Math.atan2(.8, .6)) < 1e-12);
+  assert.ok(Math.abs(parent.position.x - .64) < 1e-12);
+  assert.ok(Math.abs(parent.position.y - 2.352) < 1e-12);
+  assert.ok(Math.abs(parent.position.z - 2.456) < 1e-12);
+  const rotation = new THREE.Matrix4().makeRotationFromEuler(new THREE.Euler(parent.rotation.x, parent.rotation.y, parent.rotation.z));
+  assert.ok(new THREE.Vector3(1, 0, 0).applyMatrix4(rotation).distanceTo(new THREE.Vector3(-1, 0, 0)) < 1e-12);
+  assert.ok(new THREE.Vector3(0, 0, 1).applyMatrix4(rotation).distanceTo(new THREE.Vector3(0, .8, -.6)) < 1e-12);
   // Attachment offsets use the already transformed anchors, so a child
   // vehicle's connector occupies exactly the parent's grid-frame position.
   assert.deepEqual(childAnchor.position, parent.position);
+  assert.deepEqual(document.topology.nodes[0].position, { x: .16, y: .4, z: .56 });
+  assert.deepEqual(document.topology.links[0].points[0], document.topology.nodes[0].position);
   const validated = validateDocument(document, new Map([['engine', {}]]));
   assert.equal(validated.objects.length, 2);
+});
+test('native base grid defaults, opposite surface normals and mounting offsets follow GCL', () => {
+  const identity = [1, 0, 0, 0, 1, 0, 0, 0, 1];
+  assert.deepEqual(nativeGridFrame({}), { origin: { x: 0, y: 0, z: 0 }, rotation: identity });
+  const cases = [
+    [{ x: 1, y: 0, z: 0 }, { x: 11, y: 20, z: 30 }, [0, 1, 0, 0, 0, 1, 1, 0, 0]],
+    [{ x: -1, y: 0, z: 0 }, { x: 9, y: 20, z: 30 }, [0, -1, 0, 0, 0, 1, -1, 0, 0]],
+    [{ x: 0, y: 1, z: 0 }, { x: 10, y: 21, z: 30 }, identity],
+    [{ x: 0, y: -1, z: 0 }, { x: 10, y: 19, z: 30 }, [-1, 0, 0, 0, -1, 0, 0, 0, 1]],
+    [{ x: 0, y: 0, z: 1 }, { x: 10, y: 20, z: 31 }, [-1, 0, 0, 0, 0, 1, 0, 1, 0]],
+    [{ x: 0, y: 0, z: -1 }, { x: 10, y: 20, z: 29 }, [1, 0, 0, 0, 0, 1, 0, -1, 0]],
+  ];
+  for (const [dir, origin, rotation] of cases) {
+    const frame = nativeGridFrame({ origin: { x: 10, y: 20, z: 30 }, dir });
+    assert.deepEqual(frame.origin, origin);
+    assert.deepEqual(frame.rotation.map(value => value || 0), rotation);
+  }
+  const spatial = nativeGridFrame({ dir: { x: -2, y: 3, z: -6 } });
+  const expected = { x: -.5 - 1 / 7, y: .5 + 1.5 / 7, z: -.5 - 3 / 7 };
+  for (const axis of ['x', 'y', 'z']) assert.ok(Math.abs(spatial.origin[axis] - expected[axis]) < 1e-12);
+  const source = { definitions: { components: [] }, vehicles: { vehicles: [{ id: 1, grids: [{}] }] } };
+  const model = parseNativePair(source, {});
+  assert.deepEqual(model.vehicles[0].grids[0].dir, { x: 0, y: 1, z: 0 });
+  assert.deepEqual(toNativePair(model).data, source);
+  for (const dir of [[0, 0, 0], [1, 2], [1, .5, 0], ['1', 0, 0]]) {
+    source.vehicles.vehicles[0].grids[0].dir = dir;
+    assert.throws(() => parseNativePair(source, {}), /Invalid native grid direction/);
+  }
+});
+test('reference door handles align with the game surface grid on both door faces', () => {
+  const source = JSON.parse(readFileSync(new URL('../test-vehicle/vehicle.data', import.meta.url)));
+  const evidence = JSON.parse(readFileSync(new URL('../doc/evidence/native-grid-transform.json', import.meta.url)));
+  const document = toEditorDocument(parseNativePair(source, {}), { vehicleIds: ['553'] });
+  for (const expected of evidence.referenceComponents) {
+    const object = document.objects.find(value => value.id === expected.id);
+    assert.equal(object.type, 'mechanical_handle');
+    const rotation = new THREE.Matrix4().makeRotationFromEuler(new THREE.Euler(object.rotation.x, object.rotation.y, object.rotation.z));
+    for (const [index, axis] of ['x', 'y', 'z'].entries()) assert.ok(Math.abs(object.position[axis] - expected.worldPosition[index]) < 1e-12, `${expected.id} ${axis}`);
+    const normal = new THREE.Vector3(0, 1, 0).applyMatrix4(rotation);
+    assert.ok(normal.distanceTo(new THREE.Vector3(...expected.mountingNormal)) < 1e-12, `${expected.id} mounting normal`);
+    // Editing deltas must invert the same frame, without reapplying its origin.
+    const grid = { origin: { x: 500, y: -70, z: 900 }, dir: Object.fromEntries(['x', 'y', 'z'].map((axis, index) => [axis, expected.gridDirection[index]])) };
+    const delta = nativeGridLocalDelta(grid, { x: normal.x * .08, y: normal.y * .08, z: normal.z * .08 });
+    assert.ok(Math.abs(delta.x) < 1e-12 && Math.abs(delta.y - 1) < 1e-12 && Math.abs(delta.z) < 1e-12);
+  }
 });
 test('native child import rejects incompatible rigid attachment anchors', () => {
   const native = { definitions: { components: ['engine'] }, vehicles: { vehicles: [
@@ -697,6 +750,9 @@ test('edge creation is atomic and reuses logical endpoints', () => {
   assert.equal(second.edges[0].b, second.edges[1].a);
   const painted = createEdgeFromPoints(empty, a, b, { color: '#dddddd' });
   assert.equal(painted.edges[0].color, '#dddddd');
+  const wide = createEdgeFromPoints(empty, a, b, { size: 3 });
+  assert.equal(wide.edges[0].size, 3);
+  assert.throws(() => validateTopologyState({ ...wide, edges: [{ ...wide.edges[0], size: 2 }] }), /截面尺寸/);
   const before = structuredClone(first);
   assert.throws(() => createEdgeFromPoints(first, b, a), /已存在/);
   assert.throws(() => createEdgeFromPoints(first, c, c), /不同节点/);
@@ -777,6 +833,21 @@ test('edge meshes fill axis-aligned endpoint cubes and bridge facing square corn
     edge.geometry.dispose();
   }
   material.dispose();
+});
+
+test('wide edge meshes use three-cell endpoint cubes and retain their size when split', () => {
+  const material = new THREE.MeshBasicMaterial();
+  const start = new THREE.Vector3(); const end = new THREE.Vector3(CELL_SIZE_WORLD * 4, 0, 0);
+  const edge = createEdgeMesh(start, end, material, { size: 3 });
+  edge.geometry.computeBoundingBox();
+  assert.equal(edge.userData.edgeSize, 3);
+  assert.ok(edge.geometry.boundingBox.min.clone().add(edge.position).distanceTo(new THREE.Vector3(-CELL_SIZE_WORLD * 1.5, -CELL_SIZE_WORLD * 1.5, -CELL_SIZE_WORLD * 1.5)) < 1e-6);
+  assert.ok(edge.geometry.boundingBox.max.clone().add(edge.position).distanceTo(new THREE.Vector3(CELL_SIZE_WORLD * 5.5, CELL_SIZE_WORLD * 1.5, CELL_SIZE_WORLD * 1.5)) < 1e-6);
+  edge.geometry.dispose(); material.dispose();
+
+  const state = createEdgeFromPoints({}, { x: 0, y: 0, z: 0 }, { x: cell(4), y: 0, z: 0 }, { size: 3 });
+  const split = splitEdge(state.nodes, state.edges, state.edges[0].id, { x: cell(2), y: 0, z: 0 });
+  assert.deepEqual(split.edges.map(value => value.size), [3, 3]);
 });
 
 test('connection route points move independently and preserve native projections', () => {
@@ -1000,7 +1071,7 @@ test('edge axis snapping preserves aligned nodes and rejects invalid grid coordi
   const constrained = resolveEdgePoint(ray, frame, { node: offAxis, axisSnap: true });
   assert.equal(constrained.axis, 'x'); assert.equal(worldToCell(constrained.point.y), 0); assert.equal(worldToCell(constrained.point.z), 0);
   assert.deepEqual(resolveEdgePoint(ray, frame).point.toArray(), projectBuildPoint(ray, frame).toArray());
-  assert.throws(() => resolveEdgePoint(ray, frame, { node: { x: .1, y: 0, z: 0 }, axisSnap: true }), /整数格/);
+  assert.deepEqual(resolveEdgePoint(ray, frame, { node: { x: .1, y: 0, z: 0 }, axisSnap: true }).point.toArray(), resolveEdgePoint(ray, frame, { axisSnap: true }).point.toArray());
   const far = resolveEdgePoint(new THREE.Ray(new THREE.Vector3(20000, 0, 10), new THREE.Vector3(0, 0, -1)), frame, { axisSnap: true });
   assert.ok(far); assertGridVector(far.point);
 });

@@ -35,6 +35,7 @@ export function normalizeSettings(input = {}) {
     nodeSize: finite(s.nodeSize, .02, .25, .055),
     nodeOpacity: finite(s.nodeOpacity, 0, 1, 1),
     edgeAxisSnap: bool(s.edgeAxisSnap, false),
+    edgeSize: s.edgeSize === 3 ? 3 : 1,
     connectionVisibility: {
       electric: bool(s.connectionVisibility?.electric, true),
       mechanical: bool(s.connectionVisibility?.mechanical, true),
@@ -62,7 +63,7 @@ export function normalizeSettings(input = {}) {
     modelThumbnails: bool(s.modelThumbnails, false),
     catalogCardSize: finite(s.catalogCardSize, 64, 156, 72),
     query: text(s.query, 200), category: text(s.category, 80), selectedType: text(s.selectedType, 100, 'engine'),
-    tool: ['select', 'place', 'erase', 'translate', 'rotate', 'scale', 'node', 'edge', 'split', 'plate', 'glass', 'connect', 'paint'].includes(s.tool) ? s.tool : 'select',
+    tool: ['select', 'place', 'erase', 'translate', 'rotate', 'scale', 'node', 'edge', 'plate', 'glass', 'connect', 'paint'].includes(s.tool) ? s.tool : 'select',
     sidebarTabs: {
       left: s.sidebarTabs?.left === 'subgrids' ? 'subgrids' : 'catalog',
       right: ['editor', 'inspector', 'resources', 'history'].includes(s.sidebarTabs?.right) ? s.sidebarTabs.right : 'editor',

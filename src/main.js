@@ -92,6 +92,7 @@ let modelPreviewRequestId = 0;
 let hoveredConnectionPort = null;
 let mirrorMode = { active: false, axis: 'x', offset: 0 };
 let mirrorGuideDrag = false;
+let subgridToolbarOpen = false;
 let latestPagesBuildTime = null;
 const GITHUB_PAGES_WORKFLOW_RUNS = 'https://api.github.com/repos/BKN46/anymaker-builder/actions/workflows/pages.yml/runs?status=completed&per_page=1';
 
@@ -153,6 +154,16 @@ mirrorToolbar.id = 'mirror-toolbar'; mirrorToolbar.className = 'context-toolbar 
 mirrorToolbar.innerHTML = '<strong data-i18n="镜像模式"></strong><div class="mirror-plane-buttons" role="group" data-i18n-aria-label="镜像平面"><button type="button" data-mirror-axis="x">YZ · X</button><button type="button" data-mirror-axis="y">XZ · Y</button><button type="button" data-mirror-axis="z">XY · Z</button></div><label class="mirror-offset"><span data-i18n="平面位置"></span><input id="mirror-offset-range" type="range" min="-500" max="500" step="1" value="0" data-i18n-aria-label="镜像平面位置"><input id="mirror-offset-input" type="number" min="-125000" max="125000" step="1" value="0" data-i18n-aria-label="镜像平面位置"> <small data-i18n="格"></small></label><span class="context-help" data-i18n="拖动蓝色手柄或滑块，沿镜像平面法向移动。"></span>';
 applyTranslations(mirrorToolbar);
 
+const edgeToolbar = document.createElement('section');
+edgeToolbar.id = 'edge-toolbar'; edgeToolbar.className = 'context-toolbar edge-toolbar'; edgeToolbar.hidden = true;
+edgeToolbar.innerHTML = '<strong data-i18n="梁工具"></strong><div class="edge-size-buttons" role="group" data-i18n-aria-label="梁截面"><button type="button" data-edge-size="1">1×1</button><button type="button" data-edge-size="3">3×3</button></div><button id="edge-split-action" type="button" data-i18n="切分梁"></button><span class="context-help" data-i18n="梁截面尺寸与切分"></span>';
+applyTranslations(edgeToolbar);
+
+const subgridToolbar = document.createElement('section');
+subgridToolbar.id = 'subgrid-toolbar'; subgridToolbar.className = 'context-toolbar subgrid-toolbar'; subgridToolbar.hidden = true;
+subgridToolbar.innerHTML = '<strong data-i18n="子网格操作"></strong><button id="subgrid-split-action" type="button" data-i18n="拆分子网格"></button><button id="subgrid-merge-action" type="button" data-i18n="合并子网格"></button>';
+applyTranslations(subgridToolbar);
+
 const selectionFilterToolbar = document.createElement('section');
 selectionFilterToolbar.id = 'selection-filter-toolbar'; selectionFilterToolbar.className = 'context-toolbar selection-filter-toolbar';
 selectionFilterToolbar.innerHTML = '<button id="selection-filter-toggle" type="button" class="selection-filter-toggle" aria-expanded="false" aria-controls="selection-filter-options" data-i18n="可选择对象" data-i18n-title="展开可选择对象" data-i18n-aria-label="展开可选择对象"></button><div id="selection-filter-options" class="selection-filter-options" hidden><label><input type="checkbox" data-selectable-kind="component" checked><span data-i18n="组件"></span></label><label><input type="checkbox" data-selectable-kind="node" checked><span data-i18n="节点"></span></label><label><input type="checkbox" data-selectable-kind="edge" checked><span data-i18n="梁"></span></label><label><input type="checkbox" data-selectable-kind="plate" checked><span data-i18n="面板"></span></label><label><input type="checkbox" data-selectable-kind="link" checked><span data-i18n="连接"></span></label></div><button id="connection-visibility-toggle" type="button" class="selection-filter-toggle" aria-expanded="false" aria-controls="connection-visibility-options" data-i18n="显示连接" data-i18n-title="展开显示连接" data-i18n-aria-label="展开显示连接"></button><div id="connection-visibility-options" class="selection-filter-options" hidden><label><input type="checkbox" data-connection-kind="electric" checked><span data-i18n="电线"></span></label><label><input type="checkbox" data-connection-kind="mechanical" checked><span data-i18n="机械连接"></span></label><label><input type="checkbox" data-connection-kind="liquid" checked><span data-i18n="液体管线"></span></label><label><input type="checkbox" data-connection-kind="gas" checked><span data-i18n="气体管线"></span></label><label><input type="checkbox" data-connection-kind="belt" checked><span data-i18n="皮带"></span></label><label><input type="checkbox" data-connection-kind="data" checked><span data-i18n="数据线"></span></label></div>';
@@ -181,7 +192,8 @@ function setConnectionVisibilityCollapsed(collapsed) {
 connectionVisibilityToggle.addEventListener('click', () => setConnectionVisibilityCollapsed(!connectionVisibilityOptions.hidden));
 
 const workspace = $('#workspace');
-workspace.append(selectionFilterToolbar, paintToolbar, connectionToolbar, transparencyToolbar, mirrorToolbar);
+workspace.append(selectionFilterToolbar, paintToolbar, connectionToolbar, transparencyToolbar, edgeToolbar, subgridToolbar);
+$('#tools').after(mirrorToolbar);
 for (const input of selectionFilterToolbar.querySelectorAll('[data-selectable-kind]')) {
   input.addEventListener('change', () => {
     selectableKinds[input.dataset.selectableKind] = input.checked;
@@ -348,7 +360,7 @@ rightSidebarResizer.addEventListener('keydown', event => {
 });
 new ResizeObserver(() => { if (!leftSidebar.hidden) setLeftSidebarWidth(leftSidebarWidth); }).observe(workspace);
 
-const tools = [['select', '选择', 'V'], ['place', '放置', 'P'], ['erase', '删除', 'E'], ['translate', '移动', 'G'], ['rotate', '旋转', 'R'], ['scale', '缩放', 'S'], ['node', '节点', 'N'], ['edge', '梁', 'B'], ['split', '切分梁', 'I'], ['plate', '面板', 'L'], ['glass', '玻璃', 'J'], ['connect', '连接', 'K'], ['paint', '涂色', 'C'], ['hide', '隐藏', 'H']];
+const tools = [['select', '选择', 'V'], ['place', '放置', 'P'], ['erase', '删除', 'E'], ['translate', '移动', 'G'], ['rotate', '旋转', 'R'], ['scale', '缩放', 'S'], ['node', '节点', 'N'], ['edge', '梁', 'B'], ['plate', '面板', 'L'], ['glass', '玻璃', 'J'], ['connect', '连接', 'K'], ['paint', '涂色', 'C'], ['hide', '隐藏', 'H']];
 for (const [id, name, key] of tools) {
   const button = document.createElement('button');
   button.className = 'tool'; button.dataset.tool = id;
@@ -365,14 +377,14 @@ for (const [id, name, key] of tools) {
 const structuralActions = [
   ['copy-action', '⧉', '复制选中'],
   ['mirror-action', '⇋', '打开镜像模式'],
-  ['split-action', '⌘', '拆分子网格'],
-  ['merge-action', '⊕', '合并子网格'],
+  ['subgrid-action', '⌘', '子网格'],
 ];
 const actionHost = $('#tools');
 for (const [id, icon, label] of structuralActions) {
   const button = document.createElement('button');
-  button.id = id; button.className = 'icon-action'; button.dataset.i18nTitle = label; button.dataset.i18nAriaLabel = label;
-  button.textContent = icon; applyTranslations(button); actionHost.append(button);
+  button.id = id; button.className = 'tool structural-action'; button.dataset.i18nTitle = label; button.dataset.i18nAriaLabel = label;
+  button.innerHTML = '<span class="tool-icon">' + icon + '</span><span class="tool-label" data-i18n="' + label + '"></span>';
+  applyTranslations(button); actionHost.append(button);
 }
 const restoreTransparencyButton = document.createElement('button');
 restoreTransparencyButton.id = 'restore-transparency'; restoreTransparencyButton.className = 'transparency-reset'; restoreTransparencyButton.hidden = true;
@@ -592,6 +604,7 @@ const edgePreview = createEdgeMesh(new THREE.Vector3(), new THREE.Vector3(), new
 const edgeRuler = createEdgeRuler(viewport, () => camera);
 const edgeLengthLabels = createEdgeLengthLabels(viewport, () => camera);
 let edgeAxisSnap = settings.edgeAxisSnap;
+let edgeSize = settings.edgeSize;
 let edgeShiftSnap = false;
 let edgePointer = null;
 let pointerInCanvas = false;
@@ -667,7 +680,7 @@ function buildTopologyVisual(state, components = new Map()) {
       // their filled faces remain visible in dense imported assemblies; the
       // physically outward panel offset still wins where a plate covers one.
       const depthKey = `edge:${edge.id}`;
-      const mesh = createEdgeMesh(byId.get(edge.a).position, byId.get(edge.b).position, structureMaterial(edge.color, edge.col, topologyMaterials.edge, THREE.DoubleSide, { depthLayer: RENDER_DEPTH_LAYERS.edge, depthKey }), { outlined: settings.edgeOutlinesVisible });
+      const mesh = createEdgeMesh(byId.get(edge.a).position, byId.get(edge.b).position, structureMaterial(edge.color, edge.col, topologyMaterials.edge, THREE.DoubleSide, { depthLayer: RENDER_DEPTH_LAYERS.edge, depthKey }), { outlined: settings.edgeOutlinesVisible, size: edge.size });
       mesh.userData.topology = 'edge'; mesh.userData.edgeId = edge.id;
       mesh.castShadow = true; mesh.receiveShadow = true;
       configureOpaqueDepthLayer(mesh, RENDER_DEPTH_LAYERS.edge, { key: depthKey });
@@ -752,7 +765,7 @@ function updateTopologyPreview(nodeId, value) {
     if (object.userData.topology === 'node' && object.userData.nodeId === nodeId) object.position.copy(point);
     if (object.userData.topology === 'edge') {
       const edge = topology.edges.find(value => value.id === object.userData.edgeId);
-      if (edge && !object.userData.topologyJunction) updateEdgeMesh(object, positions.get(edge.a), positions.get(edge.b));
+      if (edge && !object.userData.topologyJunction) updateEdgeMesh(object, positions.get(edge.a), positions.get(edge.b), { size: edge.size });
       if (object.userData.topologyJunction && object.userData.nodeId === nodeId) object.position.copy(point);
     }
     if (object.userData.topology === 'plate') {
@@ -1135,6 +1148,9 @@ function setTool(value) {
   connectionToolbar.hidden = value !== 'connect' || referencePreview;
   transparencyToolbar.hidden = value !== 'hide' || referencePreview;
   mirrorToolbar.hidden = !mirrorMode.active || referencePreview;
+  edgeToolbar.hidden = value !== 'edge' || referencePreview;
+  updateEdgeToolbar();
+  updateSubgridToolbar();
   transform.detach();
   if (value !== 'place') clearPlacementPreview();
   else if (cursorPoint && pointerInCanvas) void updatePlacementPreview(cursorPoint);
@@ -1530,9 +1546,15 @@ async function place(point) {
 }
 async function remove(object) {
   if (!object) return;
-  const ids = selectedIds.has(object.userData.id) ? selectedObjectIds() : [object.userData.id];
-  const result = removeObjects(snapshot(), ids);
-  await restore(result.objects, { ...topology, links: (topology.links || []).filter(link => !ids.includes(link.from.componentId) && !ids.includes(link.to.componentId)) });
+  const items = snapshot();
+  const ids = new Set(selectedIds.has(object.userData.id) ? selectedObjectIds() : [object.userData.id]);
+  if (mirrorMode.active) for (const id of [...ids]) {
+    const counterpart = mirroredComponentId(id, items);
+    if (counterpart) ids.add(counterpart);
+  }
+  const removedIds = [...ids];
+  const result = removeObjects(items, removedIds);
+  await restore(result.objects, { ...topology, links: (topology.links || []).filter(link => !ids.has(link.from.componentId) && !ids.has(link.to.componentId)) });
   select(null);
   commit('删除组件');
   status('已删除 {count} 个组件', { count: result.removed.length });
@@ -1577,7 +1599,10 @@ function addMirroredEdge(state, start, end) {
   const reflectedEnd = mirroredTopologyPoint(end);
   if (sameGridPoint(reflectedStart, reflectedEnd) || hasTopologyEdgeAtPoints(state, reflectedStart, reflectedEnd)) return state;
   const source = state.edges.at(-1);
-  return createEdgeFromPoints(state, reflectedStart, reflectedEnd, source?.color ? { color: source.color } : {});
+  return createEdgeFromPoints(state, reflectedStart, reflectedEnd, {
+    ...(source?.color ? { color: source.color } : {}),
+    ...(source?.size ? { size: source.size } : {}),
+  });
 }
 function addMirroredPlate(state, plate) {
   if (!mirrorMode.active) return state;
@@ -1614,6 +1639,62 @@ function mirroredComponentId(componentId, items = snapshot()) {
   const match = items.find(item => item.type === source.type && item.gridId === source.gridId && sameGridPoint(item.position, position));
   return match?.id || null;
 }
+function mirroredNodeId(nodeId, state = topology) {
+  if (!mirrorMode.active) return null;
+  const node = state.nodes.find(value => value.id === nodeId);
+  if (!node) return null;
+  try {
+    const point = mirroredTopologyPoint(node.position);
+    return state.nodes.find(value => sameGridPoint(value.position, point))?.id || null;
+  } catch { return null; }
+}
+function mirroredEdgeId(edgeId, state = topology) {
+  if (!mirrorMode.active) return null;
+  const edge = state.edges.find(value => value.id === edgeId);
+  if (!edge) return null;
+  const a = state.nodes.find(value => value.id === edge.a)?.position;
+  const b = state.nodes.find(value => value.id === edge.b)?.position;
+  if (!a || !b) return null;
+  try {
+    const reflectedA = mirroredTopologyPoint(a); const reflectedB = mirroredTopologyPoint(b);
+    return state.edges.find(value => {
+      const first = state.nodes.find(node => node.id === value.a)?.position;
+      const second = state.nodes.find(node => node.id === value.b)?.position;
+      return (sameGridPoint(first, reflectedA) && sameGridPoint(second, reflectedB))
+        || (sameGridPoint(first, reflectedB) && sameGridPoint(second, reflectedA));
+    })?.id || null;
+  } catch { return null; }
+}
+function topologyPointKey(point) {
+  return axes.map(axis => Number(point[axis]).toPrecision(12)).join(',');
+}
+function mirroredPlateId(plateId, state = topology) {
+  if (!mirrorMode.active) return null;
+  const plate = state.plates.find(value => value.id === plateId);
+  if (!plate) return null;
+  const nodes = new Map(state.nodes.map(value => [value.id, value.position]));
+  try {
+    const key = plate.nodeIds.map(id => nodes.get(id)).map(mirroredTopologyPoint).map(topologyPointKey).sort().join('|');
+    return state.plates.find(value => value.nodeIds.length === plate.nodeIds.length
+      && value.nodeIds.map(id => nodes.get(id)).map(topologyPointKey).sort().join('|') === key)?.id || null;
+  } catch { return null; }
+}
+function mirroredLinkId(linkId, state = topology, items = snapshot()) {
+  if (!mirrorMode.active) return null;
+  const link = (state.links || []).find(value => value.id === linkId);
+  if (!link) return null;
+  const fromId = mirroredComponentId(link.from.componentId, items);
+  const toId = mirroredComponentId(link.to.componentId, items);
+  if (!fromId || !toId) return null;
+  try {
+    const points = (link.points || []).map(mirroredTopologyPoint);
+    return (state.links || []).find(value => value.kind === link.kind
+      && value.from.componentId === fromId && value.from.port === link.from.port
+      && value.to.componentId === toId && value.to.port === link.to.port
+      && (value.points || []).length === points.length
+      && (value.points || []).every((point, index) => sameGridPoint(point, points[index])))?.id || null;
+  } catch { return null; }
+}
 function addMirroredLink(links, link, items = snapshot()) {
   if (!mirrorMode.active) return links;
   const fromId = mirroredComponentId(link.from.componentId, items);
@@ -1640,6 +1721,17 @@ function updateMirrorToolbar() {
   $('#mirror-offset-range').value = String(Math.max(-500, Math.min(500, cells)));
   applyTranslations($('#mirror-action'));
   updateMirrorGuide();
+}
+function updateSubgridToolbar() {
+  subgridToolbar.hidden = !subgridToolbarOpen || referencePreview;
+  subgridToolbar.classList.toggle('has-primary-context', ['paint', 'connect', 'hide', 'edge'].includes(tool));
+  const button = $('#subgrid-action');
+  button.classList.toggle('active', subgridToolbarOpen);
+  button.setAttribute('aria-pressed', String(subgridToolbarOpen));
+  const label = subgridToolbarOpen ? '关闭子网格操作' : '打开子网格操作';
+  button.dataset.i18nTitle = label;
+  button.dataset.i18nAriaLabel = label;
+  applyTranslations(button);
 }
 function setMirrorOffsetCells(value) {
   const cells = Number(value);
@@ -1675,8 +1767,14 @@ function structuralMerge() {
 }
 $('#copy-action').onclick = structuralCopy;
 $('#mirror-action').onclick = structuralMirror;
-$('#split-action').onclick = structuralSplit;
-$('#merge-action').onclick = structuralMerge;
+$('#subgrid-action').onclick = () => {
+  if (busy) return;
+  subgridToolbarOpen = !subgridToolbarOpen;
+  updateSubgridToolbar();
+};
+$('#subgrid-split-action').onclick = structuralSplit;
+$('#subgrid-merge-action').onclick = structuralMerge;
+updateSubgridToolbar();
 for (const button of mirrorToolbar.querySelectorAll('[data-mirror-axis]')) {
   button.addEventListener('click', () => {
     mirrorMode = { ...mirrorMode, axis: button.dataset.mirrorAxis };
@@ -2258,6 +2356,14 @@ function pickPaintColor() {
   setPaintColorPicking(false);
   status('已取色 {color}', { color });
 }
+function setComponentPaintColor(object, color, colorIndex) {
+  const currentSlots = object.userData.colors;
+  object.userData.colors = Array.isArray(currentSlots) && currentSlots.length
+    ? currentSlots.map(() => colorIndex)
+    : [colorIndex];
+  object.userData.paintColor = color;
+  applyComponentPaint(object, color);
+}
 function paintTopology() {
   const target = pickPaintTarget();
   if (!target) { status('涂色工具需要点击组件、梁或面板'); return; }
@@ -2266,24 +2372,30 @@ function paintTopology() {
   if (target.kind === 'component') {
     const colorIndex = nearestNativePaintIndex(color);
     if (colorIndex === null) { status('颜色必须是 #RRGGBB 格式'); return; }
-    const currentSlots = target.object.userData.colors;
-    target.object.userData.colors = Array.isArray(currentSlots) && currentSlots.length
-      ? currentSlots.map(() => colorIndex)
-      : [colorIndex];
-    target.object.userData.paintColor = color;
-    applyComponentPaint(target.object, color);
+    const counterpartId = mirroredComponentId(target.id);
+    setComponentPaintColor(target.object, color, colorIndex);
+    const counterpart = counterpartId && counterpartId !== target.id
+      ? objects.find(object => object.userData.id === counterpartId)
+      : null;
+    if (counterpart) setComponentPaintColor(counterpart, color, colorIndex);
     commit('已为组件设置颜色 {color}', { color });
     hoveredObject = null; updateInteractionHighlights();
     return;
   }
   if (target.kind === 'edge') {
-    commitTopology({ ...topology, edges: topology.edges.map(edge => edge.id === target.id ? { ...edge, color } : edge) }, '已为梁设置颜色 {color}', { color });
+    const ids = new Set([target.id]);
+    const counterpartId = mirroredEdgeId(target.id);
+    if (counterpartId) ids.add(counterpartId);
+    commitTopology({ ...topology, edges: topology.edges.map(edge => ids.has(edge.id) ? { ...edge, color } : edge) }, '已为梁设置颜色 {color}', { color });
     hoveredObject = null; updateInteractionHighlights();
     return;
   }
   const side = target.plateSide === 'back' ? 'back' : 'front';
   const field = side === 'back' ? 'color_back' : 'color_front';
-  commitTopology({ ...topology, plates: topology.plates.map(plate => plate.id === target.id ? { ...plate, [field]: color } : plate) }, side === 'back' ? '已为面板背面设置颜色 {color}' : '已为面板前面设置颜色 {color}', { color });
+  const ids = new Set([target.id]);
+  const counterpartId = mirroredPlateId(target.id);
+  if (counterpartId) ids.add(counterpartId);
+  commitTopology({ ...topology, plates: topology.plates.map(plate => ids.has(plate.id) ? { ...plate, [field]: color } : plate) }, side === 'back' ? '已为面板背面设置颜色 {color}' : '已为面板前面设置颜色 {color}', { color });
   hoveredObject = null; updateInteractionHighlights();
 }
 function hidePickedObject() {
@@ -2432,7 +2544,7 @@ function updateEdgePreview(point) {
     setText(buildStatus, point ? '姊?1 鏍?路 鐐瑰嚮璧风偣' : '姊?1 鏍?路 鏃犳湁鏁存牸璧风偣');
     return;
   }
-  edgePreview.visible = !!point && updateEdgeMesh(edgePreview, edgeDraft.start, point);
+  edgePreview.visible = !!point && updateEdgeMesh(edgePreview, edgeDraft.start, point, { size: edgeSize });
   edgeAnchor.visible = true;
   if (point) edgeRuler.show(edgeDraft.start, point, edgeDraft.axis); else edgeRuler.hide();
   setText(buildStatus, point ? '梁 1 格 · 整格端点 · 点击完成 / Esc 取消' : '梁 1 格 · 无有效终点 · Esc 取消');
@@ -2464,12 +2576,24 @@ function commitTopology(next, message, params = {}) {
 function deleteTopology(kind, id) {
   const command = { node: removeNode, edge: removeEdge, plate: removePlate }[kind];
   if (kind === 'link') {
-    commitTopology({ ...topology, links: removeLink(topology.links || [], id, new Set(snapshot().map(object => object.id))).links }, '已删除连接');
+    const ids = new Set([id]);
+    const counterpart = mirroredLinkId(id);
+    if (counterpart) ids.add(counterpart);
+    let links = topology.links || [];
+    for (const targetId of ids) if (links.some(link => link.id === targetId)) links = removeLink(links, targetId, new Set(snapshot().map(object => object.id))).links;
+    commitTopology({ ...topology, links }, '已删除连接');
     return;
   }
   if (!command) return;
-  if (kind === 'node' && selectedTopologyNode === id) clearNodeSelection();
-  commitTopology(command(topology, id), kind === 'node' ? '已删除节点及其关联拓扑' : kind === 'edge' ? '已删除梁' : '已删除面板');
+  const counterpart = kind === 'node' ? mirroredNodeId(id) : kind === 'edge' ? mirroredEdgeId(id) : mirroredPlateId(id);
+  const ids = new Set([id]); if (counterpart) ids.add(counterpart);
+  if (kind === 'node' && ids.has(selectedTopologyNode)) clearNodeSelection();
+  let next = topology;
+  for (const targetId of ids) {
+    const collection = kind === 'node' ? next.nodes : kind === 'edge' ? next.edges : next.plates;
+    if (collection.some(value => value.id === targetId)) next = command(next, targetId);
+  }
+  commitTopology(next, kind === 'node' ? '已删除节点及其关联拓扑' : kind === 'edge' ? '已删除梁' : '已删除面板');
 }
 function finishPlate(type = 'plate') {
   const glass = type === 'glass';
@@ -2560,7 +2684,7 @@ function handleEdgeClick(event) {
     return;
   }
   const color = paintColorValue();
-  const created = createEdgeFromPoints(topology, edgeDraft.start, point, color ? { color } : {});
+  const created = createEdgeFromPoints(topology, edgeDraft.start, point, { ...(color ? { color } : {}), size: edgeSize });
   commitTopology(addMirroredEdge(created, edgeDraft.start, point), mirrorMode.active ? '已创建实体梁及其镜像' : '已创建 1 格实体梁');
   cancelEdge();
 }
@@ -2701,10 +2825,6 @@ renderer.domElement.addEventListener('pointerup', event => {
     try { handleEdgeClick(event); } catch (error) { reportError('梁操作失败：{error}', error); }
     return;
   }
-  if (tool === 'split') {
-    try { splitPickedEdge(); } catch (error) { reportError('梁切分失败：{error}', error); }
-    return;
-  }
   if (tool === 'connect') {
     try {
       if (pickConnectionPort()) handleConnectionClick();
@@ -2808,7 +2928,9 @@ function setReferencePreview(value) {
   paintToolbar.hidden = referencePreview || tool !== 'paint';
   connectionToolbar.hidden = referencePreview || tool !== 'connect';
   transparencyToolbar.hidden = referencePreview || tool !== 'hide';
+  edgeToolbar.hidden = referencePreview || tool !== 'edge';
   updateMirrorToolbar();
+  updateSubgridToolbar();
   $('.hud').hidden = referencePreview;
   leftSidebarToggle.hidden = referencePreview;
   rightSidebarToggle.hidden = referencePreview;
@@ -3023,7 +3145,15 @@ $('.view-controls').append(axisSnapButton);
 function updateEdgeAxisSnapButton() {
   axisSnapButton.setAttribute('aria-pressed', String(edgeAxisSnap || edgeShiftSnap));
 }
+function updateEdgeToolbar() {
+  for (const button of edgeToolbar.querySelectorAll('[data-edge-size]')) {
+    const selectedSize = Number(button.dataset.edgeSize) === edgeSize;
+    button.classList.toggle('active', selectedSize);
+    button.setAttribute('aria-pressed', String(selectedSize));
+  }
+}
 updateEdgeAxisSnapButton();
+updateEdgeToolbar();
 function toggleEdgeAxisSnap() {
   if (busy) return;
   edgeAxisSnap = !edgeAxisSnap;
@@ -3031,6 +3161,19 @@ function toggleEdgeAxisSnap() {
   refreshEdgePreview(); scheduleSettings();
 }
 axisSnapButton.onclick = toggleEdgeAxisSnap;
+for (const button of edgeToolbar.querySelectorAll('[data-edge-size]')) {
+  button.addEventListener('click', () => {
+    edgeSize = Number(button.dataset.edgeSize) === 3 ? 3 : 1;
+    updateEdgeToolbar();
+    refreshEdgePreview();
+    scheduleSettings();
+  });
+}
+$('#edge-split-action').onclick = () => {
+  if (busy) return;
+  if (edgePointer) pointerRay(edgePointer);
+  try { splitPickedEdge(); } catch (error) { reportError('梁切分失败：{error}', error); }
+};
 const constructionHelp = document.createElement('p'); constructionHelp.className = 'status construction-help';
 setText(constructionHelp, '梁：两击完成，Esc 取消，Alt 点击分割。所有节点、组件和端点均对齐世界 XYZ 整数格；1 格 = 8 cm。截面边长为 1 格；世界轴向梁的面与 XYZ 平面平行。XYZ 标尺仅显示整数格与厘米。A 切换轴向吸附；节点可隐藏。');
 $('#grid-btn').after(constructionHelp);
@@ -3249,7 +3392,7 @@ function collectSettings() {
   return {
     version: 1, language: getLocale(), leftWidth: leftSidebarWidth, rightWidth: rightSidebarWidth, leftCollapsed: leftSidebar.hidden, rightOpen: !rightSidebar.hidden,
     gridColor: $('#grid-color').value, gridOpacity: Number($('#grid-opacity').value), gridStyle: $('#grid-style').value, gridVisible: gridPreferenceVisible,
-    nodesVisible: showNodes, nodeColor: $('#node-color').value, nodeSize: Number($('#node-size').value), nodeOpacity: Number($('#node-opacity').value), edgeAxisSnap, connectionVisibility: { ...connectionVisibility }, edgeLengthsVisible: settings.edgeLengthsVisible, edgeOutlinesVisible: settings.edgeOutlinesVisible, tool, selectedType,
+    nodesVisible: showNodes, nodeColor: $('#node-color').value, nodeSize: Number($('#node-size').value), nodeOpacity: Number($('#node-opacity').value), edgeAxisSnap, edgeSize, connectionVisibility: { ...connectionVisibility }, edgeLengthsVisible: settings.edgeLengthsVisible, edgeOutlinesVisible: settings.edgeOutlinesVisible, tool, selectedType,
     backgroundColor: settings.backgroundColor, lightAzimuth: settings.lightAzimuth, lightElevation: settings.lightElevation, lightIntensity: settings.lightIntensity, shadowStrength: settings.shadowStrength, lightSoftness: settings.lightSoftness, cameraLightEnabled: settings.cameraLightEnabled, cameraLightIntensity: settings.cameraLightIntensity, paintColor: settings.paintColor, paintQuickColors: settings.paintQuickColors, orthographic: settings.orthographic,
     showBuildingFurniture: $('#show-building-furniture').checked, modelThumbnails: $('#use-model-thumbnails').checked, catalogCardSize: settings.catalogCardSize, query: $('#component-search').value, category: $('#category-filter').value,
     sidebarTabs: { left: settings.sidebarTabs.left, right: settings.sidebarTabs.right },

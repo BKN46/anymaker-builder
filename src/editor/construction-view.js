@@ -89,14 +89,20 @@ export function resolveEdgePoint(ray, frame, { axisSnap = false, node = null, vi
   const origin = quantizeWorldVector(frame.origin);
   if (!origin) return null;
   const start = vector(origin);
+  // Native imports may retain projected (non-grid) topology nodes. They are
+  // useful visual references but cannot become a manual construction endpoint.
+  // Ignore them here and continue with the quantized camera-plane projection.
+  let gridNode = null;
+  if (validPoint(node)) {
+    try { gridNode = assertGridVector(node, '节点坐标'); } catch { /* Projected native node: no grid snap target. */ }
+  }
   if (!axisSnap) {
-    const point = validPoint(node) ? assertGridVector(node, '节点坐标') : projectBuildPoint(ray, frame);
+    const point = gridNode || projectBuildPoint(ray, frame);
     return point ? { point: vector(point), axis: null } : null;
   }
-  if (validPoint(node)) {
-    const aligned = assertGridVector(node, '节点坐标');
-    const changed = AXES.filter(axis => worldToCell(aligned[axis]) !== worldToCell(origin[axis]));
-    if (changed.length <= 1) return { point: vector(aligned), axis: changed[0] || null };
+  if (gridNode) {
+    const changed = AXES.filter(axis => worldToCell(gridNode[axis]) !== worldToCell(origin[axis]));
+    if (changed.length <= 1) return { point: vector(gridNode), axis: changed[0] || null };
   }
   let best = null;
   const offset = ray.origin.clone().sub(start);
@@ -214,8 +220,12 @@ function addOutwardQuad(positions, a, b, c, d, center) {
   else addQuad(positions, a, d, c, b);
 }
 
-function createEdgeGeometry(start, end) {
-  const halfSize = EDGE_WIDTH / 2;
+function edgeHalfSize(size) {
+  return EDGE_WIDTH * (size === 3 ? 3 : 1) / 2;
+}
+
+function createEdgeGeometry(start, end, size = 1) {
+  const halfSize = edgeHalfSize(size);
   const midpoint = start.clone().add(end).multiplyScalar(.5);
   const localStart = start.clone().sub(midpoint);
   const localEnd = end.clone().sub(midpoint);
@@ -242,7 +252,7 @@ function createEdgeGeometry(start, end) {
   return { geometry, midpoint };
 }
 
-export function updateEdgeMesh(mesh, start, end) {
+export function updateEdgeMesh(mesh, start, end, { size } = {}) {
   const a = vector(start); const b = vector(end);
   const direction = b.clone().sub(a);
   const length = direction.length();
@@ -250,7 +260,9 @@ export function updateEdgeMesh(mesh, start, end) {
     mesh.visible = false;
     return false;
   }
-  const { geometry, midpoint } = createEdgeGeometry(a, b);
+  const edgeSize = size === undefined ? mesh.userData.edgeSize : size;
+  mesh.userData.edgeSize = edgeSize === 3 ? 3 : 1;
+  const { geometry, midpoint } = createEdgeGeometry(a, b, mesh.userData.edgeSize);
   mesh.geometry.dispose();
   mesh.geometry = geometry;
   mesh.position.copy(midpoint);
@@ -289,9 +301,10 @@ export function setEdgeOutline(mesh, visible) {
   if (outline) outline.visible = Boolean(visible);
 }
 
-export function createEdgeMesh(start, end, material, { outlined = false } = {}) {
+export function createEdgeMesh(start, end, material, { outlined = false, size = 1 } = {}) {
   const mesh = new THREE.Mesh(new THREE.BufferGeometry(), material);
   mesh.userData.edgeOutlineRequested = Boolean(outlined);
+  mesh.userData.edgeSize = size === 3 ? 3 : 1;
   updateEdgeMesh(mesh, start, end);
   return mesh;
 }

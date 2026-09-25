@@ -1,4 +1,8 @@
 export const editorMessages = {
+  '复制选中': 'Copy selection', '拆分子网格': 'Split subgrid', '合并子网格': 'Merge subgrids',
+  '梁工具': 'Beam tool', '梁截面': 'Beam cross-section', '梁截面尺寸与切分': 'Select a 1×1 or 3×3 beam cross-section. Split the beam nearest the cursor, or Alt-click it.',
+  '梁截面尺寸无效': 'Beam cross-section size is invalid',
+  '子网格操作': 'Subgrid operations', '打开子网格操作': 'Open subgrid operations', '关闭子网格操作': 'Close subgrid operations',
   '版本 {time}': 'Build {time}',
   '镜像模式': 'Mirror mode', '镜像平面': 'Mirror plane', '平面位置': 'Plane position', '镜像平面位置': 'Mirror plane position', '格': 'cells',
   '拖动蓝色手柄或滑块，沿镜像平面法向移动。': 'Drag the blue handle or slider to move along the plane normal.',
