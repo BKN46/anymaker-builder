@@ -8,8 +8,8 @@ export const EDGE_WIDTH = GRID_CELL_SIZE;
 export const EDGE_JOINT_SIZE = EDGE_WIDTH * 1.1;
 export const STRUCTURE_COLOR = 0xcccccc;
 const EPSILON = 1e-6;
+const PLACEMENT_SURFACE_EPSILON = CELL_SIZE_WORLD * .01;
 const EDGE_OUTLINE_NAME = 'edge-outline';
-const PLACEMENT_EPSILON = CELL_SIZE_WORLD * .01;
 const vector = point => new THREE.Vector3(point.x, point.y, point.z);
 const validPoint = point => point && AXES.every(axis => Number.isFinite(point[axis]) && Math.abs(point[axis]) <= 10000);
 
@@ -30,20 +30,9 @@ export function projectBuildPoint(ray, frame) {
   return gridPoint ? vector(gridPoint) : null;
 }
 
-function placementHitNormal(hit, ray) {
-  if (!hit?.face || !hit.object) return null;
-  const normal = hit.face.normal.clone().transformDirection(hit.object.matrixWorld);
-  if (normal.lengthSq() <= EPSILON) return null;
-  normal.normalize();
-  // A malformed/reversed mesh can expose its back face. Always move away
-  // from the incoming ray so a neighbouring placement cannot enter the mesh.
-  if (normal.dot(ray.direction) > 0) normal.negate();
-  return normal;
-}
-
-function quantizePlacementPoint(point, normal = null) {
+function quantizePlacementPoint(point, direction = null, distance = 0) {
   const adjusted = point.clone();
-  if (normal) adjusted.addScaledVector(normal, PLACEMENT_EPSILON);
+  if (direction && distance) adjusted.addScaledVector(direction, distance);
   const gridPoint = quantizeWorldVector(adjusted);
   return gridPoint ? vector(gridPoint) : null;
 }
@@ -70,15 +59,16 @@ function adjacentPlacementHit(ray, targets, padding = CELL_SIZE_WORLD / 2) {
 }
 
 // Structural coordinates identify cells, rather than their visible boundary
-// lines. Placement follows a real vehicle hit first, then a one-cell expanded
-// component envelope, and finally the fixed y=0 XZ work plane.
-export function resolvePlacementPoint(pointerRaycaster, targets, workPlane, { adjacentTargets = [], adjacentPadding = CELL_SIZE_WORLD / 2 } = {}) {
+// lines. Component placement uses the closest real hit, displaced by one
+// block towards the camera so the new item stays outside the collided mesh.
+// It then falls back to an expanded component envelope and finally Y=0.
+export function resolvePlacementPoint(pointerRaycaster, targets, workPlane, { adjacentTargets = [], adjacentPadding = CELL_SIZE_WORLD / 2, hitPadding = CELL_SIZE_WORLD } = {}) {
   const ray = pointerRaycaster.ray;
   const hit = pointerRaycaster.intersectObjects(targets, true)[0];
-  const point = hit && quantizePlacementPoint(hit.point, placementHitNormal(hit, ray));
+  const point = hit && quantizePlacementPoint(hit.point, ray.direction.clone().negate(), hitPadding);
   if (point) return point;
   const adjacent = adjacentPlacementHit(ray, adjacentTargets, adjacentPadding);
-  const adjacentPoint = adjacent && quantizePlacementPoint(adjacent.point, adjacent.normal);
+  const adjacentPoint = adjacent && quantizePlacementPoint(adjacent.point, adjacent.normal, PLACEMENT_SURFACE_EPSILON);
   if (adjacentPoint) return adjacentPoint;
   const planePoint = ray.intersectPlane(workPlane, new THREE.Vector3());
   const planeGridPoint = planePoint && quantizeWorldVector(planePoint);

@@ -71,6 +71,82 @@ test('Mesh → placement → transforms → history → files on Pages subpath',
   expect(errors).toEqual([]);
 });
 
+test('component placement preview exposes JKL rotation and UIO mirror controls', async ({ page }) => {
+  await page.goto('./');
+  await expect(page.locator('#viewport')).toHaveAttribute('data-ready', 'true');
+  await page.locator('#mesh-input').setInputFiles({ name: 'engine_block_a_0_0_0.mesh', mimeType: 'application/octet-stream', buffer: meshFixture() });
+  await page.locator('#component-search').fill('engine');
+  await page.locator('[data-id="engine"]').click();
+  const canvas = page.locator('canvas');
+  await canvas.hover({ position: { x: 380, y: 400 } });
+  await expect(page.locator('#placement-indicator')).toBeVisible();
+  await page.keyboard.press('j'); await page.keyboard.press('k'); await page.keyboard.press('l');
+  await page.keyboard.press('u'); await page.keyboard.press('i'); await page.keyboard.press('o');
+  await expect(page.locator('[data-placement-rotation="x"]')).toHaveText('↻');
+  await expect(page.locator('[data-placement-rotation="y"]')).toHaveText('↻');
+  await expect(page.locator('[data-placement-rotation="z"]')).toHaveText('↻');
+  await expect(page.locator('[data-placement-mirror="x"]')).toHaveText('↔');
+  await expect(page.locator('[data-placement-mirror="y"]')).toHaveText('↔');
+  await expect(page.locator('[data-placement-mirror="z"]')).toHaveText('↔');
+  await expect(page.locator('[data-placement-rotation="x"]').locator('..')).toHaveAttribute('aria-label', 'X rotation 90 degrees');
+  await expect(page.locator('#placement-indicator')).toHaveCSS('background-color', 'rgba(0, 0, 0, 0)');
+  await openRightSidebar(page); await page.locator('#right-tab-editor').click();
+  await page.locator('#placement-orientation-indicator').uncheck();
+  await expect(page.locator('#placement-indicator')).toBeHidden();
+  await page.locator('#viewport').focus();
+  await page.keyboard.press('j');
+  await expect(page.locator('[data-placement-rotation="x"]').locator('..')).toHaveAttribute('aria-label', 'X rotation 180 degrees');
+  await canvas.click({ position: { x: 380, y: 400 } });
+  const saved = await saveProject(page);
+  expect(saved.objects[0].localMirrorAxes).toEqual(['x', 'y', 'z']);
+  await openRightSidebar(page); await page.locator('#right-tab-inspector').click();
+  await expect(page.getByRole('spinbutton', { name: 'rotation-x', exact: true })).toHaveValue(/^180(?:\.0+)?$/);
+});
+
+test('Alt-clicking a component from any tool makes its type the active placement component', async ({ page }) => {
+  await page.goto('./');
+  await expect(page.locator('#viewport')).toHaveAttribute('data-ready', 'true');
+  await page.locator('#mesh-input').setInputFiles({ name: 'engine_block_a_0_0_0.mesh', mimeType: 'application/octet-stream', buffer: meshFixture() });
+  const canvas = page.locator('canvas');
+  await page.locator('#component-search').fill('engine');
+  await page.locator('#component-list [data-id="engine"]').click();
+  await canvas.click({ position: { x: 380, y: 400 } });
+  await expect(page.locator('#object-count')).toHaveText('1 个组件');
+  await page.locator('#component-search').fill('');
+  await page.locator('#component-list [data-id="wheel"]').first().click();
+  await page.locator('[data-tool="paint"]').click();
+  await canvas.click({ position: { x: 380, y: 400 }, modifiers: ['Alt'] });
+  await expect(page.locator('[data-tool="place"]')).toHaveClass(/active/);
+  await expect(page.locator('#component-list [data-id="engine"]')).toHaveAttribute('aria-pressed', 'true');
+  await expect(page.locator('#object-count')).toHaveText('1 个组件');
+});
+
+test('battery components expose an installed battery selector that saves to the host accessory', async ({ page }) => {
+  await page.goto('./');
+  await expect(page.locator('#viewport')).toHaveAttribute('data-ready', 'true');
+  await page.locator('#component-search').fill('battery');
+  await page.locator('#component-list [data-id="battery_a"]').click();
+  await page.locator('canvas').click({ position: { x: 380, y: 400 } });
+  await expect(page.locator('#object-count')).toHaveText('1 个组件');
+  await openRightSidebar(page); await page.locator('#right-tab-inspector').click();
+  await expect(page.locator('.native-accessory-property h3')).toHaveText('已安装电池');
+  const battery = page.getByRole('combobox', { name: '电池', exact: true });
+  // The fitted cell is a separate inventory Mesh below the cradle host.
+  // Await its published resource so this checks visual assembly as well as
+  // the serialised acc.item record.
+  const manifest = JSON.parse(readFileSync(new URL('../../public/assets/manifests/mesh-manifest.json', import.meta.url)));
+  const batteryMeshUrl = new URL(manifest.entries['meshes/components/battery_a.mesh'].url, page.url()).href;
+  const [batteryMesh] = await Promise.all([
+    page.waitForResponse(response => response.url() === batteryMeshUrl && response.ok()),
+    battery.selectOption('battery_a'),
+  ]);
+  expect(batteryMesh.headers()['content-type']).toMatch(/application\/json|application\/gzip|octet-stream/i);
+  await expect(page.locator('#save-status')).toContainText('更新电池');
+  const saved = await saveProject(page);
+  expect(saved.objects[0].nativeAccessory).toMatchObject({ _type: 'battery_a' });
+  expect(saved.objects[0].nativeAccessoryContainer).toBe('acc');
+});
+
 test('structural commands create independent components and remain undoable', async ({ page }) => {
   await page.goto('./');
   await expect(page.locator('#viewport')).toHaveAttribute('data-ready', 'true');
@@ -503,6 +579,16 @@ test('catalog uses compact square cards and category icons with accessible label
   await expect(page.locator('#use-model-thumbnails')).not.toBeChecked();
   await page.locator('#use-model-thumbnails').check();
   await expect.poll(() => cards.locator('img.component-thumbnail').count()).toBeGreaterThan(0, { timeout: 30000 });
+  await page.locator('#catalog-card-size').evaluate(input => {
+    input.value = input.min;
+    input.dispatchEvent(new Event('input', { bubbles: true }));
+  });
+  const compactCard = cards.filter({ has: page.locator('img.component-thumbnail') }).first();
+  const compactName = compactCard.locator('.component-name');
+  const compactCardBox = await compactCard.boundingBox(); const compactNameBox = await compactName.boundingBox();
+  expect(compactNameBox).not.toBeNull();
+  expect(compactNameBox.y).toBeGreaterThanOrEqual(compactCardBox.y);
+  expect(compactNameBox.y + compactNameBox.height).toBeLessThanOrEqual(compactCardBox.y + compactCardBox.height + 1);
   await page.locator('#use-model-thumbnails').uncheck();
   await expect(cards.locator('svg.category-icon')).toHaveCount(332);
   await page.locator('#show-building-furniture').check();
@@ -527,10 +613,27 @@ test('catalog uses compact square cards and category icons with accessible label
   await page.locator('#component-search').fill('engine');
   const engine = page.locator('[data-id="engine"]');
   await expect(engine).toHaveAttribute('title', /engine/);
-  await expect(engine.locator('.component-id')).toHaveText('engine');
+  await expect(engine.locator('.component-id')).toHaveCount(0);
   await engine.click(); await expect(page.locator('[data-id="engine"]')).toHaveAttribute('aria-pressed', 'true');
   await page.locator('#component-search').fill('no-such-component-xyz');
   await expect(page.locator('.catalog-empty')).toContainText('没有匹配组件');
+});
+
+test('favorite stars pin components in a persisted catalog section', async ({ page }) => {
+  await page.goto('./');
+  await expect(page.locator('#viewport')).toHaveAttribute('data-ready', 'true');
+  const star = page.locator('#component-list [data-favorite-component="engine"]');
+  await expect(star).toHaveAttribute('aria-pressed', 'false');
+  await star.click();
+  await expect(page.locator('#favorite-components')).toBeVisible();
+  await expect(page.locator('#favorite-component-list [data-id="engine"]')).toHaveCount(1);
+  await expect(page.locator('#component-list [data-favorite-component="engine"]')).toHaveAttribute('aria-pressed', 'true');
+  await page.reload();
+  await expect(page.locator('#viewport')).toHaveAttribute('data-ready', 'true');
+  await expect(page.locator('#favorite-components')).toBeVisible();
+  await expect(page.locator('#favorite-component-list [data-id="engine"]')).toHaveCount(1);
+  await page.locator('#favorite-component-list [data-favorite-component="engine"]').click();
+  await expect(page.locator('#favorite-components')).toBeHidden();
 });
 
 test('ray-placed edge creation previews, cancels and commits both endpoints atomically', async ({ page }) => {

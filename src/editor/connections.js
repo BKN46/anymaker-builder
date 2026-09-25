@@ -16,6 +16,19 @@ export const LINK_COLORS = Object.freeze({
   data: '#9b51e0',
 });
 
+// Connection routes are rendered as faceted octagonal tubes. The larger
+// physical networks deliberately read as pipes/shafts, while the electric
+// and data networks remain visibly lighter. Keeping this beside the network
+// definitions lets committed routes and their construction previews agree.
+export const LINK_RENDER_STYLES = Object.freeze({
+  electric: { radius: .009, radialSegments: 8 },
+  mechanical: { radius: .022, radialSegments: 8 },
+  liquid: { radius: .021, radialSegments: 8 },
+  gas: { radius: .019, radialSegments: 8 },
+  belt: { radius: .014, radialSegments: 8 },
+  data: { radius: .0075, radialSegments: 8 },
+});
+
 const clone = value => structuredClone(value);
 const port = value => value === undefined ? 0 : value;
 const nativeProjectedPoint = point => point && ['x', 'y', 'z'].every(axis => typeof point[axis] === 'number' && Number.isFinite(point[axis]) && Math.abs(point[axis]) <= 10000);
@@ -43,6 +56,7 @@ export function validateLinks(links = [], componentIds = null) {
     if (from.componentId === to.componentId && port(from.port) === port(to.port)) throw new Error('A connection cannot use the same component port twice');
     if (!Array.isArray(link.points) || link.points.length > 256) throw new Error('Connection route must contain at most 256 points');
     if (link.color !== undefined && (!Number.isInteger(link.color) || link.color < 0 || link.color > 255)) throw new Error('Connection color must be an integer from 0 to 255');
+    if (link.paintColor !== undefined && (typeof link.paintColor !== 'string' || !/^#[\da-f]{6}$/i.test(link.paintColor))) throw new Error('Connection paint color must be a Hex RGB value');
     if (link.nativeProjected !== undefined && link.nativeProjected !== true) throw new Error('Native connection projection is invalid');
     ids.add(link.id);
     const normalized = {
@@ -51,6 +65,7 @@ export function validateLinks(links = [], componentIds = null) {
       ...(link.nativeProjected ? { nativeProjected: true } : {}),
     };
     if (Number.isInteger(link.color) && link.color >= 0 && link.color <= 255) normalized.color = link.color;
+    if (typeof link.paintColor === 'string') normalized.paintColor = link.paintColor.toLowerCase();
     return normalized;
   });
 }

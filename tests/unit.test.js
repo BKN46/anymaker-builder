@@ -9,7 +9,7 @@ import { copyObjects, mirrorObjects, moveObjects, removeObjects, splitGrid, merg
 import { Project, Vehicle, Grid, Component, Node, Edge, Plate, Link, fromEditorDocument, toEditorDocument, toEditorTopology, validateProject, nativeGridFrame, nativeGridLocalDelta } from '../src/editor/model.js';
 import { parseNativePair, nativeStats, toNativeData, toNativePair, toNativePairFromEditor, verifyNativePairRoundTrip } from '../src/native/anymaker-data.js';
 import { createNode, moveNode, moveNodeAndMerge, mergeNodes, removeNode, removeEdge, removePlate, createEdge, createEdgeFromPoints, splitEdge, createPlate, createPlateFromEdges, createGlassPlateFromEdges, triangulatePlate, validateTopologyState } from '../src/editor/topology.js';
-import { LINK_COLORS, LINK_KINDS, createLink, moveLinkPoint, removeLink, validateLinks } from '../src/editor/connections.js';
+import { LINK_COLORS, LINK_KINDS, LINK_RENDER_STYLES, createLink, moveLinkPoint, removeLink, validateLinks } from '../src/editor/connections.js';
 import * as THREE from 'three';
 import { correctGeometryNormals, reflectGeometry } from '../src/assets/geometry-ops.js';
 import { cameraBuildFrame, projectBuildPoint, resolveEdgePoint, resolvePlacementPoint, edgeMeasurements, createEdgeMesh, createEdgeJointMesh, createConnectionRoute, updateEdgeMesh, setEdgeOutline, edgeConnectionCorners, plateSurfaceBoundary, plateSurfaceVertices, cameraFacingPlateOffset, cameraFacingPlateDirection, rayFacingPlateSide } from '../src/editor/construction-view.js';
@@ -17,7 +17,7 @@ import { CELL_SIZE_WORLD, CELL_SIZE_CM, assertGridVector, cellToWorld, quantizeW
 import { categoryInfo } from '../src/catalog/category-icons.js';
 import { normalizeSettings, createLocalStore, AUTOSAVE_INTERVAL } from '../src/editor/local-storage.js';
 import { applyGridStyle, orientCamera, VIEW_DIRECTIONS } from '../src/editor/view-settings.js';
-import { applyMeshTransform, WHEEL_TYRE_OUTBOARD_OFFSET, withWheelTyreOffset } from '../src/assets/published-library.js';
+import { applyMeshTransform, staticMeshParts, stitchTiledMeshParts, WHEEL_TYRE_OUTBOARD_OFFSET, withWheelTyreOffset } from '../src/assets/published-library.js';
 import { DEPTH_SUBLAYERS, LOG_DEPTH_LAYER_STEP, LOG_DEPTH_SUBLAYER_STEP, RENDER_DEPTH_LAYERS, assignOpaqueDepthOrder, configureOpaqueDepthLayer, depthBias, logDepthBias, stableDepthRank } from '../src/editor/render-depth.js';
 import { t, setLocale, addMessages } from '../src/i18n.js';
 import { connectionDescriptorLabel, connectionNetworkLabel, connectionPortRoleLabel } from '../src/editor/connection-port-labels.js';
@@ -27,6 +27,7 @@ import { nativePaintColor, nearestNativePaintIndex } from '../src/editor/native-
 import { mirrorPoint, mirrorSurfaceDirection, sameGridPoint } from '../src/editor/mirror-mode.js';
 import { accessoryOptionsForComponent, createNativeAccessoryItem, nativeAccessoryDefinition } from '../src/editor/native-accessories.js';
 import { extensionAxes, extensionHandlePosition, extensionVector, stretchMeshPositions, updateExtension } from '../src/editor/component-extension.js';
+import { placementOrientation, updatePlacementOrientation } from '../src/editor/placement-orientation.js';
 import { gridSelectionClosure } from '../src/editor/selection-closure.js';
 import { createMicrocontrollerVariable, microcontrollerState, updateMicrocontrollerState } from '../src/editor/microcontroller.js';
 import { stageImportedSubgrid, translateImportedSubgrid, translateSubgridTopology } from '../src/editor/imported-subgrid.js';
@@ -40,6 +41,27 @@ test('mirror mode reflects integer-grid points on every plane without moving poi
   assert.deepEqual(mirrorSurfaceDirection({ x: .5, y: -.25, z: .75 }, { axis: 'y' }), { x: .5, y: .25, z: .75 });
 });
 
+test('placement orientation maps JKL rotations and UIO local mirrors to their axes', () => {
+  let orientation = placementOrientation();
+  orientation = updatePlacementOrientation(orientation, 'j');
+  orientation = updatePlacementOrientation(orientation, 'K');
+  orientation = updatePlacementOrientation(orientation, 'l');
+  assert.deepEqual(orientation.localMirrorAxes, []);
+  assert.deepEqual(orientation.rotation, { x: Math.PI / 2, y: Math.PI / 2, z: Math.PI / 2 });
+  orientation = updatePlacementOrientation(orientation, 'u');
+  orientation = updatePlacementOrientation(orientation, 'i');
+  orientation = updatePlacementOrientation(orientation, 'o');
+  assert.deepEqual(orientation.localMirrorAxes, ['x', 'y', 'z']);
+  assert.equal(updatePlacementOrientation(orientation, 'u').localMirrorAxes.includes('x'), false);
+  assert.equal(updatePlacementOrientation(orientation, 'q'), null);
+  const document = validateDocument({
+    format: 'anymaker-web-project', version: 1,
+    objects: [{ id: 'placed', type: 'engine', localMirrorAxes: ['z', 'x'], position: { x: 0, y: 0, z: 0 }, rotation: orientation.rotation, scale: { x: 1, y: 1, z: 1 } }],
+  }, new Map([['engine', {}]]));
+  assert.deepEqual(document.objects[0].localMirrorAxes, ['x', 'z']);
+  assert.match(toIntermediateXml(document), /<local-mirror axes="x z"\/>/);
+});
+
 test('native linear component extensions use definition modes, intervals and stretch centres', () => {
   const driveShaft = { mode_z: 'stretch', interval: [0, 0, 1], ext_max: [10, 10, 40], center_stretch: [0, 0, .5] };
   assert.deepEqual(extensionAxes(driveShaft), [{ axis: 'z', index: 2, mode: 'stretch', interval: 1, max: 40 }]);
@@ -51,6 +73,34 @@ test('native linear component extensions use definition modes, intervals and str
   const engine = { mode_z: 'tile', interval: [0, 0, 2] };
   assert.deepEqual(updateExtension(engine, undefined, 'z', 5), [0, 0, 6]);
   assert.ok(Math.abs(stretchMeshPositions(engine, [0, 0, 6], new Float32Array([0, 0, .2]), CELL_SIZE_WORLD)[2] - .2) < 1e-6);
+});
+
+test('tiled component meshes use interior intervals between their two caps', () => {
+  const staticMesh = 'meshes/components/engine_block_a_0_0_0.mesh';
+  const middle = 'meshes/components/engine_block_a_0_0_1.mesh';
+  const end = 'meshes/components/engine_block_a_0_0_2.mesh';
+  const definition = { mode_z: 'tile', interval: [0, 0, 2], mesh_static: { mesh_path: staticMesh } };
+  const manifest = { entries: { [staticMesh]: {}, [middle]: {}, [end]: {} } };
+  const parts = staticMeshParts(definition, { staticMesh }, [0, 0, 4], manifest);
+  assert.deepEqual(parts, [
+    { path: staticMesh, transform: null },
+    { path: middle, transform: { position: [0, 0, 2 * CELL_SIZE_WORLD] } },
+    { path: end, transform: { position: [0, 0, 4 * CELL_SIZE_WORLD] } },
+  ]);
+});
+
+test('tiled Mesh variants join their real local bounds without empty grid cells', () => {
+  const parts = [
+    { path: 'start.mesh', transform: null },
+    { path: 'middle.mesh', transform: { position: [0, 0, .16] } },
+    { path: 'end.mesh', transform: { position: [0, 0, .48] } },
+  ];
+  const mesh = (min, max) => ({ parts: [{ positions: new Float32Array([0, 0, min, 0, 0, max]) }] });
+  const stitched = stitchTiledMeshParts(parts, [mesh(-.06, .04), mesh(-.04, .12), mesh(-.04, .06)], { mode_z: 'tile' });
+  const positions = stitched.map(part => part.transform?.position?.[2] ?? 0);
+  assert.ok(Math.abs(positions[0]) < 1e-12);
+  assert.ok(Math.abs(positions[1] - .08) < 1e-6);
+  assert.ok(Math.abs(positions[2] - .24) < 1e-6);
 });
 
 test('microcontroller state preserves the observed script and typed global variable schema', () => {
@@ -260,9 +310,14 @@ test('UI preferences default to English and reject unsafe or unsupported values'
   assert.equal(defaults.modelThumbnails, false);
   assert.equal(normalizeSettings({ version: 1, modelThumbnails: true }).modelThumbnails, true);
   for (const invalid of ['true', 1, null, {}]) assert.equal(normalizeSettings({ version: 1, modelThumbnails: invalid }).modelThumbnails, false);
+  assert.equal(defaults.placementOrientationIndicator, true);
+  assert.equal(normalizeSettings({ version: 1, placementOrientationIndicator: false }).placementOrientationIndicator, false);
+  for (const invalid of ['true', 1, null, {}]) assert.equal(normalizeSettings({ version: 1, placementOrientationIndicator: invalid }).placementOrientationIndicator, true);
   assert.equal(defaults.catalogCardSize, 72);
   assert.equal(normalizeSettings({ version: 1, catalogCardSize: 120 }).catalogCardSize, 120);
   assert.equal(normalizeSettings({ version: 1, catalogCardSize: 1000 }).catalogCardSize, defaults.catalogCardSize);
+  assert.deepEqual(normalizeSettings({ version: 1, favoriteComponents: ['engine', 'wheel', 'engine', '../unsafe'] }).favoriteComponents, ['engine', 'wheel']);
+  assert.deepEqual(normalizeSettings({ version: 1, favoriteComponents: Array.from({ length: 101 }, (_, index) => `part-${index}`) }).favoriteComponents, []);
   assert.equal(normalizeSettings({ version: 1, leftWidth: 721 }).leftWidth, 304);
   const render = normalizeSettings({ version: 1, backgroundColor: '#102030', lightAzimuth: 80, lightElevation: 35, lightIntensity: 4.2, shadowStrength: .8, cameraLightEnabled: false, cameraLightIntensity: 5.5, orthographic: true });
   assert.deepEqual(Object.fromEntries(['backgroundColor', 'lightAzimuth', 'lightElevation', 'lightIntensity', 'shadowStrength', 'cameraLightEnabled', 'cameraLightIntensity', 'orthographic'].map(key => [key, render[key]])), { backgroundColor: '#102030', lightAzimuth: 80, lightElevation: 35, lightIntensity: 4.2, shadowStrength: .8, cameraLightEnabled: false, cameraLightIntensity: 5.5, orthographic: true });
@@ -590,6 +645,28 @@ test('regular wheel exposes every verified compatible wheel and tread accessory'
   assert.equal(accessoryOptionsForComponent('wheel_c').length, 0);
   assert.deepEqual(createNativeAccessoryItem('wheel_rim_24_tread', 99), { _type: 'wheel_rim_24_tread', id: 99, pattern: 1 });
   assert.equal(nativeAccessoryDefinition('wheel_rim_24_tread').meshBinding.dynamicMeshes[0].path, 'meshes/components/rim_24_wheel_tread.mesh');
+  assert.deepEqual(accessoryOptionsForComponent('battery_a'), ['battery_a']);
+  assert.deepEqual(accessoryOptionsForComponent('battery_b'), ['battery_b']);
+  assert.deepEqual(createNativeAccessoryItem('battery_a', 100), { _type: 'battery_a', id: 100 });
+  assert.deepEqual(nativeAccessoryDefinition('battery_a').meshBinding.dynamicMeshes, [{ index: 0, path: 'meshes/components/battery_a.mesh', addComponentTool: false }]);
+});
+test('battery cells remain attached to their battery host at the native acc.item path', () => {
+  const native = {
+    definitions: { components: ['battery_a'] },
+    vehicles: { vehicles: [{ id: 1, grids: [{ components: [{
+      def: 0, id: 32, pos: [2, 3, 4],
+      acc: { item: { _type: 'battery_a', id: 40530, energy: 11337349.474430276 } },
+    }] }] }] },
+  };
+  const document = toEditorDocument(parseNativePair(native, {}));
+  const battery = document.objects.find(object => object.type === 'battery_a');
+  assert.deepEqual(battery.nativeAccessory, native.vehicles.vehicles[0].grids[0].components[0].acc.item);
+  assert.equal(battery.nativeAccessoryContainer, 'acc');
+  assert.equal(battery.nativeProperties?.acc, undefined);
+  const pair = toNativePairFromEditor(validateDocument(document, new Map([['battery_a', {}]])));
+  const exported = pair.data.vehicles.vehicles[0].grids[0].components[0];
+  assert.deepEqual(exported.acc, native.vehicles.vehicles[0].grids[0].components[0].acc);
+  assert.equal(exported.element, undefined);
 });
 test('component paint RGB values resolve to deterministic native palette slots', () => {
   assert.equal(nearestNativePaintIndex('#bd2636'), 26);
@@ -604,6 +681,12 @@ test('native component properties survive editor validation and native export', 
   assert.equal(pair.data.vehicles.vehicles[0].grids[0].components[0].gear_count, 4);
   assert.equal(pair.data.vehicles.vehicles[0].grids[0].components[0].enabled, true);
   assert.throws(() => validateDocument(project([{ ...object, nativeProperties: { connected_vehicle: 1 } }]), definitions), /property name/);
+});
+test('tank contents are editable native component properties', () => {
+  const document = validateDocument(project([{ ...object, type: 'liquid_tank', nativeProperties: { content: { oil: 4.25, temp: 6 } } }]), new Map([['liquid_tank', {}]]));
+  assert.deepEqual(document.objects[0].nativeProperties.content, { oil: 4.25, temp: 6 });
+  const pair = toNativePairFromEditor(document);
+  assert.deepEqual(pair.data.vehicles.vehicles[0].grids[0].components[0].content, { oil: 4.25, temp: 6 });
 });
 test('known Properties Tool constraints are available for new component instances', () => {
   const descriptor = componentPropertyDescriptors('gear_stick').find(value => value.key === 'gear_count');
@@ -621,6 +704,12 @@ test('known Properties Tool constraints are available for new component instance
   const pump = componentPropertyDescriptors('liquid_pump');
   assert.deepEqual(updateNativeProperty({}, pump.find(value => value.key === 'is_reverse'), true), { is_reverse: true });
   assert.deepEqual(componentPropertyDescriptors('differential_gearbox_a').map(value => value.key), ['user_defined_alias', 'input', 'output']);
+  const liquidContent = componentPropertyDescriptors('liquid_tank').find(value => value.key === 'content');
+  assert.equal(liquidContent.type, 'content');
+  assert.deepEqual(liquidContent.options, ['water', 'oil', 'petrol']);
+  assert.deepEqual(updateNativeProperty({}, liquidContent, { water: 12.5 }), { content: { water: 12.5 } });
+  assert.deepEqual(updateNativeProperty({ content: { water: 12.5, temp: 6 } }, liquidContent, { oil: 4, temp: 6 }), { content: { oil: 4, temp: 6 } });
+  assert.deepEqual(componentPropertyDescriptors('gas_tank_c').find(value => value.key === 'content').options, ['air']);
 });
 test('native export preserves combined XYZ component rotations', () => {
   const rotation = { x: 0.3, y: 0.5, z: -0.7 };
@@ -807,6 +896,11 @@ test('connection commands preserve six link families and validate endpoints', ()
     electric: '#f1c232', mechanical: '#f2994a', liquid: '#2f80ed',
     gas: '#27ae60', belt: '#98a2b3', data: '#9b51e0',
   });
+  assert.deepEqual(LINK_RENDER_STYLES, {
+    electric: { radius: .009, radialSegments: 8 }, mechanical: { radius: .022, radialSegments: 8 },
+    liquid: { radius: .021, radialSegments: 8 }, gas: { radius: .019, radialSegments: 8 },
+    belt: { radius: .014, radialSegments: 8 }, data: { radius: .0075, radialSegments: 8 },
+  });
   const componentIds = new Set(['source', 'target']);
   let links = [];
   for (const kind of LINK_KINDS) {
@@ -814,6 +908,10 @@ test('connection commands preserve six link families and validate endpoints', ()
     links = result.links;
   }
   assert.equal(validateLinks(links, componentIds).length, LINK_KINDS.length);
+  assert.equal(links[0].paintColor, undefined);
+  const painted = validateLinks([{ ...links[0], paintColor: '#AbC123' }], componentIds)[0];
+  assert.equal(painted.paintColor, '#abc123');
+  assert.throws(() => validateLinks([{ ...links[0], paintColor: 'red' }], componentIds), /Hex RGB/);
   assert.throws(() => createLink(links, { kind: 'electric', from: { componentId: 'missing' }, to: { componentId: 'target' }, points: [] }, componentIds), /unknown component/);
   assert.throws(() => validateLinks([{ id: 'bad', kind: 'belt', from: { componentId: 'source' }, to: { componentId: 'source' }, points: [] }], componentIds), /same component port/);
   assert.equal(removeLink(links, links[0].id, componentIds).links.length, LINK_KINDS.length - 1);
@@ -1147,13 +1245,13 @@ test('camera projection quantizes every world axis to the fixed integer grid', (
     assert.ok(projectBuildPoint(ray.ray, frame).distanceTo(original) < 1e-9);
   }
 });
-test('placement follows the pointer vehicle hit before its work-plane fallback', () => {
+test('component placement moves one block toward the camera from its nearest vehicle hit', () => {
   const vehicle = new THREE.Mesh(new THREE.PlaneGeometry(1, 1), new THREE.MeshBasicMaterial({ side: THREE.DoubleSide }));
   vehicle.rotation.x = -Math.PI / 2; vehicle.position.y = .5;
   vehicle.updateMatrixWorld(true);
   const pointer = new THREE.Raycaster(new THREE.Vector3(.17, 1, .17), new THREE.Vector3(0, -1, 0));
   const workPlane = new THREE.Plane(new THREE.Vector3(0, 1, 0), 0);
-  assert.deepEqual(resolvePlacementPoint(pointer, [vehicle], workPlane).toArray(), [cell(2), cell(6), cell(2)]);
+  assert.deepEqual(resolvePlacementPoint(pointer, [vehicle], workPlane).toArray(), [cell(2), cell(7), cell(2)]);
   assert.deepEqual(resolvePlacementPoint(pointer, [], workPlane).toArray(), [cell(2), 0, cell(2)]);
   vehicle.geometry.dispose(); vehicle.material.dispose();
 });

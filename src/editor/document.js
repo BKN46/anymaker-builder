@@ -95,6 +95,10 @@ export function validateDocument(input, definitions) {
       if (!o.mirror || !['x', 'y', 'z'].includes(o.mirror.axis)) throw new Error('Invalid mirror data at ' + index);
       result.mirror = { axis: o.mirror.axis, offset: assertGridScalar(o.mirror.offset, '镜像偏移') };
     }
+    if (o.localMirrorAxes !== undefined) {
+      if (!Array.isArray(o.localMirrorAxes) || o.localMirrorAxes.some(axis => !axes.includes(axis)) || new Set(o.localMirrorAxes).size !== o.localMirrorAxes.length) throw new Error('Invalid local component mirrors at ' + index);
+      if (o.localMirrorAxes.length) result.localMirrorAxes = axes.filter(axis => o.localMirrorAxes.includes(axis));
+    }
     if (o.colors !== undefined) {
       if (!Array.isArray(o.colors) || o.colors.length > 10 || o.colors.some(color => !Number.isInteger(color) || color < 0 || color > 255)) throw new Error('Invalid component color slots at ' + index);
       result.colors = [...o.colors];
@@ -113,6 +117,10 @@ export function validateDocument(input, definitions) {
       result.nativeProjected = true;
     }
     if (o.nativeAccessory !== undefined) result.nativeAccessory = validateNativeAccessory(o.nativeAccessory);
+    if (o.nativeAccessoryContainer !== undefined) {
+      if (!result.nativeAccessory || !['acc', 'element.acc'].includes(o.nativeAccessoryContainer)) throw new Error('Invalid native accessory container at ' + index);
+      result.nativeAccessoryContainer = o.nativeAccessoryContainer;
+    }
     if (o.nativeExtension !== undefined) {
       if (!Array.isArray(o.nativeExtension) || o.nativeExtension.length !== 3 || o.nativeExtension.some(value => !Number.isInteger(value) || Math.abs(value) > 10000)) throw new Error('Invalid native component extension at ' + index);
       result.nativeExtension = [...o.nativeExtension];
@@ -176,7 +184,8 @@ export function toIntermediateXml(document) {
   const components = document.objects.map(o => {
     const grid = o.gridId ? ' grid="' + escapeXml(o.gridId) + '"' : '';
     const mirror = o.mirror ? '<mirror axis="' + escapeXml(o.mirror.axis) + '" offset="' + Number(o.mirror.offset).toFixed(6) + '"/>' : '';
-    return '  <component instance="' + escapeXml(o.id) + '" definition="' + escapeXml(o.type) + '"' + grid + '>' + vector('position', o.position) + vector('rotation-radians-xyz', o.rotation) + vector('scale', o.scale) + mirror + '</component>';
+    const localMirror = o.localMirrorAxes?.length ? '<local-mirror axes="' + escapeXml(o.localMirrorAxes.join(' ')) + '"/>' : '';
+    return '  <component instance="' + escapeXml(o.id) + '" definition="' + escapeXml(o.type) + '"' + grid + '>' + vector('position', o.position) + vector('rotation-radians-xyz', o.rotation) + vector('scale', o.scale) + mirror + localMirror + '</component>';
   });
   const topology = document.topology || { nodes: [], edges: [], plates: [] };
   const nodes = topology.nodes.map(node => '  <node id="' + escapeXml(node.id) + '" x="' + node.position.x.toFixed(6) + '" y="' + node.position.y.toFixed(6) + '" z="' + node.position.z.toFixed(6) + '"/>');

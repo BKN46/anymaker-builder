@@ -24,8 +24,17 @@ function cloneItem(value, depth = 0) {
   return Object.fromEntries(entries.map(([key, item]) => [key, cloneItem(item, depth + 1)]));
 }
 
+export function nativeAccessoryContainerFromState(state) {
+  const direct = state?.acc?.item;
+  if (direct && typeof direct === 'object' && !Array.isArray(direct) && typeof direct._type === 'string' && /^[A-Za-z][A-Za-z0-9_]{0,79}$/.test(direct._type)) return 'acc';
+  const nested = state?.element?.acc?.item;
+  if (nested && typeof nested === 'object' && !Array.isArray(nested) && typeof nested._type === 'string' && /^[A-Za-z][A-Za-z0-9_]{0,79}$/.test(nested._type)) return 'element.acc';
+  return null;
+}
+
 export function nativeAccessoryFromState(state) {
-  const item = state?.element?.acc?.item;
+  const container = nativeAccessoryContainerFromState(state);
+  const item = container === 'acc' ? state?.acc?.item : state?.element?.acc?.item;
   if (!item || typeof item !== 'object' || Array.isArray(item) || typeof item._type !== 'string' || !/^[A-Za-z][A-Za-z0-9_]{0,79}$/.test(item._type)) return null;
   return cloneItem(item);
 }
@@ -52,16 +61,33 @@ const wheelAccessories = {
   wheel_rim_24_tread: { name: '24 in Tread Wheel', name_zh: '24 英寸轮胎花纹', mesh: 'meshes/components/rim_24_wheel_tread.mesh' },
   wheel4x4: { name: '4x4 Wheel', name_zh: '四驱车轮', mesh: 'meshes/components/_4x4_wheel.mesh' },
 };
+const batteryAccessories = {
+  // These inventory Meshes share the battery cradle's component-local
+  // origin. Their native attachment/floor transforms are for a character or
+  // world item presentation, respectively, and must not be applied when the
+  // item is rendered as `acc.item` on a vehicle component.
+  battery_a: { name: 'Battery', name_zh: '电池', mesh: 'meshes/components/battery_a.mesh' },
+  battery_b: { name: 'Battery', name_zh: '电池', mesh: 'meshes/components/battery_b.mesh' },
+};
+const accessories = { ...wheelAccessories, ...batteryAccessories };
 const tyreRotation = [1, 0, 0, 0, 0, -1, 0, 1, 0];
 
 export function accessoryOptionsForComponent(type) {
-  return ['wheel', 'wheel_b'].includes(type) ? Object.keys(wheelAccessories) : [];
+  if (['wheel', 'wheel_b'].includes(type)) return Object.keys(wheelAccessories);
+  return batteryAccessories[type] ? [type] : [];
 }
 
 export function createNativeAccessoryItem(itemType, id) {
   if (!Number.isInteger(id) || id < 0 || id > 1e9) throw new Error('Native accessory item ID is invalid');
-  if (!wheelAccessories[itemType]) throw new Error('Unsupported native accessory item type');
-  return { _type: itemType, id, pattern: 1 };
+  if (!accessories[itemType]) throw new Error('Unsupported native accessory item type');
+  return wheelAccessories[itemType] ? { _type: itemType, id, pattern: 1 } : { _type: itemType, id };
+}
+
+export function nativeAccessoryContainerForComponent(type) {
+  // Current native samples use the direct component `acc.item` field for
+  // wheel tyres and battery cells. Keep the older nested path only when it
+  // was explicitly imported from a legacy record.
+  return accessoryOptionsForComponent(type).length ? 'acc' : null;
 }
 
 // The component's wheel binding establishes the observed mounting frame;
@@ -86,6 +112,21 @@ export function nativeAccessoryDefinition(itemType) {
         }],
       },
       meshes_dynamic: [{ path: wheel.mesh }],
+    };
+  }
+  const battery = batteryAccessories[itemType];
+  if (battery) {
+    return {
+      id: `native-accessory-${itemType}`,
+      name: battery.name,
+      name_zh: battery.name_zh,
+      category: 'electric',
+      class: 'native_accessory',
+      meshBinding: {
+        staticMesh: null,
+        dynamicMeshes: [{ index: 0, path: battery.mesh, addComponentTool: false }],
+      },
+      meshes_dynamic: [{ path: battery.mesh }],
     };
   }
   return {

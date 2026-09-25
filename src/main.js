@@ -7,7 +7,7 @@ import { reflectObject } from './assets/geometry-ops.js';
 import { History, LIMIT, project, validateDocument, migrateDocument, toIntermediateXml } from './editor/document.js';
 import { copyObjects, moveObjects, removeObjects, splitGrid, mergeGrids, gridIds } from './editor/operations.js';
 import { createNode, moveNodeAndMerge, mergeNodes, removeNode, removeEdge, removePlate, createEdgeFromPoints, edgeSplitPoints, splitEdge, createPlate, createPlateFromEdges, createGlassPlateFromEdges } from './editor/topology.js';
-import { LINK_COLORS, createLink, moveLinkPoint, removeLink } from './editor/connections.js';
+import { LINK_COLORS, LINK_RENDER_STYLES, createLink, moveLinkPoint, removeLink } from './editor/connections.js';
 import { CELL_SIZE_WORLD, assertGridVector, cellToWorld, quantizeWorldVector, worldToCell } from './editor/grid.js';
 import { GRID_SIZE, GRID_DIVISIONS, STRUCTURE_COLOR, cameraBuildFrame, projectBuildPoint, resolveEdgePoint, resolvePlacementPoint, createEdgeMesh, createEdgeJointMesh, createConnectionRoute, updateEdgeMesh, setEdgeOutline, plateSurfaceBoundary, plateSurfaceVertices, cameraFacingPlateOffset, cameraFacingPlateDirection, rayFacingPlateSide } from './editor/construction-view.js';
 import { createEdgeRuler, createEdgeLengthLabels } from './editor/edge-ruler.js';
@@ -22,8 +22,9 @@ import { startLocalSession } from './editor/local-session.js';
 import { createOrientationIndicator, orientCamera, applyGridStyle } from './editor/view-settings.js';
 import { RENDER_DEPTH_LAYERS, assignOpaqueDepthOrder, configureOpaqueDepth, configureOpaqueDepthLayer } from './editor/render-depth.js';
 import { nativePaintColor, nearestNativePaintIndex, isGlassPlate } from './editor/native-paint.js';
-import { accessoryOptionsForComponent, createNativeAccessoryItem, nativeAccessoryDefinition } from './editor/native-accessories.js';
+import { accessoryOptionsForComponent, createNativeAccessoryItem, nativeAccessoryContainerForComponent, nativeAccessoryDefinition } from './editor/native-accessories.js';
 import { extensionAxes, extensionAxisIndex, extensionHandlePosition, extensionVector, updateExtension } from './editor/component-extension.js';
+import { placementOrientation, PLACEMENT_ORIENTATION_KEYS, updatePlacementOrientation } from './editor/placement-orientation.js';
 import { editorMessages } from './editor/ui-messages.js';
 import { connectionNetworkLabel, connectionPortRoleLabel } from './editor/connection-port-labels.js';
 import { logicNodePort, logicNodePortsForNetwork, logicNodeCellPosition } from './editor/connection-ports.js';
@@ -82,6 +83,8 @@ let placementPreview = null;
 let placementPreviewType = '';
 let placementPreviewLoadingType = '';
 let placementPreviewRequest = 0;
+let pendingPlacementOrientation = placementOrientation();
+let multiTransform = null;
 let importedSubgridDraft = null;
 let selectedSubgridId = null;
 let subgridTransform = null;
@@ -114,8 +117,8 @@ const GITHUB_PAGES_WORKFLOW_RUNS = 'https://api.github.com/repos/BKN46/anymaker-
 const isGitHubPagesDeployment = run => run?.path === 'dynamic/pages/pages-build-deployment';
 
 $('#app').innerHTML = '<header class="topbar"><div class="brand" aria-label="ANYMAKER builder by BKN"><strong>ANYMAKER</strong><small>builder by BKN</small></div><a id="github-link" class="github-link" href="https://github.com/BKN46/anymaker-builder" target="_blank" rel="noopener noreferrer" data-i18n-aria-label="GitHub 仓库" data-i18n-title="GitHub 仓库"><svg viewBox="0 0 24 24" aria-hidden="true"><path d="M12 .7a11.3 11.3 0 0 0-3.57 22c.56.1.77-.24.77-.54v-2.1c-3.14.68-3.8-1.33-3.8-1.33-.51-1.3-1.25-1.65-1.25-1.65-1.02-.7.08-.69.08-.69 1.13.08 1.73 1.16 1.73 1.16 1 .1.75 2.02 2.92 1.41.1-.73.39-1.22.71-1.5-2.51-.29-5.15-1.25-5.15-5.58 0-1.23.44-2.24 1.16-3.03-.12-.29-.5-1.44.11-2.99 0 0 .95-.3 3.11 1.16a10.8 10.8 0 0 1 5.66 0c2.16-1.46 3.1-1.16 3.1-1.16.62 1.55.23 2.7.12 2.99.72.79 1.16 1.8 1.16 3.03 0 4.34-2.65 5.29-5.17 5.57.4.35.76 1.04.76 2.1v3.11c0 .3.2.65.78.54A11.3 11.3 0 0 0 12 .7Z"></path></svg></a><span id="github-build-time" class="github-build-time" hidden aria-live="polite"></span><select id="language-select" data-i18n-aria-label="界面语言"><option value="en">English</option><option value="zh">中文</option></select><span class="status" id="save-status" role="status" data-i18n="正在加载定义…"></span><section class="section top-tool-section"><h2 data-i18n="编辑工具"></h2><div class="tool-grid" id="tools"></div></section><nav class="top-actions"><button id="library-btn" data-i18n="导入本地载具"></button><button id="subgrid-import-btn" data-i18n="导入载具作为子网格"></button><button id="new-btn" data-i18n="新建"></button><button id="undo-btn" data-i18n="撤销"></button><button id="redo-btn" data-i18n="重做"></button><button id="save-btn" data-i18n="保存载具"></button><button id="export-btn" class="primary" data-i18n="中间格式 XML"></button></nav></header>' +
-  '<main class="workspace" id="workspace"><button id="left-sidebar-toggle" class="sidebar-toggle left-toggle" aria-controls="left-sidebar" aria-expanded="true" aria-keyshortcuts="Tab" data-i18n-title="收起方块库（在视口按 Tab 也可切换）" data-i18n="收起方块库"></button><aside id="left-sidebar" class="sidebar left-sidebar" data-i18n-aria-label="方块库"><div class="sidebar-tabs" role="tablist" data-i18n-aria-label="方块库"><button id="left-tab-catalog" type="button" role="tab" aria-controls="catalog-panel" aria-selected="true" data-sidebar-tab="catalog" data-i18n="方块库"></button><button id="left-tab-subgrids" type="button" role="tab" aria-controls="subgrid-panel" aria-selected="false" tabindex="-1" data-sidebar-tab="subgrids" data-i18n="子网格"></button></div><section id="catalog-panel" class="sidebar-tab-panel catalog-panel" role="tabpanel" aria-labelledby="left-tab-catalog"><section class="section"><h2><span data-i18n="组件定义"></span> <span id="catalog-count"></span></h2><input class="search" id="component-search" data-i18n-aria-label="搜索组件" data-i18n-placeholder="搜索中文、原始 ID、类别…"><select id="category-filter" data-i18n-aria-label="组件分类"><option value="" data-i18n="全部分类"></option></select><div class="catalog-visibility-options"><label class="catalog-visibility"><input id="show-building-furniture" type="checkbox"><span data-i18n="显示建材与家具"></span></label><label class="catalog-visibility"><input id="use-model-thumbnails" type="checkbox"><span data-i18n="使用模型缩略图"></span></label><input id="catalog-card-size" class="catalog-card-size" type="range" min="64" max="156" step="4" data-i18n-aria-label="组件卡片大小" data-i18n-title="组件卡片大小"></div><div id="component-list"></div></section></section><section id="subgrid-panel" class="sidebar-tab-panel" role="tabpanel" aria-labelledby="left-tab-subgrids" hidden><section class="section"><h2 data-i18n="当前载具子网格"></h2><p id="subgrid-summary" class="status"></p><div id="subgrid-list" class="subgrid-list"></div></section></section></aside><div id="left-sidebar-resizer" role="separator" aria-orientation="vertical" aria-controls="left-sidebar" data-i18n-aria-label="调整方块库宽度" aria-valuemin="240" aria-valuemax="720" tabindex="0"></div>' +
-  '<section id="viewport" tabindex="0" data-i18n-aria-label="三维建造视口"><button id="right-sidebar-toggle" class="sidebar-toggle right-toggle" aria-controls="right-sidebar" aria-expanded="false" data-i18n="打开右侧面板"></button><div class="view-controls"><button data-view="iso" data-i18n="正交"></button><button data-view="top" data-i18n="顶视"></button><button data-view="front" data-i18n="前视"></button><button id="fit-btn" data-i18n="回到中心"></button></div><div class="hud"><span class="badge" id="object-count"></span><span class="badge" id="vehicle-size"></span><span id="topology-count" hidden></span><span class="badge" id="cursor-pos" data-i18n="工作平面 Y = 0"></span></div></section><div id="right-sidebar-resizer" role="separator" aria-orientation="vertical" aria-controls="right-sidebar" data-i18n-aria-label="调整右侧面板宽度" aria-valuemin="240" aria-valuemax="720" aria-valuenow="304" tabindex="0" hidden></div>' +
+  '<main class="workspace" id="workspace"><button id="left-sidebar-toggle" class="sidebar-toggle left-toggle" aria-controls="left-sidebar" aria-expanded="true" aria-keyshortcuts="Tab" data-i18n-title="收起方块库（在视口按 Tab 也可切换）" data-i18n="收起方块库"></button><aside id="left-sidebar" class="sidebar left-sidebar" data-i18n-aria-label="方块库"><div class="sidebar-tabs" role="tablist" data-i18n-aria-label="方块库"><button id="left-tab-catalog" type="button" role="tab" aria-controls="catalog-panel" aria-selected="true" data-sidebar-tab="catalog" data-i18n="方块库"></button><button id="left-tab-subgrids" type="button" role="tab" aria-controls="subgrid-panel" aria-selected="false" tabindex="-1" data-sidebar-tab="subgrids" data-i18n="子网格"></button></div><section id="catalog-panel" class="sidebar-tab-panel catalog-panel" role="tabpanel" aria-labelledby="left-tab-catalog"><section class="section"><h2><span data-i18n="组件定义"></span> <span id="catalog-count"></span></h2><input class="search" id="component-search" data-i18n-aria-label="搜索组件" data-i18n-placeholder="搜索中文、原始 ID、类别…"><select id="category-filter" data-i18n-aria-label="组件分类"><option value="" data-i18n="全部分类"></option></select><div class="catalog-visibility-options"><label class="catalog-visibility"><input id="show-building-furniture" type="checkbox"><span data-i18n="显示建材与家具"></span></label><label class="catalog-visibility"><input id="use-model-thumbnails" type="checkbox"><span data-i18n="使用模型缩略图"></span></label><input id="catalog-card-size" class="catalog-card-size" type="range" min="64" max="156" step="4" data-i18n-aria-label="组件卡片大小" data-i18n-title="组件卡片大小"></div><div id="component-list"></div><section id="favorite-components" hidden><h3><span data-i18n="收藏组件"></span> <span id="favorite-component-count"></span></h3><div id="favorite-component-list"></div></section></section></section><section id="subgrid-panel" class="sidebar-tab-panel" role="tabpanel" aria-labelledby="left-tab-subgrids" hidden><section class="section"><h2 data-i18n="当前载具子网格"></h2><p id="subgrid-summary" class="status"></p><div id="subgrid-list" class="subgrid-list"></div></section></section></aside><div id="left-sidebar-resizer" role="separator" aria-orientation="vertical" aria-controls="left-sidebar" data-i18n-aria-label="调整方块库宽度" aria-valuemin="240" aria-valuemax="720" tabindex="0"></div>' +
+  '<section id="viewport" tabindex="0" data-i18n-aria-label="三维建造视口"><button id="right-sidebar-toggle" class="sidebar-toggle right-toggle" aria-controls="right-sidebar" aria-expanded="false" data-i18n="打开右侧面板"></button><div class="view-controls"><button data-view="iso" data-i18n="正交"></button><button data-view="top" data-i18n="顶视"></button><button data-view="front" data-i18n="前视"></button><button id="fit-btn" data-i18n="回到中心"></button></div><span id="fps-display" class="fps-display" aria-label="Frame rate">FPS 0</span><div class="hud"><span class="badge" id="object-count"></span><span class="badge" id="vehicle-size"></span><span id="topology-count" hidden></span><span class="badge" id="cursor-pos" data-i18n="工作平面 Y = 0"></span></div></section><div id="right-sidebar-resizer" role="separator" aria-orientation="vertical" aria-controls="right-sidebar" data-i18n-aria-label="调整右侧面板宽度" aria-valuemin="240" aria-valuemax="720" aria-valuenow="304" tabindex="0" hidden></div>' +
   '<aside id="right-sidebar" class="sidebar right-sidebar" data-i18n-aria-label="编辑器面板" hidden><div class="sidebar-tabs" role="tablist" data-i18n-aria-label="编辑器面板"><button id="right-tab-editor" type="button" role="tab" aria-controls="editor-tab-panel" aria-selected="true" data-sidebar-tab="editor" data-i18n="编辑器参数"></button><button id="right-tab-inspector" type="button" role="tab" aria-controls="inspector-tab-panel" aria-selected="false" tabindex="-1" data-sidebar-tab="inspector" data-i18n="选中方块属性"></button><button id="right-tab-resources" type="button" role="tab" aria-controls="resources-tab-panel" aria-selected="false" tabindex="-1" data-sidebar-tab="resources" data-i18n="资源与校验"></button><button id="right-tab-history" type="button" role="tab" aria-controls="history-tab-panel" aria-selected="false" tabindex="-1" data-sidebar-tab="history" data-i18n="历史记录"></button></div><section id="editor-tab-panel" class="sidebar-tab-panel" role="tabpanel" aria-labelledby="right-tab-editor"><section id="grid-settings" class="section"><h2 data-i18n="工作网格 · 编辑器参数"></h2><p class="status" data-i18n="固定单位网格：1 格 = 8 cm；手动编辑位置为整数格，原生子网格投影可保留小数。"></p><button id="grid-btn" aria-pressed="true" data-i18n="隐藏网格"></button><p class="status"><span data-i18n="左键：当前工具 · 右键拖动：旋转视角"></span><br><span data-i18n="中键：平移 · 滚轮：缩放 · F：聚焦"></span><br><span data-i18n="Shift + 点击连续放置 · Ctrl / ⌘ + Z：撤销"></span></p></section></section><section id="inspector-tab-panel" class="sidebar-tab-panel" role="tabpanel" aria-labelledby="right-tab-inspector" hidden><section class="section"><div id="inspector-content" class="empty"></div></section></section><section id="resources-tab-panel" class="sidebar-tab-panel" role="tabpanel" aria-labelledby="right-tab-resources" hidden><section class="section"><h2 data-i18n="资源状态"></h2><p class="status" id="asset-status" data-i18n="尚未导入 Mesh。橙色线框仅是缺失资源标记，不代表游戏尺寸。"></p><button id="mesh-files-btn" class="full" data-i18n="选择 .mesh 文件"></button><p class="status" data-i18n="推荐选择游戏的 rom/meshes 文件夹。只在浏览器读取，不上传、不执行 EXE。仅渲染静态 Mesh，动态部件数量会单独提示。"></p></section><section class="section"><h2 data-i18n="本地原生载具"></h2><button id="native-btn" class="full" data-i18n="选择配套 .data / .meta"></button><p class="status" id="native-summary" data-i18n="选择同名的 .data 与 .meta JSON 文件。浏览器只读取，不上传；校验后立即替换当前场景。"></p></section><section class="section"><h2 data-i18n="校验"></h2><div id="validation" class="status"></div></section></section><section id="history-tab-panel" class="sidebar-tab-panel" role="tabpanel" aria-labelledby="right-tab-history" hidden><section class="section"><p class="status" data-i18n="最近 50 次已提交操作。选择任一项即可恢复到该状态。"></p><div id="history-list" class="history-list"></div></section></section></aside></main>' +
   '<input id="mesh-input" type="file" accept=".mesh" multiple hidden><input id="file-input" type="file" accept=".json" hidden><input id="native-input" type="file" accept=".data,.meta" multiple hidden><input id="native-subgrid-input" type="file" accept=".data,.meta" multiple hidden><button id="project-save-btn" type="button" hidden></button>';
 applyTranslations(document);
@@ -435,6 +438,24 @@ applyTranslations(restoreTransparencyButton);
 actionHost.append(restoreTransparencyButton);
 
 const viewport = $('#viewport');
+const fpsDisplay = $('#fps-display');
+let fpsFrameCount = 0;
+let fpsSampleStart = performance.now();
+function updateFps(now = performance.now()) {
+  fpsFrameCount++;
+  const elapsed = now - fpsSampleStart;
+  if (elapsed < 500) return;
+  const fps = Math.round(fpsFrameCount * 1000 / elapsed);
+  fpsDisplay.textContent = `FPS ${fps}`;
+  fpsFrameCount = 0;
+  fpsSampleStart = now;
+}
+const placementIndicator = document.createElement('aside');
+placementIndicator.id = 'placement-indicator'; placementIndicator.hidden = true; placementIndicator.setAttribute('aria-live', 'polite');
+placementIndicator.innerHTML = '<svg class="placement-axis-guides" aria-hidden="true"><line data-placement-guide="x"></line><line data-placement-guide="y"></line><line data-placement-guide="z"></line></svg>' +
+  axes.map((axis, index) => `<span class="placement-axis-marker placement-rotation-marker" data-placement-marker="rotation-${axis}" data-axis="${axis.toUpperCase()}" style="--axis-index:${index}"><svg viewBox="0 0 24 24" aria-hidden="true"><path d="M7 5.8A8 8 0 1 1 4.8 15"></path><path d="m4.7 8.7 2.2-3.2 3.4 1.7"></path></svg><output class="placement-marker-state" data-placement-rotation="${axis}">↻</output><kbd>${['J', 'K', 'L'][index]}</kbd></span>`).join('') +
+  axes.map((axis, index) => `<span class="placement-axis-marker placement-mirror-marker" data-placement-marker="mirror-${axis}" data-axis="${axis.toUpperCase()}" style="--axis-index:${index}"><svg viewBox="0 0 30 20" aria-hidden="true"><path d="M2 10h26"></path><path d="m2 10 4-4m-4 4 4 4m22-4-4-4m4 4-4 4"></path><path class="mirror-seam" d="M15 2v16"></path></svg><output class="placement-marker-state" data-placement-mirror="${axis}">↔</output><kbd>${['U', 'I', 'O'][index]}</kbd></span>`).join('');
+viewport.append(placementIndicator); applyTranslations(placementIndicator);
 const scene = new THREE.Scene();
 scene.background = new THREE.Color(settings.backgroundColor);
 const interactionHighlights = new THREE.Group();
@@ -530,6 +551,7 @@ transform.addEventListener('dragging-changed', e => {
         return;
       }
     }
+    if (multiTransform) return;
     const nodeId = transform.object?.userData?.topology === 'node' ? transform.object.userData.nodeId : null;
     const linkPoint = transform.object?.userData?.topology === 'link-point' ? {
       linkId: transform.object.userData.linkId,
@@ -583,6 +605,13 @@ transform.addEventListener('dragging-changed', e => {
         selectLinkPoint(linkId, pointIndex);
       }
     } catch (error) { reportError(nodeId ? '移动节点失败：{error}' : '移动连接折点失败：{error}', error); }
+  } else if (multiTransform) {
+    const active = multiTransform;
+    updateMultiTransform();
+    clearMultiTransform();
+    const changed = active.items.some(item => item.object.position.distanceTo(item.position) > 1e-9 || 1 - Math.abs(item.object.quaternion.dot(item.quaternion)) > 1e-9);
+    if (changed) commit(active.mode === 'rotate' ? '旋转选中组件' : '移动选中组件');
+    inspect();
   } else { commit(); inspect(); }
 });
 transform.addEventListener('objectChange', () => {
@@ -611,6 +640,7 @@ transform.addEventListener('objectChange', () => {
     );
     return;
   }
+  if (multiTransform) { updateMultiTransform(); return; }
   if (!topologyTransform) return;
   if (topologyTransform.nodeId && transform.object?.userData?.nodeId === topologyTransform.nodeId) updateTopologyPreview(topologyTransform.nodeId, transform.object.position);
   if (topologyTransform.linkId && transform.object?.userData?.linkId === topologyTransform.linkId) updateLinkPointPreview(topologyTransform.linkId, topologyTransform.pointIndex, transform.object.position);
@@ -880,12 +910,11 @@ function buildTopologyVisual(state, components = new Map()) {
       const to = connectionEndpointWorldPosition(link.to, components, link.kind);
       if (!from || !to) continue;
       const points = [from, ...(link.points || []), to].map(point => new THREE.Vector3(point.x, point.y, point.z));
-      const style = {
-        electric: { radius: .012, radialSegments: 8 }, mechanical: { radius: .022, radialSegments: 8 },
-        liquid: { radius: .02, radialSegments: 10 }, gas: { radius: .018, radialSegments: 10 },
-        belt: { radius: .028, radialSegments: 4 }, data: { radius: .01, radialSegments: 8 },
-      }[link.kind];
-      const material = new THREE.MeshStandardMaterial({ color: LINK_COLORS[link.kind], metalness: .1, roughness: .6, transparent: true, opacity: .92, depthTest: true, depthWrite: false });
+      const style = LINK_RENDER_STYLES[link.kind];
+      const color = paintColorValue(link.paintColor)
+        || (Number.isInteger(link.color) ? nativePaintColor(link.color) : null)
+        || LINK_COLORS[link.kind];
+      const material = new THREE.MeshStandardMaterial({ color, metalness: .1, roughness: .6, transparent: true, opacity: .92, depthTest: true, depthWrite: false });
       material.userData.topologyLink = true;
       const route = createConnectionRoute(points, material, {
         ...style,
@@ -1022,6 +1051,16 @@ function componentName(def) {
   if (!def) return '';
   return getLocale() === 'zh' ? def.name_zh || def.name || def.id : def.name || def.id;
 }
+function copyPointedComponentToPlacement() {
+  const object = pick({ ignoreComponentFilter: true });
+  if (!object || !catalog.has(object.userData.type)) return false;
+  selectedType = object.userData.type;
+  pendingPlacementOrientation = placementOrientation();
+  setTool('place');
+  renderCatalog();
+  status('准备放置：{name}', { name: componentName(catalog.index.get(selectedType)) });
+  return true;
+}
 function categoryName(category) { return getLocale() === 'zh' ? categoryInfo(category).label : category; }
 function hideComponentIdTooltip() { componentIdTooltip.hidden = true; }
 function showComponentIdTooltip(button) {
@@ -1134,9 +1173,10 @@ function updateConnectionDraftPreview(point = cursorPoint) {
   if (tool !== 'connect' || !connectionDraft || !point) return;
   const start = connectionEndpointWorldPosition(connectionDraft, componentEntries());
   if (!start) return;
-  const material = new THREE.MeshBasicMaterial({ color: LINK_COLORS[$('#connection-kind').value], transparent: true, opacity: .65, depthTest: false, depthWrite: false });
+  const kind = $('#connection-kind').value;
+  const material = new THREE.MeshBasicMaterial({ color: LINK_COLORS[kind], transparent: true, opacity: .65, depthTest: false, depthWrite: false });
   const routePoints = [start, ...(connectionDraft.points || []).map(value => new THREE.Vector3(value.x, value.y, value.z)), point];
-  const route = createConnectionRoute(routePoints, material, { radius: .012, radialSegments: 8 });
+  const route = createConnectionRoute(routePoints, material, LINK_RENDER_STYLES[kind]);
   route.renderOrder = 8; connectionDraftPreview.add(route);
 }
 function refreshConnectionPorts() {
@@ -1302,6 +1342,51 @@ function attachSubgridMoveHandle(gridId) {
   transform.attach(subgridMoveHandle);
   return true;
 }
+function clearMultiTransform() {
+  if (!multiTransform) return;
+  if (transform.object === multiTransform.pivot) transform.detach();
+  multiTransform.pivot.removeFromParent();
+  multiTransform = null;
+}
+function attachMultiTransform() {
+  const items = selectedObjects();
+  if (items.length < 2 || selectedTopologyIds.size || referencePreview) return false;
+  const bounds = new THREE.Box3();
+  items.forEach(object => bounds.expandByObject(object));
+  if (bounds.isEmpty()) return false;
+  const center = quantizeWorldVector(bounds.getCenter(new THREE.Vector3()));
+  if (!center) return false;
+  const pivot = new THREE.Object3D();
+  pivot.name = 'multi-component-transform-pivot';
+  pivot.position.set(center.x, center.y, center.z);
+  scene.add(pivot);
+  multiTransform = {
+    pivot,
+    initialPosition: pivot.position.clone(),
+    initialQuaternion: pivot.quaternion.clone(),
+    items: items.map(object => ({ object, position: object.position.clone(), quaternion: object.quaternion.clone() })),
+    mode: tool,
+  };
+  transform.setSpace('world');
+  transform.setMode(tool);
+  transform.setTranslationSnap(CELL_SIZE_WORLD);
+  transform.setRotationSnap(Math.PI / 2);
+  transform.attach(pivot);
+  return true;
+}
+function updateMultiTransform() {
+  if (!multiTransform) return;
+  const { pivot, initialPosition, initialQuaternion, items, mode } = multiTransform;
+  const delta = pivot.position.clone().sub(initialPosition);
+  const rotation = pivot.quaternion.clone().multiply(initialQuaternion.clone().invert());
+  for (const item of items) {
+    if (mode === 'translate') item.object.position.copy(item.position).add(delta);
+    if (mode === 'rotate') {
+      item.object.position.copy(item.position).sub(initialPosition).applyQuaternion(rotation).add(initialPosition).add(delta);
+      item.object.quaternion.copy(rotation).multiply(item.quaternion);
+    }
+  }
+}
 function selectSubgridForMove(gridId) {
   selectedSubgridId = gridId;
   selectedIds = new Set(objects.filter(object => object.userData.gridId === gridId).map(object => object.userData.id));
@@ -1329,6 +1414,7 @@ function setTool(value) {
   edgeToolbar.hidden = value !== 'edge' || referencePreview;
   updateEdgeToolbar();
   updateSubgridToolbar();
+  clearMultiTransform();
   transform.detach(); extensionHandle.removeFromParent(); subgridMoveHandle.visible = false; resetTransformAxes();
   if (value !== 'place') clearPlacementPreview();
   else if (cursorPoint && pointerInCanvas) void updatePlacementPreview(cursorPoint);
@@ -1345,6 +1431,8 @@ function setTool(value) {
   } else if (selected && selectedIds.size === 1 && tool === 'select' && attachExtensionHandle(selected)) {
     // Native extension handles are always shown while an extendable component
     // is selected. They edit `ext`, not the generic transform scale.
+  } else if (selectedIds.size > 1 && selectedTopologyIds.size === 0 && ['translate', 'rotate'].includes(tool) && attachMultiTransform()) {
+    // A proxy pivot drives all selected component transforms as one operation.
   } else if (selected && selectedIds.size === 1 && ['translate', 'rotate', 'scale'].includes(tool)) {
     transform.setMode(tool); transform.attach(selected);
   } else if (tool === 'translate' && selectedTopologyNode) {
@@ -1446,12 +1534,14 @@ function snapshot() {
   return objects.map(o => ({ id: o.userData.id, type: o.userData.type,
     ...(o.userData.gridId ? { gridId: o.userData.gridId } : {}),
     ...(o.userData.mirror ? { mirror: { ...o.userData.mirror } } : {}),
+    ...(o.userData.localMirrorAxes?.length ? { localMirrorAxes: [...o.userData.localMirrorAxes] } : {}),
     ...(Array.isArray(o.userData.colors) ? { colors: [...o.userData.colors] } : {}),
     ...(paintColorValue(o.userData.paintColor) ? { paintColor: o.userData.paintColor } : {}),
     ...(o.userData.hidden ? { hidden: true } : {}),
     ...(Array.isArray(o.userData.nativeExtension) ? { nativeExtension: [...o.userData.nativeExtension] } : {}),
     ...(o.userData.nativeProperties ? { nativeProperties: structuredClone(o.userData.nativeProperties) } : {}),
     ...(o.userData.nativeAccessory ? { nativeAccessory: structuredClone(o.userData.nativeAccessory) } : {}),
+    ...(o.userData.nativeAccessoryContainer ? { nativeAccessoryContainer: o.userData.nativeAccessoryContainer } : {}),
     ...(o.userData.definitionOverride ? { definitionOverride: structuredClone(o.userData.definitionOverride) } : {}),
     ...(o.userData.nativeProjected ? { nativeProjected: true } : {}),
     position: o.userData.nativeProjected
@@ -1462,17 +1552,17 @@ function snapshot() {
 }
 function commit(label = '编辑', params = {}) {
   // TransformControls may cross zero when scaling; keep the project domain valid.
-  if (selected) {
-    if (selected.userData.nativeProjected) {
-      if (axes.some(axis => !Number.isFinite(selected.position[axis]) || Math.abs(selected.position[axis]) > 10000)) throw new Error('组件位置超出合法范围');
+  for (const object of selectedObjects()) {
+    if (object.userData.nativeProjected) {
+      if (axes.some(axis => !Number.isFinite(object.position[axis]) || Math.abs(object.position[axis]) > 10000)) throw new Error('组件位置超出合法范围');
     } else {
-      const position = quantizeWorldVector(selected.position);
+      const position = quantizeWorldVector(object.position);
       if (!position) throw new Error('组件位置超出整数格范围');
-      selected.position.set(position.x, position.y, position.z);
+      object.position.set(position.x, position.y, position.z);
     }
     axes.forEach(a => {
-      const sign = Math.sign(selected.scale[a]) || 1;
-      selected.scale[a] = sign * THREE.MathUtils.clamp(Math.abs(selected.scale[a]), .001, 100);
+      const sign = Math.sign(object.scale[a]) || 1;
+      object.scale[a] = sign * THREE.MathUtils.clamp(Math.abs(object.scale[a]), .001, 100);
     });
   }
   history.commit(currentProject(), { key: label, params });
@@ -1649,7 +1739,7 @@ async function createObject(data) {
   definitions.set(data.type, catalogDefinition);
   const def = data.definitionOverride || catalogDefinition;
   const object = await library.instantiate(def, { nativeExtension: data.nativeExtension });
-  object.userData = { ...object.userData, id: data.id, type: data.type, gridId: data.gridId, mirror: data.mirror, colors: data.colors, paintColor: data.paintColor, nativeExtension: data.nativeExtension, nativeProperties: data.nativeProperties ? structuredClone(data.nativeProperties) : undefined, nativeAccessory: data.nativeAccessory ? structuredClone(data.nativeAccessory) : undefined, definitionOverride: data.definitionOverride ? structuredClone(data.definitionOverride) : undefined, nativeProjected: data.nativeProjected === true, hidden: data.hidden === true };
+  object.userData = { ...object.userData, id: data.id, type: data.type, gridId: data.gridId, mirror: data.mirror, localMirrorAxes: [], colors: data.colors, paintColor: data.paintColor, nativeExtension: data.nativeExtension, nativeProperties: data.nativeProperties ? structuredClone(data.nativeProperties) : undefined, nativeAccessory: data.nativeAccessory ? structuredClone(data.nativeAccessory) : undefined, nativeAccessoryContainer: data.nativeAccessoryContainer, definitionOverride: data.definitionOverride ? structuredClone(data.definitionOverride) : undefined, nativeProjected: data.nativeProjected === true, hidden: data.hidden === true };
   // Do not use paintColorValue() as an existence test here: without an
   // explicit value it returns the active paint-tool colour. Imported native
   // components commonly omit `colors`, so that fallback used to reach for
@@ -1661,11 +1751,20 @@ async function createObject(data) {
       : null;
   if (initialPaint) applyComponentPaint(object, initialPaint);
   if (data.nativeAccessory) {
-    const accessory = await library.instantiate(nativeAccessoryDefinition(data.nativeAccessory._type));
-    accessory.userData.nativeAccessoryVisual = true;
-    object.add(accessory);
+    const accessoryDefinition = nativeAccessoryDefinition(data.nativeAccessory._type);
+    try {
+      const accessory = await library.instantiate(accessoryDefinition);
+      accessory.userData.nativeAccessoryVisual = true;
+      object.add(accessory);
+    } catch (error) {
+      // Battery inventory Mesh files are included when published assets are
+      // regenerated from the ROM. Until then, preserve the real attachment
+      // data without preventing the host vehicle from loading.
+      if (!accessoryDefinition.optionalVisual) throw error;
+    }
   }
   for (const field of ['position', 'rotation', 'scale']) object[field].set(...axes.map(a => data[field][a]));
+  setObjectLocalMirrorAxes(object, data.localMirrorAxes);
   if (data.mirror?.axis) reflectObject(object, data.mirror.axis);
   configureOpaqueDepthLayer(object, RENDER_DEPTH_LAYERS.component, { key: `component:${data.id}` });
   object.visible = !data.hidden;
@@ -1684,12 +1783,12 @@ function applyComponentPaint(object, color) {
 function disposePlacementPreview() {
   if (!placementPreview) return;
   scene.remove(placementPreview); disposeObject(placementPreview);
-  placementPreview = null; placementPreviewType = '';
+  placementPreview = null; placementPreviewType = ''; placementIndicator.hidden = true;
 }
 function clearPlacementPreview() {
   placementPreviewRequest++;
   placementPreviewLoadingType = '';
-  disposePlacementPreview();
+  disposePlacementPreview(); placementIndicator.hidden = true;
 }
 function clearImportedSubgridPreview() {
   if (!importedSubgridDraft?.preview) return;
@@ -1725,14 +1824,71 @@ async function createImportedSubgridPreview(staged) {
     throw error;
   }
 }
+function setObjectLocalMirrorAxes(object, value) {
+  const next = new Set((value || []).filter(axis => axes.includes(axis)));
+  const previous = new Set((object.userData.localMirrorAxes || []).filter(axis => axes.includes(axis)));
+  for (const axis of axes) if (next.has(axis) !== previous.has(axis)) reflectObject(object, axis);
+  object.userData.localMirrorAxes = axes.filter(axis => next.has(axis));
+}
+function applyPendingPlacementOrientation(object) {
+  object.rotation.set(...axes.map(axis => pendingPlacementOrientation.rotation[axis]));
+  setObjectLocalMirrorAxes(object, pendingPlacementOrientation.localMirrorAxes);
+}
+function updatePlacementIndicator() {
+  const available = tool === 'place' && placementPreview?.visible && !referencePreview;
+  placementIndicator.hidden = !settings.placementOrientationIndicator || !available;
+  if (!available) return;
+  const rect = viewport.getBoundingClientRect();
+  const origin = placementPreview.getWorldPosition(new THREE.Vector3());
+  const orientation = placementPreview.getWorldQuaternion(new THREE.Quaternion());
+  const originScreen = origin.clone().project(camera);
+  if (originScreen.z < -1 || originScreen.z > 1) { placementIndicator.hidden = true; return; }
+  const screenOrigin = new THREE.Vector2((originScreen.x * .5 + .5) * rect.width, (-originScreen.y * .5 + .5) * rect.height);
+  for (const axis of axes) {
+    const degrees = Math.round(THREE.MathUtils.radToDeg(pendingPlacementOrientation.rotation[axis])) % 360;
+    const rotation = placementIndicator.querySelector(`[data-placement-rotation="${axis}"]`);
+    rotation.textContent = '↻';
+    rotation.parentElement.setAttribute('aria-label', `${axis.toUpperCase()} rotation ${degrees} degrees`);
+    const mirrored = pendingPlacementOrientation.localMirrorAxes.includes(axis);
+    const output = placementIndicator.querySelector(`[data-placement-mirror="${axis}"]`);
+    output.textContent = '↔';
+    output.parentElement.setAttribute('aria-label', `${axis.toUpperCase()} mirror ${mirrored ? 'on' : 'off'}`);
+    output.parentElement.classList.toggle('active', mirrored);
+
+    const localAxis = new THREE.Vector3(axis === 'x' ? 1 : 0, axis === 'y' ? 1 : 0, axis === 'z' ? 1 : 0).applyQuaternion(orientation);
+    const endpoint = origin.clone().addScaledVector(localAxis, .32).project(camera);
+    const screenEndpoint = new THREE.Vector2((endpoint.x * .5 + .5) * rect.width, (-endpoint.y * .5 + .5) * rect.height);
+    const screenDirection = screenEndpoint.sub(screenOrigin);
+    const marker = placementIndicator.querySelector(`[data-placement-marker="rotation-${axis}"]`);
+    const mirrorMarker = placementIndicator.querySelector(`[data-placement-marker="mirror-${axis}"]`);
+    const depthAxis = screenDirection.lengthSq() < 64;
+    const angle = depthAxis ? (-Math.PI / 2 + axes.indexOf(axis) * Math.PI * 2 / 3) : Math.atan2(screenDirection.y, screenDirection.x);
+    const direction = new THREE.Vector2(Math.cos(angle), Math.sin(angle));
+    const placeMarker = (element, distance, rotationOffset = 0) => {
+      const x = THREE.MathUtils.clamp(screenOrigin.x + direction.x * distance, 16, rect.width - 16);
+      const y = THREE.MathUtils.clamp(screenOrigin.y + direction.y * distance, 16, rect.height - 16);
+      element.style.left = `${x}px`; element.style.top = `${y}px`;
+      element.style.setProperty('--direction-angle', `${angle + rotationOffset}rad`);
+      element.classList.toggle('depth-axis', depthAxis);
+    };
+    placeMarker(marker, 45);
+    placeMarker(mirrorMarker, -43, Math.PI);
+    const guide = placementIndicator.querySelector(`[data-placement-guide="${axis}"]`);
+    guide.setAttribute('x1', String(screenOrigin.x)); guide.setAttribute('y1', String(screenOrigin.y));
+    guide.setAttribute('x2', String(screenOrigin.x + direction.x * 35)); guide.setAttribute('y2', String(screenOrigin.y + direction.y * 35));
+    guide.classList.toggle('depth-axis', depthAxis);
+  }
+}
 function setPlacementPreviewPoint(point) {
   if (!placementPreview || !point) return;
+  applyPendingPlacementOrientation(placementPreview);
   placementPreview.position.set(point.x, 0, point.z);
   placementPreview.updateMatrixWorld(true);
   const box = new THREE.Box3().setFromObject(placementPreview);
   placementPreview.position.y = cellToWorld(Math.ceil((point.y - box.min.y) / CELL_SIZE_WORLD));
   placementPreview.visible = true;
   placementPreview.updateMatrixWorld(true);
+  updatePlacementIndicator();
 }
 function makePlacementPreview(object) {
   object.traverse(child => {
@@ -1763,7 +1919,7 @@ async function updatePlacementPreview(point) {
     const preview = makePlacementPreview(await library.instantiate(definition));
     if (request !== placementPreviewRequest || tool !== 'place' || type !== selectedType) { disposeObject(preview); return; }
     placementPreviewLoadingType = '';
-    placementPreview = preview; placementPreviewType = type; scene.add(preview);
+    placementPreview = preview; placementPreviewType = type; applyPendingPlacementOrientation(preview); scene.add(preview);
     setPlacementPreviewPoint(cursorPoint || point);
   } catch (error) {
     if (request === placementPreviewRequest) { placementPreviewLoadingType = ''; reportError('放置虚影加载失败：{error}', error); }
@@ -1835,7 +1991,7 @@ async function place(point) {
   if (mirrorMode.active && objects.length >= LIMIT - 1) throw new Error('镜像放置会超过组件上限');
   const color = paintColorValue();
   const colorIndex = nearestNativePaintIndex(color);
-  const object = await createObject({ id: crypto.randomUUID(), type: selectedType, gridId: activeGridId, ...(selectedType === 'microcontroller' ? { nativeProperties: microcontrollerState() } : {}), ...(color ? { paintColor: color } : {}), ...(colorIndex !== null ? { colors: [colorIndex] } : {}), position: { x: 0, y: 0, z: 0 }, rotation: { x: 0, y: 0, z: 0 }, scale: { x: 1, y: 1, z: 1 } });
+  const object = await createObject({ id: crypto.randomUUID(), type: selectedType, gridId: activeGridId, ...(selectedType === 'microcontroller' ? { nativeProperties: microcontrollerState() } : {}), ...(color ? { paintColor: color } : {}), ...(colorIndex !== null ? { colors: [colorIndex] } : {}), ...(pendingPlacementOrientation.localMirrorAxes.length ? { localMirrorAxes: [...pendingPlacementOrientation.localMirrorAxes] } : {}), position: { x: 0, y: 0, z: 0 }, rotation: { ...pendingPlacementOrientation.rotation }, scale: { x: 1, y: 1, z: 1 } });
   const gridPoint = quantizeWorldVector(point);
   if (!gridPoint) throw new Error('放置位置超出整数格范围');
   const box = new THREE.Box3().setFromObject(object);
@@ -2311,9 +2467,40 @@ function componentPropertyLabel(key) {
     offset: ['偏移', 'Offset'], scale: ['缩放', 'Scale'], min: ['最小角度（弧度）', 'Minimum angle (radians)'], max: ['最大角度（弧度）', 'Maximum angle (radians)'],
     tilt_x: ['水平倾角（弧度）', 'Horizontal tilt (radians)'], tilt_y: ['垂直倾角（弧度）', 'Vertical tilt (radians)'],
     input: ['输入', 'Input'], output: ['输出', 'Output'], input_ratio: ['输入齿比', 'Input ratio'], output_ratio: ['输出齿比', 'Output ratio'], gear_ratio: ['齿比', 'Gear ratio'], reverse: ['反转方向', 'Reverse direction'],
-    flow_factor: ['流量系数', 'Flow factor'], power: ['功率系数', 'Power factor'], range: ['范围', 'Range'],
+    flow_factor: ['流量系数', 'Flow factor'], power: ['功率系数', 'Power factor'], range: ['范围', 'Range'], content: ['内容物', 'Contents'],
   };
   return labels[key] ? labels[key][getLocale() === 'zh' ? 0 : 1] : key.replaceAll('_', ' ').replace(/\b\w/g, letter => letter.toUpperCase());
+}
+
+function renderTankContentControl(row, descriptor, current, apply) {
+  const value = current && typeof current === 'object' && !Array.isArray(current) ? current : {};
+  const reserved = new Set(['temp', 'temperature', 'pollutant']);
+  const currentKey = Object.keys(value).find(key => !reserved.has(key) && Number.isFinite(value[key]));
+  const options = [...new Set([...(descriptor.options || []), ...(currentKey ? [currentKey] : [])])];
+  const select = document.createElement('select');
+  select.setAttribute('aria-label', componentPropertyLabel('content'));
+  const empty = document.createElement('option'); empty.value = ''; empty.textContent = getLocale() === 'zh' ? '空' : 'Empty'; select.append(empty);
+  for (const optionValue of options) {
+    const option = document.createElement('option'); option.value = optionValue;
+    option.textContent = optionValue[0].toUpperCase() + optionValue.slice(1);
+    option.selected = optionValue === currentKey; select.append(option);
+  }
+  const amount = document.createElement('input'); amount.type = 'number'; amount.min = '0'; amount.step = '.01';
+  amount.value = currentKey ? String(value[currentKey]) : '0';
+  amount.setAttribute('aria-label', getLocale() === 'zh' ? '内容物数量' : 'Contents amount');
+  const update = () => {
+    const next = { ...value };
+    for (const optionValue of options) delete next[optionValue];
+    const key = select.value;
+    if (key) {
+      const number = Number(amount.value);
+      if (!Number.isFinite(number) || number < 0) return;
+      next[key] = number;
+    }
+    apply(next);
+  };
+  select.addEventListener('change', update); amount.addEventListener('change', update);
+  row.append(select, amount);
 }
 
 function renderMicrocontrollerEditor(host, object) {
@@ -2397,7 +2584,9 @@ function renderComponentProperties(host, object) {
       } catch (error) { status(getLocale() === 'zh' ? '组件属性无效：{error}' : 'Component property is invalid: {error}', { error: error.message }); inspect(); }
     };
     let input;
-    if (descriptor.type === 'boolean') {
+    if (descriptor.type === 'content') {
+      renderTankContentControl(row, descriptor, current, apply); section.append(row); continue;
+    } else if (descriptor.type === 'boolean') {
       input = document.createElement('input'); input.type = 'checkbox'; input.checked = current === true;
       input.setAttribute('aria-label', componentPropertyLabel(descriptor.label || descriptor.key)); input.addEventListener('change', () => apply(input.checked));
     } else if (descriptor.type === 'string') {
@@ -2430,15 +2619,16 @@ function nextNativeAccessoryItemId() {
 function renderNativeAccessoryProperty(host, object) {
   const itemTypes = accessoryOptionsForComponent(object.userData.type);
   if (!itemTypes.length) return;
+  const battery = ['battery_a', 'battery_b'].includes(object.userData.type);
   const section = document.createElement('section'); section.className = 'component-properties native-accessory-property';
-  const heading = document.createElement('h3'); heading.textContent = getLocale() === 'zh' ? '已安装轮胎' : 'Installed tyre'; section.append(heading);
+  const heading = document.createElement('h3'); heading.textContent = getLocale() === 'zh' ? (battery ? '已安装电池' : '已安装轮胎') : (battery ? 'Installed battery' : 'Installed tyre'); section.append(heading);
   const hint = document.createElement('p'); hint.className = 'status';
   hint.textContent = getLocale() === 'zh'
-    ? '轮胎保存在游戏 wheel 记录的 element.acc.item 中，并非独立组件。'
-    : 'The tyre is stored in the game wheel record at element.acc.item, not as an independent component.';
+    ? (battery ? '电池保存在游戏 battery 记录的 acc.item 中，并非独立组件。' : '轮胎保存在游戏 wheel 记录的 acc.item 中，并非独立组件。')
+    : (battery ? 'The battery is stored in the game battery record at acc.item, not as an independent component.' : 'The tyre is stored in the game wheel record at acc.item, not as an independent component.');
   section.append(hint);
   const row = document.createElement('div'); row.className = 'property component-property';
-  const label = document.createElement('label'); label.textContent = getLocale() === 'zh' ? '轮胎' : 'Tyre';
+  const label = document.createElement('label'); label.textContent = getLocale() === 'zh' ? (battery ? '电池' : '轮胎') : (battery ? 'Battery' : 'Tyre');
   const input = document.createElement('select'); input.setAttribute('aria-label', label.textContent);
   const none = document.createElement('option'); none.value = ''; none.textContent = getLocale() === 'zh' ? '未安装' : 'Not installed'; input.append(none);
   for (const itemType of itemTypes) {
@@ -2458,7 +2648,7 @@ function renderNativeAccessoryProperty(host, object) {
       const items = snapshot().map(item => {
         if (item.id !== object.userData.id) return item;
         if (!itemType) {
-          const { nativeAccessory, ...withoutAccessory } = item;
+          const { nativeAccessory, nativeAccessoryContainer, ...withoutAccessory } = item;
           return withoutAccessory;
         }
         const existing = item.nativeAccessory;
@@ -2467,16 +2657,50 @@ function renderNativeAccessoryProperty(host, object) {
           nativeAccessory: existing?._type === itemType
             ? existing
             : createNativeAccessoryItem(itemType, nextNativeAccessoryItemId()),
+          nativeAccessoryContainer: item.nativeAccessoryContainer || nativeAccessoryContainerForComponent(item.type),
         };
       });
       await restore(items, topology, transparencyGroups);
       select(objects.find(item => item.userData.id === object.userData.id) || null);
-      commit(getLocale() === 'zh' ? '更新轮胎' : 'Updated tyre');
+      const label = getLocale() === 'zh' ? (battery ? '更新电池' : '更新轮胎') : (battery ? 'Updated battery' : 'Updated tyre');
+      commit(label); status(label);
     });
   });
   row.append(label, input); section.append(row); host.append(section);
 }
 
+function toggleFavoriteComponent(id) {
+  const favorites = new Set(settings.favoriteComponents);
+  if (favorites.has(id)) favorites.delete(id); else favorites.add(id);
+  settings.favoriteComponents = [...favorites];
+  renderCatalog(); scheduleSettings();
+}
+function createCatalogCard(def, favoriteIds) {
+  const card = document.createElement('div'); card.className = 'component-card';
+  const button = document.createElement('button'); button.className = 'component'; button.dataset.id = def.id; button.dataset.category = def.category;
+  button.classList.toggle('active', selectedType === def.id);
+  button.setAttribute('aria-pressed', String(selectedType === def.id));
+  const name = componentName(def);
+  button.title = name + '\n' + def.id + ' · ' + categoryName(def.category);
+  button.setAttribute('aria-label', name + ' · ' + def.id + ' · ' + categoryName(def.category));
+  const text = document.createElement('span'); text.className = 'component-name'; text.textContent = name;
+  button.append(createCategoryIcon(def.category), text);
+  button.addEventListener('mouseenter', () => { showComponentIdTooltip(button); showComponentModelPreview(button); });
+  button.addEventListener('mouseleave', () => { hideComponentIdTooltip(); hideComponentModelPreview(); });
+  button.addEventListener('focus', () => { showComponentIdTooltip(button); showComponentModelPreview(button); });
+  button.addEventListener('blur', () => { hideComponentIdTooltip(); hideComponentModelPreview(); });
+  button.onclick = () => { if (busy) return; selectedType = def.id; pendingPlacementOrientation = placementOrientation(); setTool('place'); renderCatalog(); status('准备放置：{name}', () => ({ name: componentName(def) })); };
+  const favorite = document.createElement('button'); favorite.type = 'button'; favorite.className = 'component-favorite';
+  favorite.dataset.favoriteComponent = def.id;
+  const isFavorite = favoriteIds.has(def.id);
+  favorite.setAttribute('aria-pressed', String(isFavorite));
+  favorite.textContent = isFavorite ? '★' : '☆';
+  favorite.title = t(isFavorite ? '取消收藏' : '添加收藏');
+  favorite.setAttribute('aria-label', `${t(isFavorite ? '取消收藏' : '添加收藏')} · ${name}`);
+  favorite.onclick = event => { event.preventDefault(); event.stopPropagation(); toggleFavoriteComponent(def.id); };
+  card.append(button, favorite);
+  return { card, button };
+}
 function renderCatalog() {
   hideComponentIdTooltip();
   hideComponentModelPreview();
@@ -2485,23 +2709,19 @@ function renderCatalog() {
   const restrictedCategories = new Set(['building', 'furniture']);
   const showRestricted = $('#show-building-furniture').checked;
   const host = $('#component-list'); host.replaceChildren();
+  const favoriteHost = $('#favorite-component-list'); favoriteHost.replaceChildren();
   const filtered = [...catalog.entries()].filter(d => (showRestricted || !restrictedCategories.has(d.category)) && (!category || d.category === category) && [d.id, d.name, d.name_zh, d.category, categoryInfo(d.category).label].join(' ').toLowerCase().includes(query));
   $('#catalog-count').textContent = filtered.length + ' / ' + catalog.index.size;
-  for (const def of filtered) {
-    const button = document.createElement('button'); button.className = 'component'; button.dataset.id = def.id; button.dataset.category = def.category;
-    button.classList.toggle('active', selectedType === def.id);
-    button.setAttribute('aria-pressed', String(selectedType === def.id));
-    const name = componentName(def);
-    button.title = name + '\n' + def.id + ' · ' + categoryName(def.category);
-    button.setAttribute('aria-label', name + ' · ' + def.id + ' · ' + categoryName(def.category));
-    const text = document.createElement('span'); text.className = 'component-name'; text.textContent = name;
-    button.append(createCategoryIcon(def.category), text);
-    button.addEventListener('mouseenter', () => { showComponentIdTooltip(button); showComponentModelPreview(button); });
-    button.addEventListener('mouseleave', () => { hideComponentIdTooltip(); hideComponentModelPreview(); });
-    button.addEventListener('focus', () => { showComponentIdTooltip(button); showComponentModelPreview(button); });
-    button.addEventListener('blur', () => { hideComponentIdTooltip(); hideComponentModelPreview(); });
-    button.onclick = () => { if (busy) return; selectedType = def.id; setTool('place'); renderCatalog(); status('准备放置：{name}', () => ({ name: componentName(def) })); };
-    host.append(button);
+  const favoriteIds = new Set(settings.favoriteComponents);
+  for (const def of filtered) host.append(createCatalogCard(def, favoriteIds).card);
+  const favorites = settings.favoriteComponents.map(id => catalog.index.get(id)).filter(Boolean);
+  const favoriteSection = $('#favorite-components');
+  favoriteSection.hidden = !favorites.length;
+  $('#favorite-component-count').textContent = favorites.length ? `(${favorites.length})` : '';
+  for (const def of favorites) {
+    const { card, button } = createCatalogCard(def, favoriteIds);
+    favoriteHost.append(card);
+    if (settings.modelThumbnails) requestModelThumbnail(def, button);
   }
   observeModelThumbnails(host);
   if (!filtered.length) {
@@ -2646,8 +2866,8 @@ function constructionHitTargets() {
     ...topologyLayer.children.filter(object => object.visible && object.userData.topology !== 'node'),
   ];
 }
-function pick() {
-  if (!selectableKinds.component) return null;
+function pick({ ignoreComponentFilter = false } = {}) {
+  if (!ignoreComponentFilter && !selectableKinds.component) return null;
   const rect = renderer.domElement.getBoundingClientRect();
   let closest = null; let distance = 56;
   for (const candidate of objects) {
@@ -2867,14 +3087,14 @@ function nearestEdgeEndpoint(edgeId) {
   return result?.nodeId || null;
 }
 function pickPaintTopology() {
-  const allowed = ['edge', 'plate'].filter(kind => selectableKinds[kind]);
+  const allowed = ['edge', 'plate', 'link'].filter(kind => selectableKinds[kind]);
   const hits = raycaster.intersectObjects(topologyLayer.children.filter(object => object.visible && allowed.includes(object.userData.topology)), true);
   const targets = new Map();
   for (const hit of hits) {
     let object = hit.object;
     while (object && object.parent !== topologyLayer) object = object.parent;
     const kind = object?.userData.topology;
-    if (!['edge', 'plate'].includes(kind)) continue;
+    if (!['edge', 'plate', 'link'].includes(kind)) continue;
     const id = object.userData[`${kind}Id`];
     const key = `${kind}:${id}`;
     if (targets.has(key)) continue;
@@ -2886,7 +3106,7 @@ function pickPaintTopology() {
   }
   // Painting has an intentional semantic order, independent of ray distance:
   // panels cover their supporting edges, and both cover ordinary components.
-  for (const kind of ['plate', 'edge']) {
+  for (const kind of ['plate', 'edge', 'link']) {
     if (!selectableKinds[kind]) continue;
     const target = [...targets.values()].find(candidate => candidate.kind === kind);
     if (target) return target;
@@ -2923,6 +3143,12 @@ function pickedPaintColor(target) {
     if (!edge) return null;
     return paintColorValue(edge.color) || (Number.isInteger(edge.col) ? nativePaintColor(edge.col) : null);
   }
+  if (target.kind === 'link') {
+    const link = topology.links.find(value => value.id === target.id);
+    return link && (paintColorValue(link.paintColor)
+      || (Number.isInteger(link.color) ? nativePaintColor(link.color) : null)
+      || LINK_COLORS[link.kind]);
+  }
   const plate = topology.plates.find(value => value.id === target.id);
   if (!plate) return null;
   const suffix = target.plateSide === 'back' ? 'back' : 'front';
@@ -2932,7 +3158,7 @@ function pickPaintColor() {
   const target = pickPaintTarget();
   const color = target && pickedPaintColor(target);
   if (!color) {
-    status('取色工具需要点击已有颜色的组件、梁或面板');
+    status('取色工具需要点击已有颜色的组件、梁、面板或连接');
     return;
   }
   setPaintColor(color);
@@ -2949,7 +3175,7 @@ function setComponentPaintColor(object, color, colorIndex) {
 }
 function paintTopology() {
   const target = pickPaintTarget();
-  if (!target) { status('涂色工具需要点击组件、梁或面板'); return; }
+  if (!target) { status('涂色工具需要点击组件、梁、面板或连接'); return; }
   const color = paintColorValue();
   if (!color) { status('颜色必须是 #RRGGBB 格式'); return; }
   if (target.kind === 'component') {
@@ -2970,6 +3196,14 @@ function paintTopology() {
     const counterpartId = mirroredEdgeId(target.id);
     if (counterpartId) ids.add(counterpartId);
     commitTopology({ ...topology, edges: topology.edges.map(edge => ids.has(edge.id) ? { ...edge, color } : edge) }, '已为梁设置颜色 {color}', { color });
+    hoveredObject = null; updateInteractionHighlights();
+    return;
+  }
+  if (target.kind === 'link') {
+    const ids = new Set([target.id]);
+    const counterpartId = mirroredLinkId(target.id);
+    if (counterpartId) ids.add(counterpartId);
+    commitTopology({ ...topology, links: topology.links.map(link => ids.has(link.id) ? { ...link, paintColor: color } : link) }, '已为连接设置颜色 {color}', { color });
     hoveredObject = null; updateInteractionHighlights();
     return;
   }
@@ -3108,13 +3342,12 @@ function saveTransparencyGroup() {
 function edgePoint() {
   const nodeId = pickTopologyNode(true);
   const node = topology.nodes.find(value => value.id === nodeId);
-  // Match component placement: first use the closest renderable vehicle hit,
-  // then the expanded component envelope, and finally the fixed XZ work
-  // plane. resolveEdgePoint applies only the edge-specific endpoint and
-  // optional axis-lock rules after that common placement result.
+  // Edges use the same nearest-hit selection as components, but retain the
+  // exact hit cell: only placed components are offset toward the camera.
   const candidate = node ? null : resolvePlacementPoint(raycaster, constructionHitTargets(), plane, {
     adjacentTargets: objects.filter(object => object.visible),
     adjacentPadding: CELL_SIZE_WORLD / 2,
+    hitPadding: 0,
   });
   const result = resolveEdgePoint(raycaster.ray, edgeDraft?.frame || cameraBuildFrame(camera, controls.target), {
     axisSnap: !!edgeDraft && (edgeAxisSnap || edgeShiftSnap), node: node?.position, candidate,
@@ -3361,7 +3594,7 @@ renderer.domElement.addEventListener('contextmenu', e => e.preventDefault());
 renderer.domElement.addEventListener('pointerdown', event => {
   if (event.button !== 0 || busy) return;
   pointerRay(event);
-  if (tool === 'select' && selectionAction === 'box') {
+  if (tool === 'select' && selectionAction === 'box' && !event.altKey) {
     const viewportRect = viewport.getBoundingClientRect();
     selectionBoxDraft = { startX: event.clientX, startY: event.clientY, viewportRect };
     selectionBox.style.left = `${event.clientX - viewportRect.left}px`; selectionBox.style.top = `${event.clientY - viewportRect.top}px`;
@@ -3420,7 +3653,7 @@ renderer.domElement.addEventListener('pointermove', event => {
   void updatePlacementPreview(point);
   if (tool === 'subgrid-place') setImportedSubgridPreviewPoint(point);
 });
-renderer.domElement.addEventListener('pointerleave', () => { pointerInCanvas = false; hoveredObject = null; hideConnectionPortTooltip(); updateInteractionHighlights(); edgePreview.visible = false; edgeAnchor.visible = false; edgeRuler.hide(); if (placementPreview) placementPreview.visible = false; if (importedSubgridDraft?.preview) importedSubgridDraft.preview.visible = false; });
+renderer.domElement.addEventListener('pointerleave', () => { pointerInCanvas = false; hoveredObject = null; hideConnectionPortTooltip(); updateInteractionHighlights(); edgePreview.visible = false; edgeAnchor.visible = false; edgeRuler.hide(); if (placementPreview) placementPreview.visible = false; placementIndicator.hidden = true; if (importedSubgridDraft?.preview) importedSubgridDraft.preview.visible = false; });
 renderer.domElement.addEventListener('pointerup', event => {
   if (selectionBoxDraft) {
     const start = selectionBoxDraft; selectionBoxDraft = null;
@@ -3439,8 +3672,9 @@ renderer.domElement.addEventListener('pointerup', event => {
   }
   if (!down || event.button !== 0) return;
   const moved = Math.hypot(event.clientX - down.x, event.clientY - down.y); down = null;
-  if (busy || dragOccurred || moved > 5 || (transform.axis && ['translate', 'rotate', 'scale'].includes(tool))) return;
+  if (busy || dragOccurred || moved > 5) return;
   pointerRay(event);
+  if (event.altKey && copyPointedComponentToPlacement()) return;
   if (tool === 'edge') {
     try { handleEdgeClick(event); } catch (error) { reportError('梁操作失败：{error}', error); }
     return;
@@ -3493,6 +3727,10 @@ renderer.domElement.addEventListener('pointerup', event => {
     const edge = nodeId ? null : pickEdgeByScreenTolerance(24);
     const targetNodeId = nodeId || (edge && nearestEdgeEndpoint(edge.id));
     if (targetNodeId) selectTopologyNode(targetNodeId);
+    else {
+      const target = pickSelectionTarget();
+      if (target?.kind === 'component') select(target.object, { toggle: event.shiftKey });
+    }
   } else {
     const target = pickSelectionTarget();
     if (selectionAction === 'closure') {
@@ -3578,7 +3816,7 @@ nativeReferencePreviewButton.onclick = () => {
 const gridFields = document.createElement('div');
 gridFields.innerHTML = '<div class="property"><label for="grid-color" data-i18n="网格颜色"></label><input id="grid-color" type="color"></div><div class="property"><label for="grid-opacity" data-i18n="网格透明度"></label><input id="grid-opacity" type="range" min="0" max="1" step="0.05"></div><div class="property"><label for="grid-style" data-i18n="网格线型"></label><select id="grid-style"><option value="solid" data-i18n="实线"></option><option value="dashed" data-i18n="虚线"></option></select></div><h2 data-i18n="节点显示"></h2><div class="property"><label for="node-color" data-i18n="节点颜色"></label><input id="node-color" type="color"></div><div class="property"><label for="node-size" data-i18n="节点大小"></label><input id="node-size" type="range" min="0.02" max="0.25" step="0.005"><output id="node-size-value"></output></div><div class="property"><label for="node-opacity" data-i18n="节点透明度"></label><input id="node-opacity" type="range" min="0" max="1" step="0.05"></div><h2 data-i18n="结构显示"></h2><div class="property"><label for="edge-lengths-visible" data-i18n="显示梁 XYZ 长度（格）"></label><input id="edge-lengths-visible" type="checkbox"></div><div class="property"><label for="edge-outlines-visible" data-i18n="显示梁描边"></label><input id="edge-outlines-visible" type="checkbox"></div><h2 data-i18n="涂色"></h2><div class="property"><label for="paint-color" data-i18n="颜色（Hex RGB）"></label><input id="paint-color" type="color" value="#dddddd"><input id="paint-color-hex" type="text" value="#dddddd" maxlength="7" spellcheck="false"><output id="paint-color-preview" class="paint-color-preview"></output></div><div class="property"><label for="paint-side" data-i18n="面板涂色面"></label><select id="paint-side"><option value="front" data-i18n="前面"></option><option value="back" data-i18n="背面"></option></select></div>';
 const renderSettingsFields = document.createElement('div');
-renderSettingsFields.innerHTML = '<h2 data-i18n="视图与光照"></h2><div class="property"><label for="background-color" data-i18n="背景颜色"></label><input id="background-color" type="color"></div><div class="property"><label for="orthographic-view" data-i18n="正交镜头"></label><input id="orthographic-view" type="checkbox"></div><div class="property"><label for="light-azimuth" data-i18n="光照方位角"></label><input id="light-azimuth" type="range" min="-180" max="180" step="1"><output id="light-azimuth-value"></output></div><div class="property"><label for="light-elevation" data-i18n="光照高度角"></label><input id="light-elevation" type="range" min="5" max="90" step="1"><output id="light-elevation-value"></output></div><div class="property"><label for="light-intensity" data-i18n="光照强度"></label><input id="light-intensity" type="range" min="0" max="8" step="0.1"><output id="light-intensity-value"></output></div><div class="property"><label for="shadow-strength" data-i18n="阴影强度"></label><input id="shadow-strength" type="range" min="0" max="1" step="0.05"><output id="shadow-strength-value"></output></div><div class="property"><label for="light-softness" data-i18n="光照柔和度"></label><input id="light-softness" type="range" min="0" max="8" step="0.25"><output id="light-softness-value"></output></div>';
+renderSettingsFields.innerHTML = '<h2 data-i18n="视图与光照"></h2><div class="property"><label for="background-color" data-i18n="背景颜色"></label><input id="background-color" type="color"></div><div class="property"><label for="orthographic-view" data-i18n="正交镜头"></label><input id="orthographic-view" type="checkbox"></div><div class="property"><label for="light-azimuth" data-i18n="光照方位角"></label><input id="light-azimuth" type="range" min="-180" max="180" step="1"><output id="light-azimuth-value"></output></div><div class="property"><label for="light-elevation" data-i18n="光照高度角"></label><input id="light-elevation" type="range" min="5" max="90" step="1"><output id="light-elevation-value"></output></div><div class="property"><label for="light-intensity" data-i18n="光照强度"></label><input id="light-intensity" type="range" min="0" max="8" step="0.1"><output id="light-intensity-value"></output></div><div class="property"><label for="shadow-strength" data-i18n="阴影强度"></label><input id="shadow-strength" type="range" min="0" max="1" step="0.05"><output id="shadow-strength-value"></output></div><div class="property"><label for="light-softness" data-i18n="光照柔和度"></label><input id="light-softness" type="range" min="0" max="8" step="0.25"><output id="light-softness-value"></output></div><h2 data-i18n="放置方向"></h2><div class="property"><label for="placement-orientation-indicator" data-i18n="显示放置方向提示"></label><input id="placement-orientation-indicator" type="checkbox"></div>';
 const cameraLightSettings = document.createElement('div');
 const cameraLightToggle = document.createElement('div'); cameraLightToggle.className = 'property';
 const cameraLightToggleLabel = document.createElement('label'); cameraLightToggleLabel.htmlFor = 'camera-light-enabled'; cameraLightToggleLabel.dataset.i18n = '\u955c\u5934\u8f85\u52a9\u706f'; setText(cameraLightToggleLabel, '\u955c\u5934\u8f85\u52a9\u706f');
@@ -3606,6 +3844,7 @@ $('#edge-lengths-visible').checked = settings.edgeLengthsVisible;
 $('#edge-outlines-visible').checked = settings.edgeOutlinesVisible;
 $('#background-color').value = settings.backgroundColor;
 $('#orthographic-view').checked = settings.orthographic;
+$('#placement-orientation-indicator').checked = settings.placementOrientationIndicator;
 $('#camera-light-enabled').checked = settings.cameraLightEnabled;
 $('#camera-light-intensity').value = settings.cameraLightIntensity;
 $('#light-azimuth').value = settings.lightAzimuth;
@@ -3659,6 +3898,10 @@ function updateRenderSettings() {
 }
 for (const id of ['background-color', 'light-azimuth', 'light-elevation', 'light-intensity', 'shadow-strength', 'light-softness', 'camera-light-enabled', 'camera-light-intensity']) $('#' + id).addEventListener('input', updateRenderSettings);
 $('#orthographic-view').addEventListener('change', updateRenderSettings);
+$('#placement-orientation-indicator').addEventListener('change', () => {
+  settings.placementOrientationIndicator = normalizeSettings({ version: 1, placementOrientationIndicator: $('#placement-orientation-indicator').checked }).placementOrientationIndicator;
+  updatePlacementIndicator(); scheduleSettings();
+});
 updateRenderSettings();
 function updateEdgeLengthVisibility() {
   settings.edgeLengthsVisible = normalizeSettings({ version: 1, edgeLengthsVisible: $('#edge-lengths-visible').checked }).edgeLengthsVisible;
@@ -3818,11 +4061,12 @@ $('#show-building-furniture').onchange = () => { settings.showBuildingFurniture 
 $('#use-model-thumbnails').onchange = () => { settings.modelThumbnails = $('#use-model-thumbnails').checked; renderCatalog(); scheduleSettings(); };
 function updateCatalogCardSize(value = $('#catalog-card-size').value) {
   settings.catalogCardSize = normalizeSettings({ version: 1, catalogCardSize: Number(value) }).catalogCardSize;
-  const list = $('#component-list');
-  list.style.setProperty('--component-card-size', `${settings.catalogCardSize}px`);
-  list.style.setProperty('--component-thumbnail-size', `${Math.round(settings.catalogCardSize * .75)}px`);
-  list.style.setProperty('--component-icon-size', `${Math.round(settings.catalogCardSize * .32)}px`);
-  list.style.setProperty('--component-text-size', `${Math.min(16, Math.max(9, settings.catalogCardSize * .14)).toFixed(1)}px`);
+  for (const list of [$('#component-list'), $('#favorite-component-list')]) {
+    list.style.setProperty('--component-card-size', `${settings.catalogCardSize}px`);
+    list.style.setProperty('--component-thumbnail-size', `${Math.round(settings.catalogCardSize * .75)}px`);
+    list.style.setProperty('--component-icon-size', `${Math.round(settings.catalogCardSize * .32)}px`);
+    list.style.setProperty('--component-text-size', `${Math.min(16, Math.max(9, settings.catalogCardSize * .14)).toFixed(1)}px`);
+  }
   $('#catalog-card-size').value = String(settings.catalogCardSize);
 }
 $('#catalog-card-size').addEventListener('input', () => { updateCatalogCardSize(); scheduleSettings(); });
@@ -4024,6 +4268,13 @@ window.addEventListener('keydown', e => {
   if (busy) return;
   const key = e.key.toLowerCase();
   if (e.ctrlKey || e.metaKey) { if (key === 'z') { e.preventDefault(); e.shiftKey ? redo() : undo(); } else if (key === 'y') { e.preventDefault(); redo(); } return; }
+  if (tool === 'place' && PLACEMENT_ORIENTATION_KEYS[key]) {
+    e.preventDefault();
+    pendingPlacementOrientation = updatePlacementOrientation(pendingPlacementOrientation, key);
+    if (placementPreview && cursorPoint) setPlacementPreviewPoint(cursorPoint);
+    else updatePlacementIndicator();
+    return;
+  }
   if (key === 'a' && !e.altKey && !e.repeat) { e.preventDefault(); toggleEdgeAxisSnap(); return; }
   const binding = tools.find(t => t[2].toLowerCase() === key);
   if (binding) setTool(binding[0]);
@@ -4090,8 +4341,8 @@ function collectSettings() {
     version: 1, language: getLocale(), leftWidth: leftSidebarWidth, rightWidth: rightSidebarWidth, leftCollapsed: leftSidebar.hidden, rightOpen: !rightSidebar.hidden,
     gridColor: $('#grid-color').value, gridOpacity: Number($('#grid-opacity').value), gridStyle: $('#grid-style').value, gridVisible: gridPreferenceVisible,
     nodesVisible: showNodes, nodeColor: $('#node-color').value, nodeSize: Number($('#node-size').value), nodeOpacity: Number($('#node-opacity').value), edgeAxisSnap, edgeSize, connectionVisibility: { ...connectionVisibility }, edgeLengthsVisible: settings.edgeLengthsVisible, edgeOutlinesVisible: settings.edgeOutlinesVisible, tool, selectedType,
-    backgroundColor: settings.backgroundColor, lightAzimuth: settings.lightAzimuth, lightElevation: settings.lightElevation, lightIntensity: settings.lightIntensity, shadowStrength: settings.shadowStrength, lightSoftness: settings.lightSoftness, cameraLightEnabled: settings.cameraLightEnabled, cameraLightIntensity: settings.cameraLightIntensity, paintColor: settings.paintColor, paintQuickColors: settings.paintQuickColors, orthographic: settings.orthographic,
-    showBuildingFurniture: $('#show-building-furniture').checked, modelThumbnails: $('#use-model-thumbnails').checked, catalogCardSize: settings.catalogCardSize, query: $('#component-search').value, category: $('#category-filter').value,
+    backgroundColor: settings.backgroundColor, lightAzimuth: settings.lightAzimuth, lightElevation: settings.lightElevation, lightIntensity: settings.lightIntensity, shadowStrength: settings.shadowStrength, lightSoftness: settings.lightSoftness, cameraLightEnabled: settings.cameraLightEnabled, cameraLightIntensity: settings.cameraLightIntensity, paintColor: settings.paintColor, paintQuickColors: settings.paintQuickColors, orthographic: settings.orthographic, placementOrientationIndicator: settings.placementOrientationIndicator,
+    showBuildingFurniture: $('#show-building-furniture').checked, modelThumbnails: $('#use-model-thumbnails').checked, catalogCardSize: settings.catalogCardSize, favoriteComponents: [...settings.favoriteComponents], query: $('#component-search').value, category: $('#category-filter').value,
     sidebarTabs: { left: settings.sidebarTabs.left, right: settings.sidebarTabs.right },
     camera: { position: camera.position.toArray(), target: controls.target.toArray() },
   };
@@ -4221,4 +4472,4 @@ async function initialize() {
   if (storedSettings.error) status('设置保存失败：{detail}', { detail: storedSettings.error.message });
 }
 initialize().catch(error => reportError('组件目录加载失败：{error}', error));
-renderer.setAnimationLoop(() => { controls.update(); updateReferenceGrid(); updateTopologyHelperVisibility(); orientation.update(); edgeRuler.update(); edgeLengthLabels.update(); renderer.render(scene, camera); });
+renderer.setAnimationLoop(time => { updateFps(time); controls.update(); updateReferenceGrid(); updateTopologyHelperVisibility(); orientation.update(); edgeRuler.update(); edgeLengthLabels.update(); updatePlacementIndicator(); renderer.render(scene, camera); });

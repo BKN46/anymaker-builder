@@ -247,12 +247,17 @@ export function toNativePairFromEditor(document, { vehicleId = 1 } = {}) {
     if (nativeProperties) Object.assign(result, nativeProperties);
     const accessory = object.nativeAccessory;
     if (accessory) {
-      // Retain any observed host element fields that are not the installed
-      // item.  Native accessories are nested in `element.acc.item`, rather
-      // than appearing as independent grid component records.
-      const element = result.element && typeof result.element === 'object' && !Array.isArray(result.element) ? result.element : {};
-      const acc = element.acc && typeof element.acc === 'object' && !Array.isArray(element.acc) ? element.acc : {};
-      result.element = { ...element, acc: { ...acc, item: accessory } };
+      // Batteries and current wheel records store the item at top-level
+      // `acc.item`; preserve the legacy nested form only when that exact
+      // container was imported. Attachments never become grid components.
+      if (object.nativeAccessoryContainer === 'element.acc') {
+        const element = result.element && typeof result.element === 'object' && !Array.isArray(result.element) ? result.element : {};
+        const acc = element.acc && typeof element.acc === 'object' && !Array.isArray(element.acc) ? element.acc : {};
+        result.element = { ...element, acc: { ...acc, item: accessory } };
+      } else {
+        const acc = result.acc && typeof result.acc === 'object' && !Array.isArray(result.acc) ? result.acc : {};
+        result.acc = { ...acc, item: accessory };
+      }
     }
     if (object.scale && nativeAxes.every(axis => Number.isFinite(object.scale[axis])) && Math.abs(object.scale.x - object.scale.y) < 1e-9 && Math.abs(object.scale.x - object.scale.z) < 1e-9 && Math.abs(object.scale.x - 1) > 1e-9) result.scale = object.scale.x;
     return result;

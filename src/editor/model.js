@@ -1,7 +1,7 @@
 // Renderer-independent Anymaker editing model. Native file adapters can map
 // this model to .data without importing Three.js or relying on scene objects.
 import { nativePropertiesFromState } from './component-properties.js';
-import { nativeAccessoryFromState } from './native-accessories.js';
+import { nativeAccessoryContainerFromState, nativeAccessoryFromState } from './native-accessories.js';
 
 export const MODEL_FORMAT = 'anymaker-builder-domain';
 export const MODEL_VERSION = 1;
@@ -59,6 +59,7 @@ export class Component {
       scale: vector(data.scale ?? data.transform?.scale, 1),
     };
     this.mirror = data.mirror ? { axis: data.mirror.axis, offset: data.mirror.offset } : undefined;
+    this.localMirrorAxes = Array.isArray(data.localMirrorAxes) ? [...data.localMirrorAxes] : undefined;
     this.colors = Array.isArray(data.colors) ? [...data.colors] : undefined;
     this.paintColor = typeof data.paintColor === 'string' ? data.paintColor : undefined;
     this.hidden = data.hidden === true ? true : undefined;
@@ -336,26 +337,33 @@ export function toEditorDocument(model, { vehicleIds = null } = {}) {
     const id = nativeImport ? `${vehicle.id}:${grid.id}:${component.id}` : component.id;
     const state = component.extras?.native?.state;
     const accessoryItem = nativeAccessoryFromState(state);
-    // `element.acc.item` is an installed item (for example a tyre), not a
+    const accessoryContainer = nativeAccessoryContainerFromState(state);
+    // `acc.item` (or legacy `element.acc.item`) is an installed item, not a
     // component record. Keep it on its host as an explicit accessory field;
     // the renderer adds its visual below the host's component transform.
     const propertyState = clone(state || {});
+    if (propertyState.acc && typeof propertyState.acc === 'object') {
+      delete propertyState.acc.item;
+      if (!Object.keys(propertyState.acc).length) delete propertyState.acc;
+    }
     if (propertyState.element?.acc && typeof propertyState.element.acc === 'object') {
-      // Preserve other `element`/`acc` fields in the host's raw property bag;
-      // only the installed item itself changes ownership to the attachment.
       delete propertyState.element.acc.item;
+      if (!Object.keys(propertyState.element.acc).length) delete propertyState.element.acc;
+      if (!Object.keys(propertyState.element).length) delete propertyState.element;
     }
     objects.push({
       id,
       type: component.type,
       gridId: grid.id,
       ...(component.mirror ? { mirror: clone(component.mirror) } : {}),
+      ...(component.localMirrorAxes?.length ? { localMirrorAxes: [...component.localMirrorAxes] } : {}),
       ...(Array.isArray(sourceColors) && sourceColors.length <= 10 && sourceColors.every(color => Number.isInteger(color) && color >= 0 && color <= 255) ? { colors: [...sourceColors] } : {}),
       ...(typeof component.paintColor === 'string' ? { paintColor: component.paintColor } : {}),
       ...(component.hidden ? { hidden: true } : {}),
       ...(nativeExtension(component) ? { nativeExtension: nativeExtension(component) } : {}),
       ...(nativePropertiesFromState(propertyState) ? { nativeProperties: nativePropertiesFromState(propertyState) } : {}),
       ...(accessoryItem ? { nativeAccessory: accessoryItem } : {}),
+      ...(accessoryContainer ? { nativeAccessoryContainer: accessoryContainer } : {}),
       ...(nativeImport ? { nativeProjected: true } : {}),
       position,
       rotation: nativeImport ? matrixToEulerXYZ(multiplyMatrices(frame.rotation, nativeComponentRotation(component))) : clone(component.transform.rotation),

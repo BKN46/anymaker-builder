@@ -62,6 +62,11 @@ const descriptor = (key, type, options = {}) => ({ key, type, ...options });
 const integer = (key, options) => descriptor(key, 'integer', { step: 1, ...options });
 const number = (key, options) => descriptor(key, 'number', { step: .01, ...options });
 const forTypes = (types, descriptors) => Object.fromEntries(types.map(type => [type, descriptors]));
+const content = (kind, options) => descriptor('content', 'content', {
+  contentKind: kind,
+  options,
+  defaultValue: {},
+});
 
 // These fields are cross-checked against the game's Properties Tool labels,
 // component descriptions, and the native component records used by shipped
@@ -87,6 +92,13 @@ const known = {
   jet_accessory_gearbox_a: [integer('gear_ratio', { min: 1, max: 128, defaultValue: 1 })],
   jet_nosecone_gearbox: [integer('gear_ratio', { min: 1, max: 128, defaultValue: 1 })],
   ...forTypes(['hydraulic_pump', 'liquid_pump', 'gas_pump'], [descriptor('is_reverse', 'boolean', { defaultValue: false, label: 'reverse' }), number('flow_factor', { min: 0, max: 1, defaultValue: 1 })]),
+  // Native tank records store the preset material as a dynamic key inside
+  // `content` (for example `{ water: 4.1, temp: 6 }`). Keep the observed
+  // runtime fields intact while exposing the material and amount for editing.
+  liquid_tank: [content('liquid', ['water', 'oil', 'petrol'])],
+  gas_tank_a: [content('gas', ['air'])],
+  gas_tank_b: [content('gas', ['air'])],
+  gas_tank_c: [content('gas', ['air'])],
   pulley_wheel: [descriptor('reverse', 'boolean', { defaultValue: false })],
   electric_motor_a: [descriptor('reverse', 'boolean', { defaultValue: false }), number('power', { min: 0, max: 1, defaultValue: 1 })],
   electric_motor_b: [descriptor('reverse', 'boolean', { defaultValue: false }), number('power', { min: 0, max: 1, defaultValue: 1 })],
@@ -147,6 +159,12 @@ export function updateNativeProperty(properties, descriptorValue, value) {
   const { key, type, min = -1e9, max = 1e9, maxLength = 65536 } = descriptorValue;
   if (type === 'readonly') throw new Error('This native component property is read-only');
   if (type === 'boolean') result[key] = value === true;
+  else if (type === 'content') {
+    if (!value || typeof value !== 'object' || Array.isArray(value)) throw new Error('Invalid tank content');
+    const contentValue = validateValue(value);
+    if (Object.keys(contentValue).length) result[key] = contentValue;
+    else delete result[key];
+  }
   else if (type === 'string') {
     if (typeof value !== 'string' || value.length > maxLength) throw new Error('Invalid component property text');
     result[key] = value;

@@ -10,6 +10,11 @@ const paintColors = (value, fallback) => {
   const colors = value.map(color => hexColor(color) || (Number.isInteger(color) && color >= 0 && color <= 255 ? nativePaintColor(color) : null));
   return colors.every(Boolean) ? [...new Set(colors)] : fallback;
 };
+const componentIds = value => {
+  if (!Array.isArray(value) || value.length > 100) return [];
+  const ids = value.filter(id => typeof id === 'string' && /^[A-Za-z0-9_-]{1,100}$/.test(id));
+  return [...new Set(ids)];
+};
 export const AUTOSAVE_INTERVAL = 60000;
 
 export function normalizeSettings(input = {}) {
@@ -59,9 +64,11 @@ export function normalizeSettings(input = {}) {
     // once on read so the visible palette and all newly saved colors are RGB.
     paintQuickColors: paintColors(s.paintQuickColors, ['#dddddd', '#bd2636', '#631a24', '#2b3440', '#20252c']),
     orthographic: bool(s.orthographic, false),
+    placementOrientationIndicator: bool(s.placementOrientationIndicator, true),
     showBuildingFurniture: bool(s.showBuildingFurniture, false),
     modelThumbnails: bool(s.modelThumbnails, false),
     catalogCardSize: finite(s.catalogCardSize, 64, 156, 72),
+    favoriteComponents: componentIds(s.favoriteComponents),
     query: text(s.query, 200), category: text(s.category, 80), selectedType: text(s.selectedType, 100, 'engine'),
     tool: ['select', 'place', 'erase', 'translate', 'rotate', 'scale', 'node', 'edge', 'plate', 'glass', 'connect', 'paint'].includes(s.tool) ? s.tool : 'select',
     sidebarTabs: {

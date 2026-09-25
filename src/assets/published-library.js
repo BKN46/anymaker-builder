@@ -45,7 +45,7 @@ function variantPath(staticMesh, axis, variant) {
   return `${match[1]}_${values.join('_')}.mesh`;
 }
 
-function staticMeshParts(definition, binding, extension, manifest) {
+export function staticMeshParts(definition, binding, extension, manifest) {
   const staticMesh = binding.staticMesh || definition.mesh_static?.mesh_path || definition.mesh || null;
   if (!staticMesh) return [];
   const parts = [{ path: staticMesh, transform: null }];
@@ -61,6 +61,10 @@ function staticMeshParts(definition, binding, extension, manifest) {
     const end = variantPath(staticMesh, axis, 2);
     if (!middle || !end || !manifest.entries[middle] || !manifest.entries[end]) continue;
     const tiles = length / interval;
+    // Variant 0 and 2 are the anchored and far caps. Variant 1 fills only
+    // the intervals *between* them: inserting one for every extension
+    // interval adds a whole extra tile and turns even-length engines into
+    // visibly odd-length assemblies.
     for (let tile = 1; tile < tiles; tile++) {
       const position = [0, 0, 0]; position[index] = tile * interval * CELL_SIZE_WORLD;
       parts.push({ path: middle, transform: { position } });
@@ -70,6 +74,40 @@ function staticMeshParts(definition, binding, extension, manifest) {
     break;
   }
   return parts;
+}
+
+function meshAxisBounds(meshData, axis) {
+  const index = axisIndex[axis];
+  let min = Infinity;
+  let max = -Infinity;
+  for (const part of meshData?.parts || []) {
+    for (let offset = index; offset < part.positions.length; offset += 3) {
+      const value = part.positions[offset];
+      min = Math.min(min, value);
+      max = Math.max(max, value);
+    }
+  }
+  return Number.isFinite(min) && Number.isFinite(max) ? { min, max } : null;
+}
+
+// Tile variants do not share a universal local origin. For example, the
+// regular engine's first cap ends one cell earlier than its nominal repeat
+// interval, while the V engine does not. Join each parsed variant at its real
+// edge instead of assuming every family has the same origin convention.
+export function stitchTiledMeshParts(parts, parsed, definition) {
+  const axis = Object.keys(axisIndex).find(key => definition[`mode_${key}`] === 'tile');
+  if (!axis || parts.length < 2 || parsed.length !== parts.length) return parts;
+  const result = [parts[0]];
+  for (let index = 1; index < parts.length; index++) {
+    const previousBounds = meshAxisBounds(parsed[index - 1], axis);
+    const currentBounds = meshAxisBounds(parsed[index], axis);
+    if (!previousBounds || !currentBounds) { result.push(parts[index]); continue; }
+    const position = Array.isArray(parts[index].transform?.position) ? [...parts[index].transform.position] : [0, 0, 0];
+    const previousPosition = Array.isArray(result[index - 1].transform?.position) ? result[index - 1].transform.position[axisIndex[axis]] : 0;
+    position[axisIndex[axis]] = previousPosition + previousBounds.max - currentBounds.min;
+    result.push({ ...parts[index], transform: { ...parts[index].transform, position } });
+  }
+  return result;
 }
 
 function parsedFromPublished(payload) {
@@ -153,6 +191,8 @@ export class PublishedAssetLibrary {
       const parts = [...staticParts, ...dynamicMeshes.map(item => ({ path: item.path, transform: item }))];
       if (!parts.length) return this.fallback.instantiate(definition, { nativeExtension: extension });
       const parsed = await Promise.all(parts.map(part => this.parse(part.path)));
+      const stitchedStaticParts = stitchTiledMeshParts(staticParts, parsed.slice(0, staticParts.length), definition);
+      const renderedParts = [...stitchedStaticParts, ...parts.slice(staticParts.length)];
       const group = new THREE.Group();
       if (parsed.every(value => value.opaque || !value.parts.length)) {
         const marker = new THREE.Mesh(new THREE.BoxGeometry(.2, .2, .2), new THREE.MeshBasicMaterial({ color: '#d49b4a', wireframe: true }));
@@ -188,7 +228,7 @@ export class PublishedAssetLibrary {
           group.add(mesh);
         }
       };
-      parsed.forEach((meshData, index) => addParsed(meshData, parts[index].transform, parts[index].path));
+      parsed.forEach((meshData, index) => addParsed(meshData, renderedParts[index].transform, renderedParts[index].path));
       group.userData.visual = 'mesh';
       group.userData.reason = '独立发布 Mesh（完整解析，gzip 懒加载）';
       group.userData.vertices = parsed.flatMap(value => value.parts).reduce((n, part) => n + part.positions.length / 3, 0);

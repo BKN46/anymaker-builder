@@ -1,11 +1,11 @@
 {
   "format": "anymaker-mesh-manifest",
   "version": 1,
-  "generatedAt": "2026-09-25T07:02:55.688Z",
+  "generatedAt": "2026-09-25T15:27:18.439Z",
   "sourceRoot": "Anymaker/rom",
   "parser": "src/assets/mesh.js",
   "compression": "gzip",
-  "count": 863,
+  "count": 865,
   "opaque": 1,
   "entries": {
     "meshes/blade_blurred/blade.mesh": {
@@ -1123,6 +1123,32 @@
       "parts": 1,
       "vertices": 272,
       "triangles": 172,
+      "compression": "gzip",
+      "format": "anymaker-published-mesh/1",
+      "parsed": true
+    },
+    "meshes/components/battery_a.mesh": {
+      "url": "assets/meshes/a33e88cdc63ff374.json.gz",
+      "sourceSha256": "25654f154478dd31ba69bd94a8c76a5cabb9ec468ea523f7ca495280911ddaa3",
+      "outputSha256": "a7c14d45f23d0f73aafaca529e4e7bf43dfe372cc4231bf1ca55312e10c960de",
+      "bytes": 2412,
+      "uncompressedBytes": 32798,
+      "parts": 1,
+      "vertices": 228,
+      "triangles": 120,
+      "compression": "gzip",
+      "format": "anymaker-published-mesh/1",
+      "parsed": true
+    },
+    "meshes/components/battery_b.mesh": {
+      "url": "assets/meshes/2271d3b769868cf3.json.gz",
+      "sourceSha256": "8b91bd158c663a98151c12e6d0b839242a0f0afb40057d1aedfff0cf3191ffa0",
+      "outputSha256": "441888526c9a59702f8d1dde7b1a60debece0f980a1806d532f321282b727cf3",
+      "bytes": 2145,
+      "uncompressedBytes": 27931,
+      "parts": 1,
+      "vertices": 192,
+      "triangles": 102,
       "compression": "gzip",
       "format": "anymaker-published-mesh/1",
       "parsed": true

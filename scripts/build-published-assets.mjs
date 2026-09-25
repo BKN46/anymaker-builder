@@ -42,14 +42,14 @@ for (const file of fs.readdirSync(bindingsRoot)) {
   for (const dynamic of binding.dynamicMeshes || []) if (dynamic.path) sources.add(safeSource(dynamic.path));
 }
 
-// Wheel items are inventory accessories nested in `element.acc.item`, rather
+// Wheel and battery inventory items are installed on component records rather
 // than component bindings. Publish their verified meshes too, so the browser
 // can render installed variants without requiring a local game installation.
 const inventoryDefinitionsPath = path.join(root, 'data', 'inventory_definitions.json');
 if (fs.existsSync(inventoryDefinitionsPath)) {
   const inventory = readJson(inventoryDefinitionsPath);
   for (const item of inventory.definitions || []) {
-    if (item?.class !== 'wheel' || !Array.isArray(item.flags) || !item.flags.includes('is_component_accessory') || !item.mesh_file) continue;
+    if (!['wheel', 'battery'].includes(item?.class) || !Array.isArray(item.flags) || !item.flags.includes('is_component_accessory') || !item.mesh_file) continue;
     sources.add(safeSource(item.mesh_file));
   }
 }
