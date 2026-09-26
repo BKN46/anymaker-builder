@@ -1,5 +1,5 @@
 import { test, expect } from '@playwright/test';
-import { meshFixture } from '../fixtures.js';
+import { meshFixture, modelGlbFixture } from '../fixtures.js';
 import { readFileSync } from 'node:fs';
 
 test.beforeEach(async ({ page }) => {
@@ -14,6 +14,183 @@ async function openRightSidebar(page) {
   if (await toggle.getAttribute('aria-expanded') === 'false') await toggle.click();
   await expect(page.locator('#right-sidebar')).toBeVisible();
 }
+
+test('3D model tool previews GLB, OBJ and STL, changes scale and panels, commits and undoes once', async ({ page }) => {
+  const errors = []; page.on('pageerror', error => errors.push(error.message));
+  await page.goto('./');
+  await expect(page.locator('#viewport')).toHaveAttribute('data-ready', 'true');
+  await openRightSidebar(page); await page.locator('#right-tab-resources').click();
+  const input = page.locator('#model-file-input');
+  await input.setInputFiles({ name: 'quad.glb', mimeType: 'model/gltf-binary', buffer: modelGlbFixture() });
+  await expect(page.locator('.model-import-tool')).toHaveAttribute('data-state', 'ready');
+  await expect(page.locator('#model-source-stats')).toContainText('4 顶点记录 / 2 三角面');
+  await expect(page.locator('#model-simplification')).toHaveAttribute('max', '12');
+  await expect(page.locator('#model-level')).toContainText('150 顶点');
+  await expect(page.locator('#model-face-stats')).toContainText('1 四边面 / 0 三角面');
+  await expect(page.locator('#model-preview')).toBeVisible();
+  await expect(page.locator('#topology-count')).toContainText('0 节点');
+  await page.locator('#model-scale').fill('0.3');
+  await expect(page.locator('#model-scale-value')).toHaveText('2.00×');
+  await expect(page.locator('.model-import-tool')).toHaveAttribute('data-state', 'ready');
+  await expect(page.locator('#model-dimensions')).toContainText('8.08');
+  await page.locator('#model-panels').uncheck();
+  await expect(page.locator('#model-result-stats')).toContainText('0 面板');
+  await page.locator('#model-generate-btn').click();
+  await expect(page.locator('#topology-count')).toContainText('4 节点 · 4 梁 · 0 面板');
+  await expect(page.locator('#project-name')).toHaveValue('quad');
+  await page.locator('#undo-btn').click();
+  await expect(page.locator('#topology-count')).toContainText('0 节点');
+  await page.locator('#redo-btn').click();
+  await expect(page.locator('#topology-count')).toContainText('4 节点 · 4 梁 · 0 面板');
+  await input.setInputFiles({ name: 'triangle.obj', mimeType: 'text/plain', buffer: Buffer.from('v 0 0 0\nv 1 0 0\nv 0 1 0\nf 1 2 3\n') });
+  await expect(page.locator('.model-import-tool')).toHaveAttribute('data-state', 'ready');
+  await page.locator('#model-panels').check();
+  await page.locator('#model-reverse-normals').check();
+  await expect(page.locator('#model-result-stats')).toContainText('1 面板');
+  await page.locator('#model-generate-btn').click();
+  await expect(page.locator('#topology-count')).toContainText('3 节点 · 3 梁 · 1 面板');
+  await page.locator('#left-tab-subgrids').click();
+  await page.locator('#subgrid-check-btn').click();
+  await expect(page.locator('#subgrid-summary')).toHaveAttribute('data-subgrid-valid', 'true');
+  await expect(page.locator('#viewport')).toHaveAttribute('data-subgrid-error-marker-count', '0');
+  await page.locator('#undo-btn').click();
+  await expect(page.locator('#topology-count')).toContainText('4 节点 · 4 梁 · 0 面板');
+  await input.setInputFiles({ name: 'triangle.stl', mimeType: 'application/octet-stream', buffer: Buffer.from('solid tri\nfacet normal 0 0 1\nouter loop\nvertex 0 0 0\nvertex 1 0 0\nvertex 0 1 0\nendloop\nendfacet\nendsolid tri') });
+  await expect(page.locator('.model-import-tool')).toHaveAttribute('data-state', 'ready');
+  await page.locator('#language-select').selectOption('en');
+  await expect(page.locator('#model-result-stats')).toContainText('3 nodes / 3 beams / 1 panels');
+  await page.locator('#model-cancel-btn').click();
+  await expect(page.locator('#model-generate-btn')).toBeDisabled();
+  await expect(page.locator('#topology-count')).toContainText('4 nodes');
+  await input.setInputFiles({ name: 'bad.glb', mimeType: 'model/gltf-binary', buffer: Buffer.from('bad') });
+  await expect(page.locator('#model-import-status')).toContainText('Invalid model geometry');
+  await expect(page.locator('#model-generate-btn')).toBeDisabled();
+  await expect(page.locator('#topology-count')).toContainText('4 nodes');
+  expect(errors).toEqual([]);
+});
+
+test('3D model symmetry updates axis previews, restores the original and generates paired nodes', async ({ page }) => {
+  const errors = []; page.on('pageerror', error => errors.push(error.message));
+  await page.goto('./'); await expect(page.locator('#viewport')).toHaveAttribute('data-ready', 'true');
+  await openRightSidebar(page); await page.locator('#right-tab-resources').click();
+  const enabled = page.getByRole('checkbox', { name: '对称模式', exact: true });
+  const direction = page.getByLabel('对称方向', { exact: true });
+  await expect(enabled).not.toBeChecked(); await expect(direction).toBeDisabled();
+  await page.locator('#model-file-input').setInputFiles({ name: 'asymmetric.glb', mimeType: 'model/gltf-binary', buffer: modelGlbFixture((_json, binary) => {
+    binary.writeFloatLE(.7, 24); binary.writeFloatLE(.6, 28); binary.writeFloatLE(.2, 36);
+  }) });
+  await expect(page.locator('.model-import-tool')).toHaveAttribute('data-state', 'ready');
+  const originalPath = await page.locator('#model-preview path').getAttribute('d');
+  const originalCounts = await page.locator('#model-result-stats').textContent();
+  await enabled.check(); await expect(direction).toBeEnabled();
+  await expect(page.locator('.model-import-tool')).toHaveAttribute('data-state', 'ready');
+  await expect(page.locator('#model-preview path')).not.toHaveAttribute('d', originalPath);
+  const xPath = await page.locator('#model-preview path').getAttribute('d');
+  await direction.selectOption('y');
+  await expect(page.locator('.model-import-tool')).toHaveAttribute('data-state', 'ready');
+  await expect(page.locator('#model-preview path')).not.toHaveAttribute('d', xPath);
+  await direction.selectOption('z');
+  await expect(page.locator('.model-import-tool')).toHaveAttribute('data-state', 'ready');
+  await expect(page.locator('#model-preview path')).toHaveAttribute('d', originalPath);
+  await enabled.uncheck(); await expect(direction).toBeDisabled();
+  await expect(page.locator('.model-import-tool')).toHaveAttribute('data-state', 'ready');
+  await expect(page.locator('#model-result-stats')).toHaveText(originalCounts);
+  await enabled.check();
+  // Change several controls before the worker returns; only the final request may commit.
+  await direction.selectOption('x');
+  await page.locator('#model-scale').fill('0.1');
+  await page.locator('#model-simplification').fill('12');
+  await expect(page.locator('#model-level')).toContainText('30 顶点');
+  await expect(page.locator('.model-import-tool')).toHaveAttribute('data-state', 'ready');
+  await expect(page.locator('#topology-count')).toContainText('0 节点');
+  await page.locator('#language-select').selectOption('en');
+  await expect(page.getByRole('checkbox', { name: 'Symmetry mode', exact: true })).toBeChecked();
+  await expect(page.getByLabel('Symmetry direction', { exact: true })).toHaveValue('x');
+  await expect(page.locator('#model-symmetry-axis option:checked')).toHaveText('X direction (center YZ plane)');
+  await page.locator('#language-select').selectOption('zh');
+  const expectedNodes = Number((await page.locator('#model-result-stats').textContent()).match(/生成：(\d+) 节点/)[1]);
+  await page.locator('#model-generate-btn').click();
+  await expect(page.locator('#topology-count')).toContainText(`${expectedNodes} 节点`);
+  const snapshot = await page.evaluate(() => {
+    window.dispatchEvent(new Event('pagehide'));
+    return JSON.parse(localStorage.getItem('anymaker:' + location.pathname + ':autosave:v1')).document;
+  });
+  expect(snapshot.topology.nodes).toHaveLength(expectedNodes);
+  const positions = snapshot.topology.nodes.map(node => ['x', 'y', 'z'].map(axis => Math.round(node.position[axis] / .08)));
+  const keys = new Set(positions.map(point => point.join(',')));
+  expect(positions.every(([x, y, z]) => keys.has([-x, y, z].join(',')))).toBe(true);
+  await page.locator('#undo-btn').click(); await expect(page.locator('#topology-count')).toContainText('0 节点');
+  await page.locator('#redo-btn').click(); await expect(page.locator('#topology-count')).toContainText(`${expectedNodes} 节点`);
+  expect(errors).toEqual([]);
+});
+
+// Opt in with ANYMAKER_MODEL_SAMPLE; the private model is never copied to the repo.
+if (process.env.ANYMAKER_MODEL_SAMPLE) test('local 3D model sample generates the previewed structure and restores history', async ({ page }) => {
+  test.setTimeout(120000);
+  const errors = []; page.on('pageerror', error => errors.push(error.message));
+  await page.goto('./'); await expect(page.locator('#viewport')).toHaveAttribute('data-ready', 'true');
+  await openRightSidebar(page); await page.locator('#right-tab-resources').click();
+  await page.locator('#model-file-input').setInputFiles(process.env.ANYMAKER_MODEL_SAMPLE);
+  await expect(page.locator('.model-import-tool')).toHaveAttribute('data-state', 'ready', { timeout: 30000 });
+  const source = await page.locator('#model-source-stats').textContent();
+  const detailed = await page.locator('#model-simplified-stats').textContent();
+  const levels = [];
+  for (const level of ['0', '3', '5', '7', '9', '10', '11', '12']) {
+    await page.locator('#model-simplification').fill(level);
+    await expect(page.locator('.model-import-tool')).toHaveAttribute('data-state', 'ready');
+    const count = Number((await page.locator('#model-result-stats').textContent()).match(/生成：(\d+) 节点/)[1]);
+    expect(count).toBeGreaterThanOrEqual(Number(level) < 10 ? 70 : 20);
+    expect(count).toBeLessThanOrEqual(Number(level) < 10 ? 250 : 70);
+    const faces = (await page.locator('#model-face-stats').textContent()).match(/(\d+) 四边面 \/ (\d+) 三角面/).slice(1).map(Number);
+    expect(faces[0] / (faces[0] + faces[1])).toBeGreaterThan(Number(level) < 10 ? .75 : .5);
+    levels.push({ level, count, quads: faces[0], triangles: faces[1] });
+  }
+  expect(levels.every((item, i) => !i || item.count < levels[i - 1].count)).toBe(true);
+  await page.locator('#model-simplification').fill('12');
+  await expect(page.locator('.model-import-tool')).toHaveAttribute('data-state', 'ready');
+  await expect(page.locator('#model-simplified-stats')).not.toHaveText(detailed);
+  await page.locator('#model-scale').fill('0.1');
+  await page.locator('#model-scale').fill('0');
+  await expect(page.locator('.model-import-tool')).toHaveAttribute('data-state', 'ready');
+  const noSymmetry = await page.locator('#model-preview path').getAttribute('d');
+  await page.locator('#model-symmetry').check();
+  for (const axis of ['y', 'z', 'x']) {
+    await page.locator('#model-symmetry-axis').selectOption(axis);
+    await expect(page.locator('.model-import-tool')).toHaveAttribute('data-state', 'ready');
+    await expect(page.locator('#model-preview')).toBeVisible();
+  }
+  await page.locator('#model-symmetry').uncheck();
+  await expect(page.locator('.model-import-tool')).toHaveAttribute('data-state', 'ready');
+  await expect(page.locator('#model-preview path')).toHaveAttribute('d', noSymmetry);
+  await page.locator('#model-symmetry').check();
+  await expect(page.locator('.model-import-tool')).toHaveAttribute('data-state', 'ready');
+  const expected = (await page.locator('#model-result-stats').textContent()).match(/生成：(\d+) 节点 \/ (\d+) 梁 \/ (\d+) 面板/).slice(1).map(Number);
+  const dimensions = await page.locator('#model-dimensions').textContent();
+  await page.locator('#model-preview').screenshot({ path: 'test-results/model-sample-preview.png' });
+  await page.locator('#model-generate-btn').click();
+  await expect(page.locator('#topology-count')).toHaveText(`${expected[0]} 节点 · ${expected[1]} 梁 · ${expected[2]} 面板`, { timeout: 30000 });
+  await page.locator('#left-tab-subgrids').click();
+  await page.locator('#subgrid-check-btn').click();
+  await expect(page.locator('#subgrid-summary')).toHaveAttribute('data-subgrid-valid', 'true');
+  await expect(page.locator('#subgrid-summary')).toContainText('0 个错误；0 个警告');
+  await page.getByRole('button', { name: '隐藏节点', exact: true }).click();
+  await page.locator('canvas').screenshot({ path: 'test-results/model-sample-vehicle.png' });
+  const snapshot = await page.evaluate(() => {
+    window.dispatchEvent(new Event('pagehide'));
+    return JSON.parse(localStorage.getItem('anymaker:' + location.pathname + ':autosave:v1')).document;
+  });
+  expect(snapshot.topology.nodes).toHaveLength(expected[0]);
+  expect(snapshot.topology.edges).toHaveLength(expected[1]);
+  expect(snapshot.topology.plates).toHaveLength(expected[2]);
+  expect(snapshot.topology.nodes.every(node => Object.values(node.position).every(value => Math.abs(value / .08 - Math.round(value / .08)) < 1e-7))).toBe(true);
+  const points = snapshot.topology.nodes.map(node => ['x', 'y', 'z'].map(axis => Math.round(node.position[axis] / .08)));
+  const pointKeys = new Set(points.map(point => point.join(',')));
+  expect(points.every(([x, y, z]) => pointKeys.has([-x, y, z].join(',')))).toBe(true);
+  await page.locator('#undo-btn').click(); await expect(page.locator('#topology-count')).toContainText('0 节点');
+  await page.locator('#redo-btn').click(); await expect(page.locator('#topology-count')).toContainText(`${expected[0]} 节点`);
+  console.log(JSON.stringify({ source, detailed, generated: expected, dimensions, levels }));
+  expect(errors).toEqual([]);
+});
 
 test('GitHub build time selects a successful Pages deployment over a newer failure', async ({ page }) => {
   await page.route(/api\.github\.com\/repos\/BKN46\/anymaker-builder\/actions\/runs/, route => route.fulfill({
@@ -160,12 +337,67 @@ test('structural commands create independent components and remain undoable', as
   await expect(page.locator('#object-count')).toHaveText('2 个组件');
   await page.locator('#mirror-action').click();
   await expect(page.locator('#mirror-toolbar')).toBeVisible();
+  await expect(page.locator('#selection-filter-toolbar #mirror-toolbar')).toBeVisible();
+  await expect(page.locator('#viewport')).toHaveAttribute('data-mirror-guide-visible', 'true');
+  await page.locator('#mirror-hide-plane').check();
+  await expect(page.locator('#viewport')).toHaveAttribute('data-mirror-guide-visible', 'false');
   await expect(page.locator('#mirror-action')).toHaveAttribute('aria-pressed', 'true');
   await page.locator('[data-id="engine"]').click();
   await page.locator('canvas').click({ position: { x: 540, y: 400 } });
   await expect(page.locator('#object-count')).toHaveText('4 个组件');
+  await page.locator('#mirror-hide-plane').uncheck();
+  await expect(page.locator('#viewport')).toHaveAttribute('data-mirror-guide-visible', 'true');
   await page.locator('#undo-btn').click();
   await expect(page.locator('#object-count')).toHaveText('2 个组件');
+});
+
+test('mirror mode keeps paired component moves and rotations synchronized through Inspector and history', async ({ page }) => {
+  const errors = []; page.on('pageerror', error => errors.push(error.message));
+  await page.goto('./');
+  await expect(page.locator('#viewport')).toHaveAttribute('data-ready', 'true');
+  await page.locator('#mesh-input').setInputFiles({ name: 'engine_block_a_0_0_0.mesh', mimeType: 'application/octet-stream', buffer: meshFixture() });
+  await page.locator('#mirror-action').click();
+  await page.locator('#component-search').fill('engine');
+  await page.locator('[data-id="engine"]').click();
+  await page.locator('canvas').hover({ position: { x: 540, y: 400 } });
+  await page.keyboard.press('k');
+  await page.locator('canvas').click({ position: { x: 540, y: 400 } });
+  await expect(page.locator('#object-count')).toHaveText('2 个组件');
+  const initial = await saveProject(page);
+  const source = initial.objects.find(object => !object.mirror);
+  const mirror = initial.objects.find(object => object.mirror);
+  expect(mirror.position.x).toBeCloseTo(-source.position.x);
+  expect(mirror.rotation.y).toBeCloseTo(-source.rotation.y);
+  await openRightSidebar(page); await page.locator('#right-tab-inspector').click();
+  const sourceX = Math.round(source.position.x / .08);
+  const x = page.getByRole('spinbutton', { name: 'position-x', exact: true });
+  await x.fill(String(sourceX + 3)); await x.press('Enter');
+  let changed = await saveProject(page);
+  expect(changed.objects.find(object => object.id === source.id).position.x).toBeCloseTo((sourceX + 3) * .08);
+  expect(changed.objects.find(object => object.id === mirror.id).position.x).toBeCloseTo(-(sourceX + 3) * .08);
+  const y = page.getByRole('spinbutton', { name: 'position-y', exact: true });
+  await y.fill('2'); await y.press('Enter');
+  changed = await saveProject(page);
+  expect(changed.objects[0].position.y).toBeCloseTo(.16);
+  expect(changed.objects[1].position.y).toBeCloseTo(.16);
+  const yaw = page.getByRole('spinbutton', { name: 'rotation-y', exact: true });
+  await yaw.fill('180'); await yaw.press('Enter');
+  changed = await saveProject(page);
+  expect(changed.objects.find(object => object.id === source.id).rotation.y).toBeCloseTo(Math.PI);
+  expect(changed.objects.find(object => object.id === mirror.id).rotation.y).toBeCloseTo(-Math.PI);
+  const roll = page.getByRole('spinbutton', { name: 'rotation-x', exact: true });
+  await roll.fill('45'); await roll.press('Enter');
+  changed = await saveProject(page);
+  expect(changed.objects.find(object => object.id === source.id).rotation.x).toBeCloseTo(Math.PI / 4);
+  expect(changed.objects.find(object => object.id === mirror.id).rotation.x).toBeCloseTo(Math.PI / 4);
+  await page.locator('#undo-btn').click();
+  changed = await saveProject(page);
+  expect(changed.objects.find(object => object.id === source.id).rotation.x).toBeCloseTo(0);
+  expect(changed.objects.find(object => object.id === mirror.id).rotation.x).toBeCloseTo(0);
+  await page.locator('#redo-btn').click();
+  changed = await saveProject(page);
+  expect(changed.objects.find(object => object.id === mirror.id).rotation.x).toBeCloseTo(Math.PI / 4);
+  expect(errors).toEqual([]);
 });
 
 test('Shift click multi-selection batches structural actions into one history entry', async ({ page }) => {
@@ -189,6 +421,29 @@ test('Shift click multi-selection batches structural actions into one history en
   await expect(page.locator('#object-count')).toHaveText('2 个组件');
   await page.locator('#redo-btn').click();
   await expect(page.locator('#object-count')).toHaveText('4 个组件');
+});
+
+test('erase tool deletes only its highlighted component from a multi-selection', async ({ page }) => {
+  await page.goto('./');
+  await expect(page.locator('#viewport')).toHaveAttribute('data-ready', 'true');
+  const canvas = page.locator('canvas');
+  await page.locator('#mesh-input').setInputFiles({ name: 'engine_block_a_0_0_0.mesh', mimeType: 'application/octet-stream', buffer: meshFixture() });
+  await page.locator('#component-search').fill('engine');
+  for (const x of [380, 680]) {
+    await page.locator('[data-id="engine"]').click();
+    await canvas.click({ position: { x, y: 400 } });
+  }
+  const before = await saveProject(page);
+  await canvas.click({ position: { x: 380, y: 400 } });
+  await page.keyboard.down('Shift'); await canvas.click({ position: { x: 680, y: 400 } }); await page.keyboard.up('Shift');
+  await expect(page.locator('#inspector-content')).toContainText('已选择 2 个组件');
+  await page.locator('[data-tool="erase"]').click();
+  await canvas.hover({ position: { x: 380, y: 400 } });
+  await expect(page.locator('#viewport')).toHaveAttribute('data-interaction-highlight-count', '1');
+  await canvas.click({ position: { x: 380, y: 400 } });
+  await expect(page.locator('#object-count')).toHaveText('1 个组件');
+  await expect(page.locator('#viewport')).toHaveAttribute('data-interaction-highlight-count', '0');
+  expect((await saveProject(page)).objects.map(object => object.id)).toEqual([before.objects[1].id]);
 });
 
 test('native JSON maps through the domain model and imports components', async ({ page }) => {
@@ -268,20 +523,17 @@ test('native import centers a half-cell-wide structure without moving nodes off 
   }
   await page.locator('#left-tab-subgrids').click();
   await page.locator('#subgrid-check-btn').click();
-  await expect(page.locator('#subgrid-summary')).toHaveAttribute('data-subgrid-valid', 'false');
-  await expect(page.locator('#viewport')).toHaveAttribute('data-subgrid-error-marker-count', '2');
-  await expect(page.locator('#subgrid-error-markers .subgrid-error-marker')).toHaveCount(2);
-  await expect(page.locator('#subgrid-error-markers .subgrid-error-marker').first()).toBeVisible();
-  await page.locator('#viewport').screenshot({ path: 'test-results/subgrid-error-markers.png' });
+  await expect(page.locator('#subgrid-summary')).toHaveAttribute('data-subgrid-valid', 'true');
+  await expect(page.locator('#subgrid-summary')).toContainText('0 个错误');
+  await expect(page.locator('#viewport')).toHaveAttribute('data-subgrid-error-marker-count', '0');
+  await expect(page.locator('#subgrid-error-markers .subgrid-error-marker')).toHaveCount(0);
+  await expect(page.locator('#subgrid-diagnostics')).toBeHidden();
   await page.locator('#subgrid-error-toggle').uncheck();
   await expect(page.locator('#subgrid-error-markers')).toBeHidden();
   await page.locator('#subgrid-error-toggle').check();
-  await expect(page.locator('#subgrid-error-markers .subgrid-error-marker').first()).toBeVisible();
-  await expect(page.locator('#subgrid-diagnostics [data-code="unmounted-node"]')).toHaveCount(2);
-  await expect(page.locator('#subgrid-diagnostics [data-code="dangling-edge"]')).toContainText('梁的端点未连接到组件。');
-  await expect(page.locator('#subgrid-diagnostics')).toContainText('节点 grid-1-1:1：X');
+  await expect(page.locator('#subgrid-error-markers .subgrid-error-marker')).toHaveCount(0);
   await page.locator('#language-select').selectOption('en');
-  await expect(page.locator('#subgrid-diagnostics [data-code="dangling-edge"]')).toContainText('Edge has an endpoint that is not mounted to a component.');
+  await expect(page.locator('#subgrid-summary')).toContainText('0 error(s)');
   await page.locator('#new-btn').click();
   await expect(page.locator('#subgrid-diagnostics')).toBeHidden();
   await expect(page.locator('#subgrid-error-markers .subgrid-error-marker')).toHaveCount(0);
@@ -457,11 +709,15 @@ test('paint and connection context toolbars expose saved colors, network ports a
   await expect(page.locator('#selection-filter-toolbar')).toBeVisible();
   const filterBounds = await page.locator('#selection-filter-toolbar').boundingBox();
   const toolbarBounds = await page.locator('.top-tool-section').boundingBox();
+  const viewportStartBounds = await page.locator('#viewport').boundingBox();
   expect(Math.abs(filterBounds.y - toolbarBounds.y)).toBeLessThan(1);
-  expect(filterBounds.x - (toolbarBounds.x + toolbarBounds.width)).toBeGreaterThanOrEqual(8);
+  expect(filterBounds.x).toBeGreaterThanOrEqual(viewportStartBounds.x);
+  expect(filterBounds.x + filterBounds.width).toBeLessThanOrEqual(toolbarBounds.x);
   await page.locator('#right-sidebar-toggle').click();
   const openSidebarFilterBounds = await page.locator('#selection-filter-toolbar').boundingBox();
-  expect(openSidebarFilterBounds.y).toBeGreaterThan(toolbarBounds.y + toolbarBounds.height);
+  const openToolbarBounds = await page.locator('.top-tool-section').boundingBox();
+  expect(Math.abs(openSidebarFilterBounds.y - openToolbarBounds.y)).toBeLessThan(1);
+  expect(openSidebarFilterBounds.x + openSidebarFilterBounds.width).toBeLessThanOrEqual(openToolbarBounds.x);
   await page.locator('#right-sidebar-toggle').click();
   await expect(page.locator('#selection-filter-toolbar [data-selectable-kind]')).toHaveCount(6);
   await expect(page.locator('#selection-filter-toggle')).toHaveAttribute('aria-expanded', 'false');
@@ -469,7 +725,7 @@ test('paint and connection context toolbars expose saved colors, network ports a
   await page.locator('#selection-filter-toggle').click();
   await expect(page.locator('#selection-filter-toggle')).toHaveAttribute('aria-expanded', 'true');
   await expect(page.locator('#selection-filter-options')).toBeVisible();
-  await expect(page.locator('[data-selectable-kind="structure"]')).not.toBeChecked();
+  await expect(page.locator('[data-selectable-kind="structure"]')).toBeChecked();
   await page.locator('#selection-filter-toolbar [data-selectable-kind="edge"]').uncheck();
   await expect(page.locator('#selection-filter-toolbar [data-selectable-kind="edge"]')).not.toBeChecked();
   await page.locator('#selection-filter-toolbar [data-selectable-kind="edge"]').check();
@@ -852,7 +1108,7 @@ test('front-view solid edges are pickable off the centerline and split with hidd
   }
 });
 
-test('structural selection is opt-in without disabling construction tools', async ({ page }) => {
+test('structural selection is enabled by default and can be disabled without affecting construction', async ({ page }) => {
   await page.goto('./');
   await expect(page.locator('#viewport')).toHaveAttribute('data-ready', 'true');
   await page.locator('[data-view="front"]').click();
@@ -863,22 +1119,16 @@ test('structural selection is opt-in without disabling construction tools', asyn
   await expect(page.locator('#topology-count')).toHaveText('2 节点 · 1 梁 · 0 面板');
   await page.locator('[data-tool="select"]').click();
   await canvas.hover({ position: { x: 600, y: 420 } });
-  await expect(page.locator('#viewport')).toHaveAttribute('data-interaction-highlight-count', '0');
+  await expect.poll(() => page.locator('#viewport').getAttribute('data-interaction-highlight-count').then(Number)).toBeGreaterThanOrEqual(1);
   await canvas.click({ position: { x: 600, y: 420 } });
-  await expect(page.locator('#inspector-content')).not.toContainText('已选择 1 个结构对象');
+  await expect(page.locator('#inspector-content')).toContainText('已选择 1 个结构对象');
   await page.locator('#box-select-action').click();
   await canvas.dragTo(canvas, { sourcePosition: { x: 570, y: 390 }, targetPosition: { x: 630, y: 450 } });
-  await expect(page.locator('#inspector-content')).not.toContainText('已选择 1 个结构对象');
+  await expect(page.locator('#inspector-content')).toContainText('已选择 1 个结构对象');
 
   await page.locator('#selection-filter-toggle').click();
   const structure = page.locator('[data-selectable-kind="structure"]');
-  await expect(structure).not.toBeChecked();
-  await structure.check();
-  await canvas.click({ position: { x: 600, y: 420 } });
-  await expect(page.locator('#inspector-content')).toContainText('已选择 1 个结构对象');
-  await page.locator('#box-select-action').click();
-  await canvas.dragTo(canvas, { sourcePosition: { x: 570, y: 390 }, targetPosition: { x: 630, y: 450 } });
-  await expect(page.locator('#inspector-content')).toContainText('已选择 1 个结构对象');
+  await expect(structure).toBeChecked();
   await structure.uncheck();
   await expect(page.locator('#inspector-content')).not.toContainText('已选择 1 个结构对象');
   await canvas.hover({ position: { x: 600, y: 420 } });
@@ -953,6 +1203,37 @@ test('glass tool closes selected edges into an offset window panel and paint sto
   await page.keyboard.down('Shift'); await canvas.click({ position: { x: 580, y: 575 } }); await page.keyboard.up('Shift');
   await expect(page.locator('#inspector-content')).toContainText('已选择 2 个结构对象');
   await expect.poll(() => page.locator('#viewport').getAttribute('data-interaction-highlight-count').then(Number)).toBeGreaterThanOrEqual(2);
+});
+
+test('erase tool removes the highlighted front panel before its supporting edge', async ({ page }) => {
+  await page.goto('./');
+  await expect(page.locator('#viewport')).toHaveAttribute('data-ready', 'true');
+  await page.locator('[data-view="front"]').click();
+  const canvas = page.locator('canvas');
+  const corners = [[430, 560], [730, 560], [730, 280], [430, 280]];
+  await page.locator('[data-tool="edge"]').click();
+  for (let index = 0; index < corners.length; index++) {
+    await canvas.click({ position: { x: corners[index][0], y: corners[index][1] } });
+    const next = corners[(index + 1) % corners.length];
+    await canvas.click({ position: { x: next[0], y: next[1] } });
+  }
+  await page.locator('[data-tool="glass"]').click();
+  for (const [x, y] of [[580, 560], [730, 420], [580, 280], [430, 420]]) await canvas.click({ position: { x, y } });
+  await expect(page.locator('#topology-count')).toHaveText('4 节点 · 4 梁 · 1 面板');
+
+  await page.locator('[data-tool="erase"]').click();
+  await canvas.hover({ position: { x: 580, y: 560 } });
+  await expect(page.locator('#viewport')).toHaveAttribute('data-plate-boundary-highlight-count', '1');
+  await canvas.click({ position: { x: 580, y: 560 } });
+  let saved = await saveProject(page);
+  expect(saved.topology.plates).toHaveLength(0);
+  expect(saved.topology.edges).toHaveLength(4);
+
+  await canvas.hover({ position: { x: 580, y: 560 } });
+  await expect(page.locator('#viewport')).toHaveAttribute('data-edge-center-highlight-count', '1');
+  await canvas.click({ position: { x: 580, y: 560 } });
+  saved = await saveProject(page);
+  expect(saved.topology.edges).toHaveLength(3);
 });
 
 test('XYZ rulers follow axis snapping, language, cancellation and committed endpoints', async ({ page }) => {

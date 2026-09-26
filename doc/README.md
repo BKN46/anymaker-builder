@@ -11,6 +11,7 @@
 | [04 Component / Mesh 拆分](04_COMPONENT_MESH_SPLIT.md) | 每组件详情与绑定、单 Mesh 文件、共享资源和按需加载 |
 | [05 镜像与子网格操作](05_BUILD_OPERATIONS.md) | 拆分、复制、移动、合并语义、边界策略和验收 |
 | [06 本地反编译分析](06_REVERSE_ENGINEERING.md) | 只读游戏输入、Ghidra 导出流程和证据边界 |
+| [07 3D 模型解析](07_MODEL_IMPORT.md) | GLB/OBJ/STL、外壳简化、方向对称、格点结构生成、占地和验证边界 |
 | [资源研究记录](RESOURCE_ANALYSIS.md) | 扫描方法、Mesh 支持范围、Stormworks 方法参考 |
 | [审计报告](evidence/asset-audit.json) | ROM 计数、EXE/定义/Mesh SHA-256、解析成功和失败记录 |
 | [原生子网格变换证据](evidence/native-grid-transform.json) | 游戏 GCL 函数与常量、安装偏移、四个车门把手回归坐标 |

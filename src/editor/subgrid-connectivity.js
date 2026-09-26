@@ -2,9 +2,8 @@
 //
 // The checker does not use a padded render AABB as a structural connection.
 // The observed game node representation is a one-cell cube (the eight
-// +/-0.5 corners), so a node is mounted only when that cube reaches a
-// component boundary. This module is a conservative editor diagnostic; it
-// does not claim to reproduce opaque game code that has not been recovered.
+// +/-0.5 corners). Boundary contact helps estimate connectivity, but is not
+// evidence that other valid structural nodes must be mounted to a component.
 
 const entityKey = (kind, id) => `${kind}:${id}`;
 const EPSILON = 1e-6;
@@ -118,15 +117,12 @@ function buildAnalysis({ components = [], topology = {}, cellSize = DEFAULT_CELL
       }
     }
   }
-  const mountedNodes = new Map([...nodeById.keys()].map(id => [id, new Set()]));
   for (const node of nodeById.values()) {
     for (const component of bounded) {
       if (nodeTouchesComponent(node, component, cellSize, epsilon)) {
-        mountedNodes.get(node.id).add(component.id);
         connect(graph, entityKey('node', node.id), entityKey('component', component.id));
       }
     }
-    if (!mountedNodes.get(node.id).size) addDiagnostic(diagnostics, 'unmounted-node', 'error', [node.id], 'Node does not reach a component installation boundary.');
     if (!referencedNodeIds.has(node.id) && node.standalone !== true && node.nativeProjected !== true) {
       addDiagnostic(diagnostics, 'unreferenced-node', 'warning', [node.id], 'Node is not referenced by an edge or plate.');
     }
@@ -144,16 +140,11 @@ function buildAnalysis({ components = [], topology = {}, cellSize = DEFAULT_CELL
     if (fromGrid && toGrid && fromGrid !== toGrid) addDiagnostic(diagnostics, 'cross-grid-link', 'warning', [link.id, from, to], 'Connection crosses existing subgrid ownership.');
   }
   for (const edge of edgeById.values()) {
-    const aMounted = mountedNodes.get(edge.a)?.size || 0;
-    const bMounted = mountedNodes.get(edge.b)?.size || 0;
-    if (!aMounted || !bMounted) addDiagnostic(diagnostics, 'dangling-edge', 'error', [edge.id, edge.a, edge.b], 'Edge has an endpoint that is not mounted to a component.');
     const aGrid = nodeById.get(edge.a)?.gridId;
     const bGrid = nodeById.get(edge.b)?.gridId;
     if (aGrid && bGrid && aGrid !== bGrid) addDiagnostic(diagnostics, 'cross-grid-edge', 'warning', [edge.id, edge.a, edge.b], 'Edge crosses existing subgrid ownership.');
   }
   for (const plate of plateById.values()) {
-    const mounted = (plate.nodeIds || []).filter(id => mountedNodes.get(id)?.size).length;
-    if (mounted < 3) addDiagnostic(diagnostics, 'dangling-plate', 'error', [plate.id, ...(plate.nodeIds || [])], 'Plate has fewer than three mounted nodes.');
     const grids = new Set((plate.nodeIds || []).map(id => nodeById.get(id)?.gridId).filter(Boolean));
     if (grids.size > 1) addDiagnostic(diagnostics, 'cross-grid-plate', 'warning', [plate.id, ...(plate.nodeIds || [])], 'Plate crosses existing subgrid ownership.');
   }

@@ -3,7 +3,6 @@ const AXES = ['x', 'y', 'z'];
 export function locatableSubgridErrors(diagnostics, topology) {
   const nodes = new Map((topology.nodes || []).map(node => [node.id, node]));
   const plates = new Map((topology.plates || []).map(plate => [plate.id, plate]));
-  const unmounted = new Set(diagnostics.filter(item => item.severity === 'error' && item.code === 'unmounted-node').flatMap(item => item.entityIds));
   const locations = new Map();
   const add = (nodeId, diagnostic) => {
     const position = nodes.get(nodeId)?.position;
@@ -16,10 +15,8 @@ export function locatableSubgridErrors(diagnostics, topology) {
   };
   for (const diagnostic of diagnostics) {
     if (diagnostic.severity !== 'error') continue;
-    if (diagnostic.code === 'unmounted-node') {
-      for (const id of diagnostic.entityIds) add(id, diagnostic);
-    } else if (diagnostic.code === 'dangling-edge' || diagnostic.code === 'dangling-plate') {
-      for (const id of diagnostic.entityIds) if (unmounted.has(id)) add(id, diagnostic);
+    if (diagnostic.code === 'missing-edge-node' || diagnostic.code === 'missing-plate-node') {
+      for (const id of diagnostic.entityIds) if (nodes.has(id)) add(id, diagnostic);
     } else if (diagnostic.code === 'invalid-plate') {
       const plate = plates.get(diagnostic.entityIds[0]);
       const anchor = plate?.nodeIds.find(id => nodes.has(id));

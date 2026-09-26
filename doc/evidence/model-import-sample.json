@@ -1,0 +1,642 @@
+{
+  "date": "2026-09-26",
+  "file": "2014_porsche_cayman_s_981.glb",
+  "bytes": 5863988,
+  "sha256": "2cd6ad9c2af9e9e7b2c9df718d969ef8972d39e8bb47bd5e9c1b7af7642eda13",
+  "sourceVertices": 77620,
+  "sourceTriangles": 79638,
+  "sourceBounds": {
+    "min": [
+      -0.009882809894916189,
+      -0.0015625299164087362,
+      -0.022109379274188434
+    ],
+    "max": [
+      0.009882809894916189,
+      0.011425779802521019,
+      0.021718749514548108
+    ],
+    "size": [
+      0.019765619789832378,
+      0.012988309718929756,
+      0.04382812878873654
+    ]
+  },
+  "levels": [
+    {
+      "level": 0,
+      "targetVertices": 250,
+      "scale": 1,
+      "simplifiedVertices": 248,
+      "generated": {
+        "nodes": 242,
+        "edges": 483,
+        "faces": 243,
+        "plates": 243,
+        "quads": 237,
+        "triangles": 6
+      },
+      "dimensionsXYZ": [
+        {
+          "cells": 21,
+          "meters": 1.68
+        },
+        {
+          "cells": 16,
+          "meters": 1.28
+        },
+        {
+          "cells": 50,
+          "meters": 4
+        }
+      ],
+      "closedEdgeIncidence": true
+    },
+    {
+      "level": 1,
+      "targetVertices": 230,
+      "scale": 1,
+      "simplifiedVertices": 232,
+      "generated": {
+        "nodes": 226,
+        "edges": 452,
+        "faces": 228,
+        "plates": 228,
+        "quads": 220,
+        "triangles": 8
+      },
+      "dimensionsXYZ": [
+        {
+          "cells": 21,
+          "meters": 1.68
+        },
+        {
+          "cells": 15,
+          "meters": 1.2
+        },
+        {
+          "cells": 50,
+          "meters": 4
+        }
+      ],
+      "closedEdgeIncidence": true
+    },
+    {
+      "level": 2,
+      "targetVertices": 210,
+      "scale": 1,
+      "simplifiedVertices": 208,
+      "generated": {
+        "nodes": 202,
+        "edges": 404,
+        "faces": 204,
+        "plates": 204,
+        "quads": 196,
+        "triangles": 8
+      },
+      "dimensionsXYZ": [
+        {
+          "cells": 21,
+          "meters": 1.68
+        },
+        {
+          "cells": 16,
+          "meters": 1.28
+        },
+        {
+          "cells": 50,
+          "meters": 4
+        }
+      ],
+      "closedEdgeIncidence": true
+    },
+    {
+      "level": 3,
+      "targetVertices": 190,
+      "scale": 1,
+      "simplifiedVertices": 192,
+      "generated": {
+        "nodes": 186,
+        "edges": 374,
+        "faces": 190,
+        "plates": 190,
+        "quads": 178,
+        "triangles": 12
+      },
+      "dimensionsXYZ": [
+        {
+          "cells": 21,
+          "meters": 1.68
+        },
+        {
+          "cells": 15,
+          "meters": 1.2
+        },
+        {
+          "cells": 50,
+          "meters": 4
+        }
+      ],
+      "closedEdgeIncidence": true
+    },
+    {
+      "level": 4,
+      "targetVertices": 170,
+      "scale": 1,
+      "simplifiedVertices": 168,
+      "generated": {
+        "nodes": 162,
+        "edges": 329,
+        "faces": 169,
+        "plates": 169,
+        "quads": 151,
+        "triangles": 18
+      },
+      "dimensionsXYZ": [
+        {
+          "cells": 21,
+          "meters": 1.68
+        },
+        {
+          "cells": 16,
+          "meters": 1.28
+        },
+        {
+          "cells": 50,
+          "meters": 4
+        }
+      ],
+      "closedEdgeIncidence": true
+    },
+    {
+      "level": 5,
+      "targetVertices": 150,
+      "scale": 1,
+      "simplifiedVertices": 152,
+      "generated": {
+        "nodes": 146,
+        "edges": 293,
+        "faces": 149,
+        "plates": 149,
+        "quads": 139,
+        "triangles": 10
+      },
+      "dimensionsXYZ": [
+        {
+          "cells": 21,
+          "meters": 1.68
+        },
+        {
+          "cells": 15,
+          "meters": 1.2
+        },
+        {
+          "cells": 50,
+          "meters": 4
+        }
+      ],
+      "closedEdgeIncidence": true
+    },
+    {
+      "level": 6,
+      "targetVertices": 130,
+      "scale": 1,
+      "simplifiedVertices": 128,
+      "generated": {
+        "nodes": 122,
+        "edges": 246,
+        "faces": 126,
+        "plates": 126,
+        "quads": 114,
+        "triangles": 12
+      },
+      "dimensionsXYZ": [
+        {
+          "cells": 21,
+          "meters": 1.68
+        },
+        {
+          "cells": 16,
+          "meters": 1.28
+        },
+        {
+          "cells": 50,
+          "meters": 4
+        }
+      ],
+      "closedEdgeIncidence": true
+    },
+    {
+      "level": 7,
+      "targetVertices": 110,
+      "scale": 1,
+      "simplifiedVertices": 112,
+      "generated": {
+        "nodes": 106,
+        "edges": 212,
+        "faces": 108,
+        "plates": 108,
+        "quads": 100,
+        "triangles": 8
+      },
+      "dimensionsXYZ": [
+        {
+          "cells": 21,
+          "meters": 1.68
+        },
+        {
+          "cells": 15,
+          "meters": 1.2
+        },
+        {
+          "cells": 50,
+          "meters": 4
+        }
+      ],
+      "closedEdgeIncidence": true
+    },
+    {
+      "level": 8,
+      "targetVertices": 90,
+      "scale": 1,
+      "simplifiedVertices": 88,
+      "generated": {
+        "nodes": 82,
+        "edges": 164,
+        "faces": 84,
+        "plates": 84,
+        "quads": 76,
+        "triangles": 8
+      },
+      "dimensionsXYZ": [
+        {
+          "cells": 21,
+          "meters": 1.68
+        },
+        {
+          "cells": 15,
+          "meters": 1.2
+        },
+        {
+          "cells": 50,
+          "meters": 4
+        }
+      ],
+      "closedEdgeIncidence": true
+    },
+    {
+      "level": 9,
+      "targetVertices": 70,
+      "scale": 1,
+      "simplifiedVertices": 80,
+      "generated": {
+        "nodes": 74,
+        "edges": 150,
+        "faces": 78,
+        "plates": 78,
+        "quads": 66,
+        "triangles": 12
+      },
+      "dimensionsXYZ": [
+        {
+          "cells": 21,
+          "meters": 1.68
+        },
+        {
+          "cells": 15,
+          "meters": 1.2
+        },
+        {
+          "cells": 50,
+          "meters": 4
+        }
+      ],
+      "closedEdgeIncidence": true
+    },
+    {
+      "level": 10,
+      "targetVertices": 50,
+      "scale": 1,
+      "simplifiedVertices": 48,
+      "generated": {
+        "nodes": 42,
+        "edges": 83,
+        "faces": 43,
+        "plates": 43,
+        "quads": 37,
+        "triangles": 6
+      },
+      "dimensionsXYZ": [
+        {
+          "cells": 21,
+          "meters": 1.68
+        },
+        {
+          "cells": 15,
+          "meters": 1.2
+        },
+        {
+          "cells": 50,
+          "meters": 4
+        }
+      ],
+      "closedEdgeIncidence": true
+    },
+    {
+      "level": 11,
+      "targetVertices": 40,
+      "scale": 1,
+      "simplifiedVertices": 40,
+      "generated": {
+        "nodes": 34,
+        "edges": 67,
+        "faces": 35,
+        "plates": 35,
+        "quads": 29,
+        "triangles": 6
+      },
+      "dimensionsXYZ": [
+        {
+          "cells": 21,
+          "meters": 1.68
+        },
+        {
+          "cells": 14,
+          "meters": 1.12
+        },
+        {
+          "cells": 50,
+          "meters": 4
+        }
+      ],
+      "closedEdgeIncidence": true
+    },
+    {
+      "level": 12,
+      "targetVertices": 30,
+      "scale": 1,
+      "simplifiedVertices": 32,
+      "generated": {
+        "nodes": 26,
+        "edges": 51,
+        "faces": 27,
+        "plates": 27,
+        "quads": 21,
+        "triangles": 6
+      },
+      "dimensionsXYZ": [
+        {
+          "cells": 21,
+          "meters": 1.68
+        },
+        {
+          "cells": 13,
+          "meters": 1.04
+        },
+        {
+          "cells": 50,
+          "meters": 4
+        }
+      ],
+      "closedEdgeIncidence": true
+    }
+  ],
+  "browser": {
+    "testedLevels": [
+      0,
+      3,
+      5,
+      7,
+      9,
+      10,
+      11,
+      12
+    ],
+    "status": "passed",
+    "passed": [
+      "GLB/OBJ/STL file workflows",
+      "target vertex slider",
+      "26-242 actual nodes across sample levels",
+      "quad-majority faces at all tested levels",
+      "preview matches generated counts",
+      "integer grid positions",
+      "autosave snapshot",
+      "undo",
+      "redo",
+      "no page errors",
+      "symmetry off by default and direction selector disabled",
+      "X/Y/Z direction changes update previews",
+      "disabling symmetry restores prior preview",
+      "rapid control changes use the final options",
+      "bilingual symmetry controls",
+      "generated vertices have mirrored counterparts"
+    ],
+    "screenshots": [
+      "test-results/model-sample-preview.png",
+      "test-results/model-sample-vehicle.png"
+    ]
+  },
+  "unverified": [
+    "game loading",
+    "physical connectivity",
+    "visual parity",
+    "performance on low-end hardware"
+  ],
+  "algorithm": "filtered depth envelope and octagonal section loft",
+  "shellStats": {
+    "sourceVertices": 41014,
+    "filteredVoxels": 11128,
+    "removedIslands": 0,
+    "planar": false
+  },
+  "validation": {
+    "unitTests": 114,
+    "unitStatus": "passed",
+    "productionBuild": "passed",
+    "editorBrowser": {
+      "passed": 33,
+      "failed": 4,
+      "failuresReproducedOnBaseline": "8671728"
+    },
+    "allTenSampleLevels": {
+      "integerGrid": true,
+      "planarPanels": true,
+      "closedEdgeIncidence": true
+    },
+    "limitations": [
+      "convex sections fill deep recesses and holes",
+      "disconnected sections may be joined into one shell",
+      "small-scale grid snapping may collapse faces"
+    ],
+    "extraThreeSampleLevels": {
+      "integerGrid": true,
+      "planarPanels": true,
+      "closedEdgeIncidence": true
+    }
+  },
+  "symmetry": {
+    "enabledByDefault": false,
+    "axes": [
+      "x",
+      "y",
+      "z"
+    ],
+    "center": "source bounds midpoint snapped to the construction grid",
+    "testedLevels": [
+      0,
+      1,
+      2,
+      3,
+      4,
+      5,
+      6,
+      7,
+      8,
+      9,
+      10,
+      11,
+      12
+    ],
+    "testedScales": [
+      1,
+      1.02,
+      1.37
+    ],
+    "testedCombinations": 117,
+    "generatedNodeRange": [
+      24,
+      242
+    ],
+    "minimumQuadFraction": 0.6923076923076923,
+    "allVerticesPaired": true,
+    "allPlanarPanels": true,
+    "allClosedEdgeIncidence": true,
+    "defaultLevelAtScale1": [
+      {
+        "level": 5,
+        "axis": "x",
+        "scale": 1,
+        "generated": {
+          "nodes": 146,
+          "edges": 295,
+          "faces": 151,
+          "plates": 151,
+          "quads": 137,
+          "triangles": 14
+        },
+        "center": 0,
+        "dimensionsXYZ": [
+          {
+            "cells": 21,
+            "meters": 1.68
+          },
+          {
+            "cells": 15,
+            "meters": 1.2
+          },
+          {
+            "cells": 50,
+            "meters": 4
+          }
+        ],
+        "unmatchedNodes": 0,
+        "planarPanels": true,
+        "closedEdgeIncidence": true
+      },
+      {
+        "level": 5,
+        "axis": "y",
+        "scale": 1,
+        "generated": {
+          "nodes": 146,
+          "edges": 291,
+          "faces": 147,
+          "plates": 147,
+          "quads": 141,
+          "triangles": 6
+        },
+        "center": 0.56,
+        "dimensionsXYZ": [
+          {
+            "cells": 21,
+            "meters": 1.68
+          },
+          {
+            "cells": 13,
+            "meters": 1.04
+          },
+          {
+            "cells": 50,
+            "meters": 4
+          }
+        ],
+        "unmatchedNodes": 0,
+        "planarPanels": true,
+        "closedEdgeIncidence": true
+      },
+      {
+        "level": 5,
+        "axis": "z",
+        "scale": 1,
+        "generated": {
+          "nodes": 144,
+          "edges": 294,
+          "faces": 152,
+          "plates": 152,
+          "quads": 132,
+          "triangles": 20
+        },
+        "center": 0,
+        "dimensionsXYZ": [
+          {
+            "cells": 21,
+            "meters": 1.68
+          },
+          {
+            "cells": 14,
+            "meters": 1.12
+          },
+          {
+            "cells": 49,
+            "meters": 3.92
+          }
+        ],
+        "unmatchedNodes": 0,
+        "planarPanels": true,
+        "closedEdgeIncidence": true
+      }
+    ],
+    "browserGenerated": {
+      "level": 12,
+      "axis": "x",
+      "scale": 1,
+      "generated": {
+        "nodes": 26,
+        "edges": 51,
+        "faces": 27,
+        "plates": 27,
+        "quads": 21,
+        "triangles": 6
+      },
+      "center": 0,
+      "dimensionsXYZ": [
+        {
+          "cells": 21,
+          "meters": 1.68
+        },
+        {
+          "cells": 13,
+          "meters": 1.04
+        },
+        {
+          "cells": 50,
+          "meters": 4
+        }
+      ],
+      "unmatchedNodes": 0,
+      "planarPanels": true,
+      "closedEdgeIncidence": true
+    },
+    "faceSubdivisionSymmetryGuaranteed": false
+  }
+}

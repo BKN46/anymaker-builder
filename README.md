@@ -15,6 +15,7 @@ The editor currently provides:
 - Import of paired native `.data` / `.meta` vehicle files for inspection and editing.
 - Export of a paired native JSON `.data` / `.meta` representation, plus a clearly non-game-compatible debug XML export.
 - English UI by default, with a persisted Chinese language option.
+- A local GLB/OBJ/STL model tool under Resources & validation, with filtered outer shells, 13 simplification levels (30–250 target vertices, focused on 70–250), quad-first panels, optional X/Y/Z symmetry, uniform scale, footprint preview, and undoable beam/panel generation. See [model import](doc/07_MODEL_IMPORT.md) for supported geometry and limits.
 
 The published asset set and its source metadata are checked by repository scripts. Component geometry is rendered with neutral diagnostic materials; game materials, camera matching, lighting, dynamic assembly, and visual parity have not been verified.
 

@@ -2,7 +2,12 @@ import test from 'node:test';
 import assert from 'node:assert/strict';
 import { readFileSync, readdirSync } from 'node:fs';
 import { createHash } from 'node:crypto';
-import { meshFixture } from './fixtures.js';
+import { meshFixture, modelGlbFixture } from './fixtures.js';
+import { parseModel } from '../src/assets/model-import.js';
+import { simplifyModel, convertModel, modelBounds, MODEL_VERTEX_TARGETS } from '../src/editor/model-conversion.js';
+import { prepareModelShell } from '../src/assets/model-shell.js';
+import { loftShellSections } from '../src/editor/model-shell-sections.js';
+
 import { parseMesh } from '../src/assets/mesh.js';
 import { History, project, validateDocument, migrateDocument, toIntermediateXml } from '../src/editor/document.js';
 import { copyObjects, mirrorObjects, moveObjects, removeObjects, splitGrid, mergeGrids, gridIds } from '../src/editor/operations.js';
@@ -28,7 +33,7 @@ import { nativePaintColor, nearestNativePaintIndex, officialPaintColors } from '
 import { paintColorValue } from '../src/editor/paint-color.js';
 import { DEFAULT_PROJECT_NAME, normalizeProjectName, projectFileBaseName } from '../src/editor/project-name.js';
 import { isSaveCancelled, saveFilePair, saveSingleFile } from '../src/editor/file-save.js';
-import { mirrorPoint, mirrorSurfaceDirection, sameGridPoint } from '../src/editor/mirror-mode.js';
+import { mirrorPoint, mirrorPositionPreview, mirrorRotation, mirrorSurfaceDirection, moveMirroredNode, sameGridPoint } from '../src/editor/mirror-mode.js';
 import { accessoryOptionsForComponent, createNativeAccessoryItem, defaultAccessoryForPlacement, nativeAccessoryDefinition } from '../src/editor/native-accessories.js';
 import { extensionAxes, extensionControlValue, extensionHandlePosition, extensionVector, stretchMeshPositions, updateExtension, updateExtensionFromControl } from '../src/editor/component-extension.js';
 import { placementOrientation, updatePlacementOrientation } from '../src/editor/placement-orientation.js';
@@ -64,6 +69,37 @@ test('mirror mode reflects integer-grid points on every plane without moving poi
   assert.deepEqual(mirrorSurfaceDirection({ x: .5, y: -.25, z: .75 }, { axis: 'y' }), { x: .5, y: .25, z: .75 });
 });
 
+test('mirror mode conjugates XYZ rotation and moves paired nodes as one topology change', () => {
+  const rotation = { x: .3, y: -.7, z: 1.1 };
+  for (const axis of ['x', 'y', 'z']) {
+    const reflected = mirrorRotation(rotation, { axis });
+    assert.deepEqual(mirrorRotation(reflected, { axis }), rotation);
+    const basis = new THREE.Matrix4().makeScale(...['x', 'y', 'z'].map(key => key === axis ? -1 : 1));
+    const original = new THREE.Matrix4().makeRotationFromEuler(new THREE.Euler(rotation.x, rotation.y, rotation.z, 'XYZ'));
+    const expected = basis.clone().multiply(original).multiply(basis);
+    const actual = new THREE.Matrix4().makeRotationFromEuler(new THREE.Euler(reflected.x, reflected.y, reflected.z, 'XYZ'));
+    assert.ok(expected.elements.every((value, i) => Math.abs(value - actual.elements[i]) < 1e-12));
+    assert.deepEqual(mirrorPositionPreview({ x: .13, y: -.26, z: .39 }, { axis, offset: .08 })[axis], .16 - { x: .13, y: -.26, z: .39 }[axis]);
+  }
+  const state = {
+    nodes: [
+      { id: 'left', position: { x: cell(2), y: 0, z: 0 }, standalone: true },
+      { id: 'right', position: { x: cell(-2), y: 0, z: 0 }, standalone: true },
+      { id: 'far', position: { x: cell(4), y: 0, z: 0 }, standalone: true },
+      { id: 'far-mirror', position: { x: cell(-4), y: 0, z: 0 }, standalone: true },
+    ], edges: [], plates: [], links: [],
+  };
+  const moved = moveMirroredNode(state, 'left', { x: cell(3), y: cell(1), z: 0 }, 'right', { axis: 'x', offset: 0 });
+  assert.deepEqual(moved.nodes.slice(0, 2).map(node => node.position), [{ x: cell(3), y: cell(1), z: 0 }, { x: cell(-3), y: cell(1), z: 0 }]);
+  assert.deepEqual(state.nodes[0].position, { x: cell(2), y: 0, z: 0 });
+  const swapped = moveMirroredNode(state, 'left', { x: cell(-2), y: 0, z: 0 }, 'right', { axis: 'x', offset: 0 });
+  assert.deepEqual(swapped.nodes.slice(0, 2).map(node => node.position.x), [cell(-2), cell(2)]);
+  const merged = moveMirroredNode(state, 'left', { x: 0, y: 0, z: 0 }, 'right', { axis: 'x', offset: 0 });
+  assert.equal(merged.nodes.length, 3);
+  assert.deepEqual(merged.idMap, { left: 'right' });
+  assert.throws(() => moveMirroredNode(state, 'left', { x: cell(1), y: 0, z: 0 }, 'left', { axis: 'x', offset: 0 }), /只能沿平面移动/);
+});
+
 test('subgrid connectivity partitions touching, linked and structural records', () => {
   const box = (x, z) => ({ min: { x, y: 0, z }, max: { x: x + .08, y: .08, z: z + .08 } });
   const groups = partitionSubgrids({
@@ -81,14 +117,15 @@ test('subgrid connectivity partitions touching, linked and structural records', 
   assert.equal(isolated.length, 2);
 });
 
-test('subgrid integrity rejects padded overlap and deep interior nodes', () => {
+test('subgrid connectivity keeps deep interior nodes separate without calling them invalid', () => {
   const box = (x, z) => ({ min: { x, y: 0, z }, max: { x: x + .08, y: .08, z: z + .08 } });
   const result = analyzeSubgridIntegrity({
     components: [{ id: 'a', bounds: { min: { x: 0, y: 0, z: 0 }, max: { x: .24, y: .24, z: .24 } }, gridId: 'grid-1' }, { id: 'b', bounds: box(.4, 0), gridId: 'grid-1' }],
     topology: { nodes: [{ id: 'inside', position: { x: .12, y: .12, z: .12 } }], edges: [], plates: [], links: [] },
   });
   assert.equal(result.groups.filter(group => group.components.length).length, 2);
-  assert.equal(result.diagnostics.some(item => item.code === 'unmounted-node'), true);
+  assert.equal(result.groups.length, 3);
+  assert.equal(result.isValid, true);
   assert.equal(result.diagnostics.some(item => item.code === 'multiple-islands'), true);
 });
 
@@ -109,11 +146,12 @@ test('subgrid integrity prefers definition occupancy over visual bounds', () => 
     }],
     topology: { nodes: [{ id: 'visual-only', position: { x: .8, y: .4, z: .4 } }], edges: [], plates: [], links: [] },
   });
-  assert.equal(result.diagnostics.some(item => item.code === 'unmounted-node'), true);
+  assert.equal(result.groups.length, 2, 'visual bounds must not mount the node to the component');
+  assert.equal(result.isValid, true);
   assert.equal(result.diagnostics.some(item => item.code === 'missing-occupancy-bounds'), false);
 });
 
-test('subgrid integrity reports dangling structure and keeps existing grid IDs unchanged', () => {
+test('subgrid integrity reports missing references and keeps existing grid IDs unchanged', () => {
   const result = analyzeSubgridIntegrity({
     components: [{ id: 'a', gridId: 'grid-2', bounds: { min: { x: 0, y: 0, z: 0 }, max: { x: .08, y: .08, z: .08 } } }],
     topology: {
@@ -123,8 +161,28 @@ test('subgrid integrity reports dangling structure and keeps existing grid IDs u
   });
   assert.equal(result.isValid, false);
   assert.equal(result.diagnostics.some(item => item.code === 'missing-edge-node'), true);
-  assert.equal(result.diagnostics.some(item => item.code === 'dangling-edge'), true);
+  assert.equal(result.diagnostics.some(item => item.code === 'dangling-edge'), false);
   assert.equal(result.groups.find(group => group.components.includes('a')).components[0], 'a');
+});
+
+test('component-free beam and panel shells do not produce mounting errors', () => {
+  const topology = {
+    nodes: [
+      { id: 'a', position: { x: 0, y: 0, z: 0 } },
+      { id: 'b', position: { x: .08, y: 0, z: 0 } },
+      { id: 'c', position: { x: .08, y: .08, z: 0 } },
+      { id: 'd', position: { x: 0, y: .08, z: 0 } },
+    ],
+    edges: [
+      { id: 'ab', a: 'a', b: 'b' }, { id: 'bc', a: 'b', b: 'c' },
+      { id: 'cd', a: 'c', b: 'd' }, { id: 'da', a: 'd', b: 'a' },
+    ],
+    plates: [{ id: 'shell', nodeIds: ['a', 'b', 'c', 'd'] }], links: [],
+  };
+  const result = analyzeSubgridIntegrity({ topology });
+  assert.equal(result.groups.length, 1);
+  assert.equal(result.isValid, true);
+  assert.deepEqual(result.diagnostics, []);
 });
 
 test('subgrid error markers locate only known faulty grid points and merge coincident errors', () => {
@@ -137,15 +195,13 @@ test('subgrid error markers locate only known faulty grid points and merge coinc
     plates: [{ id: 'plate', nodeIds: ['c', 'a'] }],
   };
   const diagnostics = [
-    { code: 'unmounted-node', severity: 'error', entityIds: ['a'] },
-    { code: 'unmounted-node', severity: 'error', entityIds: ['b'] },
-    { code: 'dangling-edge', severity: 'error', entityIds: ['edge', 'a', 'c'] },
+    { code: 'missing-edge-node', severity: 'error', entityIds: ['edge', 'a', 'missing'] },
+    { code: 'missing-plate-node', severity: 'error', entityIds: ['plate', 'b', 'missing'] },
     { code: 'invalid-plate', severity: 'error', entityIds: ['plate'] },
-    { code: 'missing-edge-node', severity: 'error', entityIds: ['edge', 'missing'] },
     { code: 'unreferenced-node', severity: 'warning', entityIds: ['c'] },
   ];
   assert.deepEqual(locatableSubgridErrors(diagnostics, topology), [
-    { position: { x: 0, y: 0, z: 0 }, nodeIds: ['a', 'b'], codes: ['unmounted-node', 'dangling-edge'] },
+    { position: { x: 0, y: 0, z: 0 }, nodeIds: ['a', 'b'], codes: ['missing-edge-node', 'missing-plate-node'] },
     { position: { x: .08, y: 0, z: 0 }, nodeIds: ['c'], codes: ['invalid-plate'] },
   ]);
 });
@@ -1729,4 +1785,246 @@ test('mesh normals are corrected when native winding is reversed', () => {
   assert.equal(correctGeometryNormals(geometry), true);
   assert.deepEqual([...geometry.getAttribute('normal').array].map(value => value === 0 ? 0 : value), [0, 0, 1, 0, 0, 1, 0, 0, 1]);
   geometry.dispose();
+});
+
+const modelArrayBuffer = buffer => buffer.buffer.slice(buffer.byteOffset, buffer.byteOffset + buffer.byteLength);
+
+test('model GLB parser applies hierarchy and reflection without fetching material URLs', () => {
+  const fixture = modelGlbFixture(json => {
+    json.nodes = [{ translation: [3, 2, 1], children: [1] }, { mesh: 0, scale: [-2, 2, 2] }];
+    json.images = [{ uri: 'http://127.0.0.1/private.png' }];
+  });
+  const parsed = parseModel(modelArrayBuffer(fixture), 'quad.GLB');
+  assert.deepEqual(modelBounds(parsed.positions), { min: [1, 2, 1], max: [3, 4, 1], size: [2, 2, 0] });
+  assert.deepEqual([...parsed.indices], [0, 2, 1, 0, 3, 2]);
+  assert.equal(parsed.rawVertices, 4);
+  const result = convertModel(simplifyModel(parsed, 0));
+  assert.deepEqual(result.counts, { nodes: 4, edges: 4, faces: 1, plates: 1, quads: 1, triangles: 0 });
+  assert.ok(result.topology.plates.every(plate => plate.surfaceDirection.z > .99));
+  assert.doesNotThrow(() => validateDocument(project([], result.topology), new Map()));
+});
+
+test('model GLB parser rejects external buffers, cycles, invalid counts, indices and nonfinite positions', () => {
+  const mutations = [
+    json => { json.buffers[0].uri = 'http://127.0.0.1/private.bin'; },
+    json => { json.nodes[0].children = [0]; },
+    json => { json.accessors[0].count = 2000000000; },
+    json => { json.accessors[0].sparse = {}; },
+    json => { json.bufferViews[0].byteOffset = 99999; },
+    json => { json.extensionsRequired = ['KHR_draco_mesh_compression']; },
+    (_json, binary) => { binary.writeUInt16LE(90, 48); },
+    (_json, binary) => { binary.writeFloatLE(NaN, 0); },
+  ];
+  for (const mutate of mutations) assert.throws(() => parseModel(modelArrayBuffer(modelGlbFixture(mutate)), 'bad.glb'));
+  assert.throws(() => parseModel(new ArrayBuffer(33 * 1024 * 1024), 'bad.glb'), /模型过大/);
+  assert.throws(() => parseModel(modelArrayBuffer(modelGlbFixture().subarray(0, 32)), 'bad.glb'));
+});
+
+test('OBJ negative indices and ASCII/binary STL produce welded editable triangles', () => {
+  const obj = Buffer.from('v 0 0 0\nv 1 0 0\nv 1 1 0\nv 0 1 0\nf -4 -3 -2 -1\n');
+  const parsed = parseModel(modelArrayBuffer(obj), 'quad.obj');
+  assert.equal(parsed.rawFaces, 2);
+  assert.equal(convertModel(simplifyModel(parsed, 0)).counts.edges, 4);
+  const ascii = Buffer.from('solid triangle\nfacet normal 0 0 1\nouter loop\nvertex 0 0 0\nvertex 1 0 0\nvertex 0 1 0\nendloop\nendfacet\nendsolid triangle');
+  const binary = Buffer.alloc(134); binary.writeUInt32LE(1, 80); binary.writeFloatLE(1, 92); binary.writeFloatLE(1, 108); binary.writeFloatLE(1, 124);
+  for (const [name, file] of [['ascii.stl', ascii], ['binary.stl', binary]]) {
+    const mesh = simplifyModel(parseModel(modelArrayBuffer(file), name), 0);
+    assert.equal(mesh.indices.length, 3);
+    assert.equal(convertModel(mesh, { panels: false }).topology.plates.length, 0);
+  }
+  assert.throws(() => parseModel(modelArrayBuffer(Buffer.from('v 0 0 0\nf 1 2 3')), 'bad.obj'));
+});
+
+test('model simplification reduces faces; scale, normals, cleanup and bounds match generated topology', () => {
+  const positions = [], indices = [];
+  for (let y = 0; y <= 16; y++) for (let x = 0; x <= 16; x++) positions.push(x / 16, y / 16, 0);
+  for (let y = 0; y < 16; y++) for (let x = 0; x < 16; x++) {
+    const a = y * 17 + x; indices.push(a, a + 1, a + 18, a, a + 18, a + 17);
+  }
+  const mesh = { positions: new Float64Array(positions), indices: new Uint32Array(indices) };
+  const detailed = simplifyModel(mesh, 0), coarse = simplifyModel(mesh, 9);
+  assert.ok(detailed.positions.length / 3 <= 250);
+  assert.ok(coarse.positions.length / 3 <= 70);
+  assert.ok(coarse.indices.length < detailed.indices.length);
+  const small = convertModel(coarse), large = convertModel(coarse, { scale: 2, reverseNormals: true });
+  assert.ok(large.dimensions[0].meters > small.dimensions[0].meters);
+  assert.ok(large.topology.plates.every(plate => plate.surfaceDirection.z < -.99));
+  assert.ok(small.topology.plates.every(plate => plate.surfaceDirection.z > .99));
+  assert.ok(large.topology.nodes.every(node => ['x', 'y', 'z'].every(axis => worldToCell(node.position[axis]) !== null)));
+  const occupied = modelBounds(large.preview.positions);
+  assert.equal(large.dimensions[0].cells, Math.round(occupied.size[0] / CELL_SIZE_WORLD) + 1);
+  assert.doesNotThrow(() => validateDocument(project([], large.topology), new Map()));
+  const duplicated = { ...detailed, indices: new Uint32Array([...detailed.indices, ...detailed.indices, 0, 0, 1]) };
+  assert.equal(convertModel(duplicated).counts.edges, convertModel(detailed).counts.edges);
+  const tiny = convertModel(simplifyModel(parseModel(modelArrayBuffer(modelGlbFixture()), 'quad.glb'), 0), { scale: .01 });
+  assert.equal(tiny.topology, null);
+  assert.match(tiny.error, /格点吸附/);
+});
+
+test('model shell discards enclosed geometry and small protrusions before budgeted quad lofting', () => {
+  const box = (size, offset = [0, 0, 0]) => {
+    const geometry = new THREE.BoxGeometry(...size);
+    const positions = Float64Array.from(geometry.attributes.position.array, (value, i) => value + offset[i % 3]);
+    const indices = new Uint32Array(geometry.index.array); geometry.dispose(); return { positions, indices };
+  };
+  const combine = (a, b) => ({ positions: new Float64Array([...a.positions, ...b.positions]), indices: new Uint32Array([...a.indices, ...b.indices.map(index => index + a.positions.length / 3)]) });
+  const outer = box([2, 1, 4]);
+  const reference = simplifyModel(outer);
+  const interior = simplifyModel(combine(outer, box([1, .5, 2])));
+  assert.deepEqual(interior.positions, reference.positions);
+  assert.deepEqual(interior.indices, reference.indices);
+  const withDetail = simplifyModel(combine(outer, box([.02, .3, .02], [0, .65, 0])));
+  assert.ok(modelBounds(withDetail.positions).max[1] < .6, 'the narrow .8-high protrusion is filtered out');
+  const shell = prepareModelShell(outer), counts = [];
+  assert.deepEqual(MODEL_VERTEX_TARGETS, [250, 230, 210, 190, 170, 150, 130, 110, 90, 70, 50, 40, 30]);
+  for (let level = 0; level < MODEL_VERTEX_TARGETS.length; level++) {
+    const result = convertModel(simplifyModel(shell, level));
+    assert.equal(result.error, null);
+    assert.ok(result.counts.nodes <= 250);
+    if (level < 10) assert.ok(result.counts.nodes >= 70);
+    else assert.ok(result.counts.nodes < 70, 'higher simplification levels must actually reduce the shell');
+    assert.ok(result.counts.quads > result.counts.faces * .75);
+    assert.doesNotThrow(() => validateDocument(project([], result.topology), new Map()));
+    const incidence = new Map();
+    for (const plate of result.topology.plates) plate.nodeIds.forEach((id, i) => {
+      const key = [id, plate.nodeIds[(i + 1) % plate.nodeIds.length]].sort().join(',');
+      incidence.set(key, (incidence.get(key) || 0) + 1);
+    });
+    assert.equal(incidence.size, result.counts.edges, 'no internal triangulation beams');
+    assert.ok([...incidence.values()].every(count => count === 2), 'the exterior shell is closed');
+    counts.push(result.counts.nodes);
+  }
+  assert.ok(counts.every((count, i) => !i || count <= counts[i - 1]));
+  assert.ok(counts[10] > counts[11] && counts[11] > counts[12], 'each extra level produces fewer nodes');
+});
+
+test('narrow shell tips keep distinct panel corners and outward native winding', () => {
+  const section = (at, minU, maxU, minV, maxV) => ({
+    at, minU, maxU, minV, maxV,
+    minSum: minU + minV, maxSum: maxU + maxV,
+    minDiff: minU - maxV, maxDiff: maxU - minV,
+  });
+  const profile = { axis: 2, u: 0, v: 1, sections: [
+    section(-2, -1, 1, 0, 1),
+    section(0, -.8, .8, .1, .9),
+    section(2, -.04, .04, .49, .51),
+  ] };
+  const mesh = { ...loftShellSections(profile), profile, sourceBounds: { min: [-1, 0, -2], max: [1, 1, 2], size: [2, 1, 4] } };
+  const result = convertModel(mesh, { symmetryAxis: 'x' });
+  assert.equal(result.error, null);
+  assert.equal(result.counts.triangles, 0);
+  const points = new Map(result.topology.nodes.map(node => [node.id, node.position]));
+  for (const edge of result.topology.edges) {
+    const a = points.get(edge.a), b = points.get(edge.b);
+    assert.ok(Math.hypot(a.x - b.x, a.y - b.y, a.z - b.z) >= 2 * CELL_SIZE_WORLD - 1e-9);
+  }
+  const native = toNativePairFromEditor(project([], result.topology)).data.vehicles.vehicles[0];
+  const nativePoints = new Map(native.nodes.map(node => [node.id, node.pos]));
+  let signedVolume = 0;
+  for (const plate of native.plates) {
+    const corners = plate.nodes.map(id => nativePoints.get(id));
+    for (let i = 1; i < corners.length - 1; i++) {
+      const [a, b, c] = [corners[0], corners[i], corners[i + 1]];
+      signedVolume += (a[0] * (b[1] * c[2] - b[2] * c[1])
+        + a[1] * (b[2] * c[0] - b[0] * c[2])
+        + a[2] * (b[0] * c[1] - b[1] * c[0])) / 6;
+    }
+  }
+  assert.ok(signedVolume > 0, 'native face loops still point outward after X reflection');
+});
+
+test('tilted open surfaces retain geometry and quad merging respects winding and grid planarity', () => {
+  const mesh = parseModel(modelArrayBuffer(modelGlbFixture(json => { json.nodes[0].rotation = [Math.sin(Math.PI / 8), 0, 0, Math.cos(Math.PI / 8)]; })), 'tilted.glb');
+  const shell = prepareModelShell(mesh);
+  assert.equal(shell.shellStats.planar, true);
+  const result = convertModel(simplifyModel(shell));
+  assert.equal(result.counts.quads, 1);
+  assert.equal(result.counts.edges, 4);
+  assert.equal(result.topology.plates[0].nodeIds.length, 4);
+  assert.doesNotThrow(() => validateDocument(project([], result.topology), new Map()));
+  assert.ok(result.topology.plates[0].surfaceDirection.z > 0);
+  const dense = new THREE.PlaneGeometry(4, 4, 64, 64);
+  const reduced = simplifyModel({ positions: new Float64Array(dense.attributes.position.array), indices: new Uint32Array(dense.index.array) });
+  dense.dispose();
+  assert.ok(reduced.positions.length / 3 <= 150);
+  const converted = convertModel(reduced);
+  assert.equal(converted.error, null);
+  assert.doesNotThrow(() => validateDocument(project([], converted.topology), new Map()));
+});
+
+function assertModelSymmetry(result, axis) {
+  assert.equal(result.error, null);
+  const axisIndex = ['x', 'y', 'z'].indexOf(axis), center = worldToCell(result.symmetry.coordinate);
+  const points = result.topology.nodes.map(node => ['x', 'y', 'z'].map(key => worldToCell(node.position[key])));
+  assert.ok(points.every(point => point.every(value => value !== null)));
+  const keys = new Set(points.map(point => point.join(',')));
+  assert.equal(keys.size, points.length, 'no duplicate seam nodes');
+  for (const point of points) {
+    const reflected = point.map((value, i) => i === axisIndex ? 2 * center - value : value);
+    assert.ok(keys.has(reflected.join(',')), `missing ${axis} counterpart of ${point}`);
+  }
+  const referenced = new Set(result.topology.edges.flatMap(edge => [edge.a, edge.b]));
+  assert.equal(referenced.size, points.length, 'all symmetric nodes participate in the structure');
+  assert.doesNotThrow(() => validateDocument(project([], result.topology), new Map()));
+}
+
+test('model symmetry fits asymmetric shells in all axes without breaking budgets, quads or cached geometry', () => {
+  const geometry = new THREE.BoxGeometry(2, 1, 4, 4, 2, 8);
+  const original = Array.from(geometry.attributes.position.array);
+  const asymmetric = [];
+  for (let i = 0; i < original.length; i += 3) {
+    const [x, y, z] = original.slice(i, i + 3);
+    asymmetric.push(x * (1 + .08 * z) + .12 * z * z + .1 * y, y + .1 * z, z);
+  }
+  for (let rotate = 0; rotate < 3; rotate++) {
+    const positions = asymmetric.map((_, i) => asymmetric[Math.floor(i / 3) * 3 + (i + rotate) % 3]);
+    const shell = prepareModelShell({ positions: new Float64Array(positions), indices: new Uint32Array(geometry.index.array) });
+    for (const level of [0, 5, 9, 10, 11, 12]) {
+      const mesh = simplifyModel(shell, level), saved = structuredClone(mesh), off = convertModel(mesh);
+      for (const axis of ['x', 'y', 'z']) for (const scale of [1, 1.02, 1.37]) {
+        const result = convertModel(mesh, { symmetryAxis: axis, scale });
+        assertModelSymmetry(result, axis);
+        assert.ok(result.counts.nodes >= (level < 10 ? 70 : 20) && result.counts.nodes <= (level < 10 ? 250 : 70));
+        assert.ok(result.counts.quads > result.counts.faces * .75);
+        assert.equal(result.preview.adjustedVertices, 0);
+        const incidence = new Map();
+        for (const plate of result.topology.plates) plate.nodeIds.forEach((id, i) => {
+          const key = [id, plate.nodeIds[(i + 1) % plate.nodeIds.length]].sort().join(',');
+          incidence.set(key, (incidence.get(key) || 0) + 1);
+        });
+        assert.ok([...incidence.values()].every(count => count === 2), 'symmetric shell stays closed');
+        if (axis === 'y') assert.ok(result.symmetry.coordinate > 0, 'Y symmetry uses the model center, not ground level');
+      }
+      assert.deepEqual(mesh, saved, 'conversion does not mutate the reduced mesh or profile');
+      assert.deepEqual(convertModel(mesh, { symmetryAxis: null }), off, 'turning symmetry off restores the prior result');
+    }
+  }
+  geometry.dispose();
+});
+
+test('model symmetry clips open surfaces, welds the seam and reflects normals', () => {
+  const mesh = simplifyModel(parseModel(modelArrayBuffer(modelGlbFixture((_json, binary) => {
+    binary.writeFloatLE(.7, 24); binary.writeFloatLE(.6, 28); binary.writeFloatLE(.2, 36);
+  })), 'asymmetric.glb'));
+  const off = convertModel(mesh), saved = structuredClone(mesh);
+  assert.equal(off.counts.nodes, 4);
+  for (const axis of ['x', 'y', 'z']) for (const scale of [.5, 1, 1.01, 1.37]) {
+    const result = convertModel(mesh, { symmetryAxis: axis, scale });
+    assertModelSymmetry(result, axis);
+    assert.ok(result.topology.plates.every(plate => plate.surfaceDirection.z > .99));
+    const reversed = convertModel(mesh, { symmetryAxis: axis, scale, reverseNormals: true });
+    assert.deepEqual(reversed.topology.nodes, result.topology.nodes);
+    assert.ok(reversed.topology.plates.every(plate => plate.surfaceDirection.z < -.99));
+  }
+  const beamOnly = convertModel(mesh, { symmetryAxis: 'x', panels: false });
+  assertModelSymmetry(beamOnly, 'x');
+  assert.equal(beamOnly.counts.plates, 0);
+  assert.deepEqual(mesh, saved);
+  assert.deepEqual(convertModel(mesh), off);
+  for (const invalid of ['', 'xy', 'X', 0, false, {}]) assert.throws(() => convertModel(mesh, { symmetryAxis: invalid }), /对称方向/);
+
+  const tilted = simplifyModel(parseModel(modelArrayBuffer(modelGlbFixture(json => {
+    json.nodes[0].rotation = [Math.sin(Math.PI / 8), 0, 0, Math.cos(Math.PI / 8)];
+  })), 'tilted.glb'));
+  for (const axis of ['x', 'y', 'z']) assertModelSymmetry(convertModel(tilted, { symmetryAxis: axis }), axis);
 });

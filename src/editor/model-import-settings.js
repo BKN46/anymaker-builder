@@ -1,0 +1,2 @@
+export const MODEL_VERTEX_TARGETS = [250, 230, 210, 190, 170, 150, 130, 110, 90, 70, 50, 40, 30];
+export const DEFAULT_MODEL_LEVEL = 5;

@@ -21,3 +21,24 @@ export function meshFixture({ layout = 36, parts = 1 } = {}) {
   chunks.push(Buffer.alloc(8));
   return Buffer.concat(chunks);
 }
+// Small self-contained glTF 2.0 quad; mutation supports parser boundary tests.
+export function modelGlbFixture(mutate = () => {}) {
+  const binary = Buffer.alloc(60);
+  [0, 0, 0, 1, 0, 0, 1, 1, 0, 0, 1, 0].forEach((value, i) => binary.writeFloatLE(value, i * 4));
+  [0, 1, 2, 0, 2, 3].forEach((value, i) => binary.writeUInt16LE(value, 48 + i * 2));
+  const json = {
+    asset: { version: '2.0' }, scene: 0, scenes: [{ nodes: [0] }], nodes: [{ mesh: 0 }],
+    meshes: [{ primitives: [{ attributes: { POSITION: 0 }, indices: 1 }] }],
+    buffers: [{ byteLength: binary.length }],
+    bufferViews: [{ buffer: 0, byteOffset: 0, byteLength: 48 }, { buffer: 0, byteOffset: 48, byteLength: 12 }],
+    accessors: [{ bufferView: 0, componentType: 5126, count: 4, type: 'VEC3' }, { bufferView: 1, componentType: 5123, count: 6, type: 'SCALAR' }],
+  };
+  mutate(json, binary);
+  const text = Buffer.from(JSON.stringify(json));
+  const padded = Buffer.alloc(Math.ceil(text.length / 4) * 4, 32); text.copy(padded);
+  const buffer = Buffer.alloc(28 + padded.length + binary.length);
+  buffer.writeUInt32LE(0x46546c67, 0); buffer.writeUInt32LE(2, 4); buffer.writeUInt32LE(buffer.length, 8);
+  buffer.writeUInt32LE(padded.length, 12); buffer.writeUInt32LE(0x4e4f534a, 16); padded.copy(buffer, 20);
+  buffer.writeUInt32LE(binary.length, 20 + padded.length); buffer.writeUInt32LE(0x004e4942, 24 + padded.length); binary.copy(buffer, 28 + padded.length);
+  return buffer;
+}

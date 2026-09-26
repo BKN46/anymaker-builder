@@ -32,13 +32,14 @@ import { editorMessages } from './editor/ui-messages.js';
 import { isSaveCancelled, saveFilePair, saveSingleFile } from './editor/file-save.js';
 import { connectionNetworkLabel, connectionPortRoleLabel } from './editor/connection-port-labels.js';
 import { connectionRouteCellPosition, logicNodePort, logicNodePortsForNetwork, logicNodeCellPosition, orientMechanicalLink } from './editor/connection-ports.js';
-import { mirrorPoint, mirrorSurfaceDirection, sameGridPoint } from './editor/mirror-mode.js';
+import { mirrorPoint, mirrorPositionPreview, mirrorRotation, mirrorSurfaceDirection, moveMirroredNode, sameGridPoint } from './editor/mirror-mode.js';
 import { gridSelectionClosure } from './editor/selection-closure.js';
 import { analyzeSubgridIntegrity } from './editor/subgrid-connectivity.js';
 import { locatableSubgridErrors } from './editor/subgrid-error-markers.js';
 import { createMicrocontrollerVariable, microcontrollerState, updateMicrocontrollerState } from './editor/microcontroller.js';
 import { TANK_TYPES, tankCapacityCells, tankCapacityLiters } from './editor/tank-capacity.js';
 import { stageImportedSubgrid, translateImportedSubgrid, translateSubgridTopology } from './editor/imported-subgrid.js';
+import { mountModelImportTool } from './editor/model-import-tool.js';
 import './style.css';
 
 addMessages(editorMessages);
@@ -86,7 +87,7 @@ let connectionDraft = null;
 let selectedTopologyNode = null;
 let selectedLinkPoint = null;
 let selectedTopologyIds = new Set();
-const selectableKinds = { component: true, structure: false, node: true, edge: true, plate: true, link: true };
+const selectableKinds = { component: true, structure: true, node: true, edge: true, plate: true, link: true };
 const connectionVisibility = { ...settings.connectionVisibility };
 let transparencyGroups = [];
 let nodeMoveFrame = null;
@@ -101,6 +102,7 @@ let multiTransform = null;
 let importedSubgridDraft = null;
 let selectedSubgridId = null;
 let subgridTransform = null;
+let componentMirrorTransform = null;
 let referencePreview = false;
 let hoveredObject = null;
 let paintColorPicking = false;
@@ -116,7 +118,7 @@ const thumbnailLargeRequests = new Map();
 let modelPreviewCard = null;
 let modelPreviewRequestId = 0;
 let hoveredConnectionPort = null;
-let mirrorMode = { active: false, axis: 'x', offset: 0 };
+let mirrorMode = { active: false, axis: 'x', offset: 0, hidePlane: false };
 let mirrorGuideDrag = false;
 let subgridToolbarOpen = false;
 let selectionAction = null;
@@ -217,8 +219,8 @@ transparencyToolbar.innerHTML = '<strong data-i18n="隐藏组"></strong><label c
 applyTranslations(transparencyToolbar);
 
 const mirrorToolbar = document.createElement('section');
-mirrorToolbar.id = 'mirror-toolbar'; mirrorToolbar.className = 'context-toolbar mirror-toolbar'; mirrorToolbar.hidden = true;
-mirrorToolbar.innerHTML = '<strong data-i18n="镜像模式"></strong><div class="mirror-plane-buttons" role="group" data-i18n-aria-label="镜像平面"><button type="button" data-mirror-axis="x">YZ · X</button><button type="button" data-mirror-axis="y">XZ · Y</button><button type="button" data-mirror-axis="z">XY · Z</button></div><label class="mirror-offset"><span data-i18n="平面位置"></span><input id="mirror-offset-range" type="range" min="-500" max="500" step="1" value="0" data-i18n-aria-label="镜像平面位置"><input id="mirror-offset-input" type="number" min="-125000" max="125000" step="1" value="0" data-i18n-aria-label="镜像平面位置"> <small data-i18n="格"></small></label><span class="context-help" data-i18n="拖动蓝色手柄或滑块，沿镜像平面法向移动。"></span>';
+mirrorToolbar.id = 'mirror-toolbar'; mirrorToolbar.className = 'mirror-toolbar'; mirrorToolbar.hidden = true;
+mirrorToolbar.innerHTML = '<strong data-i18n="镜像模式"></strong><div class="mirror-plane-buttons" role="group" data-i18n-aria-label="镜像平面"><button type="button" data-mirror-axis="x">YZ · X</button><button type="button" data-mirror-axis="y">XZ · Y</button><button type="button" data-mirror-axis="z">XY · Z</button></div><label class="mirror-offset"><span data-i18n="平面位置"></span><input id="mirror-offset-range" type="range" min="-500" max="500" step="1" value="0" data-i18n-aria-label="镜像平面位置"><input id="mirror-offset-input" type="number" min="-125000" max="125000" step="1" value="0" data-i18n-aria-label="镜像平面位置"> <small data-i18n="格"></small></label><label class="mirror-plane-visibility"><input id="mirror-hide-plane" type="checkbox"><span data-i18n="隐藏镜像平面"></span></label>';
 applyTranslations(mirrorToolbar);
 
 const edgeToolbar = document.createElement('section');
@@ -233,7 +235,7 @@ applyTranslations(subgridToolbar);
 
 const selectionFilterToolbar = document.createElement('section');
 selectionFilterToolbar.id = 'selection-filter-toolbar'; selectionFilterToolbar.className = 'context-toolbar selection-filter-toolbar';
-selectionFilterToolbar.innerHTML = '<button id="selection-filter-toggle" type="button" class="selection-filter-toggle" aria-expanded="false" aria-controls="selection-filter-options" data-i18n="可选择对象" data-i18n-title="展开可选择对象" data-i18n-aria-label="展开可选择对象"></button><div id="selection-filter-options" class="selection-filter-options" hidden><label><input type="checkbox" data-selectable-kind="component" checked><span data-i18n="组件"></span></label><label><input type="checkbox" data-selectable-kind="structure"><span data-i18n="结构对象"></span></label><label><input type="checkbox" data-selectable-kind="node" checked><span data-i18n="节点"></span></label><label><input type="checkbox" data-selectable-kind="edge" checked><span data-i18n="梁"></span></label><label><input type="checkbox" data-selectable-kind="plate" checked><span data-i18n="面板"></span></label><label><input type="checkbox" data-selectable-kind="link" checked><span data-i18n="连接"></span></label></div><button id="connection-visibility-toggle" type="button" class="selection-filter-toggle" aria-expanded="false" aria-controls="connection-visibility-options" data-i18n="显示连接" data-i18n-title="展开显示连接" data-i18n-aria-label="展开显示连接"></button><div id="connection-visibility-options" class="selection-filter-options" hidden><label><input type="checkbox" data-connection-kind="electric" checked><span data-i18n="电线"></span></label><label><input type="checkbox" data-connection-kind="mechanical" checked><span data-i18n="机械连接"></span></label><label><input type="checkbox" data-connection-kind="liquid" checked><span data-i18n="液体管线"></span></label><label><input type="checkbox" data-connection-kind="gas" checked><span data-i18n="气体管线"></span></label><label><input type="checkbox" data-connection-kind="belt" checked><span data-i18n="皮带"></span></label><label><input type="checkbox" data-connection-kind="data" checked><span data-i18n="数据线"></span></label></div>';
+selectionFilterToolbar.innerHTML = '<button id="selection-filter-toggle" type="button" class="selection-filter-toggle" aria-expanded="false" aria-controls="selection-filter-options" data-i18n="可选择对象" data-i18n-title="展开可选择对象" data-i18n-aria-label="展开可选择对象"></button><div id="selection-filter-options" class="selection-filter-options" hidden><label><input type="checkbox" data-selectable-kind="component" checked><span data-i18n="组件"></span></label><label><input type="checkbox" data-selectable-kind="structure" checked><span data-i18n="结构对象"></span></label><label><input type="checkbox" data-selectable-kind="node" checked><span data-i18n="节点"></span></label><label><input type="checkbox" data-selectable-kind="edge" checked><span data-i18n="梁"></span></label><label><input type="checkbox" data-selectable-kind="plate" checked><span data-i18n="面板"></span></label><label><input type="checkbox" data-selectable-kind="link" checked><span data-i18n="连接"></span></label></div><button id="connection-visibility-toggle" type="button" class="selection-filter-toggle" aria-expanded="false" aria-controls="connection-visibility-options" data-i18n="显示连接" data-i18n-title="展开显示连接" data-i18n-aria-label="展开显示连接"></button><div id="connection-visibility-options" class="selection-filter-options" hidden><label><input type="checkbox" data-connection-kind="electric" checked><span data-i18n="电线"></span></label><label><input type="checkbox" data-connection-kind="mechanical" checked><span data-i18n="机械连接"></span></label><label><input type="checkbox" data-connection-kind="liquid" checked><span data-i18n="液体管线"></span></label><label><input type="checkbox" data-connection-kind="gas" checked><span data-i18n="气体管线"></span></label><label><input type="checkbox" data-connection-kind="belt" checked><span data-i18n="皮带"></span></label><label><input type="checkbox" data-connection-kind="data" checked><span data-i18n="数据线"></span></label></div>';
 applyTranslations(selectionFilterToolbar);
 const selectionFilterToggle = selectionFilterToolbar.querySelector('#selection-filter-toggle');
 const selectionFilterOptions = selectionFilterToolbar.querySelector('#selection-filter-options');
@@ -271,7 +273,7 @@ function setSelectionAction(value) {
 }
 $('#box-select-action').onclick = () => setSelectionAction('box');
 $('#closure-select-action').onclick = () => setSelectionAction('closure');
-$('#tools').after(mirrorToolbar);
+selectionFilterToolbar.append(mirrorToolbar);
 for (const input of selectionFilterToolbar.querySelectorAll('[data-selectable-kind]')) {
   input.addEventListener('change', () => {
     selectableKinds[input.dataset.selectableKind] = input.checked;
@@ -599,12 +601,15 @@ transform.addEventListener('dragging-changed', e => {
       }
     }
     if (multiTransform) return;
+    const component = transform.object?.userData?.id ? transform.object : null;
+    const counterpart = component && ['translate', 'rotate'].includes(tool) ? mirroredComponentObject(component) : null;
+    componentMirrorTransform = counterpart ? mirrorTransformItem(component, counterpart) : null;
     const nodeId = transform.object?.userData?.topology === 'node' ? transform.object.userData.nodeId : null;
     const linkPoint = transform.object?.userData?.topology === 'link-point' ? {
       linkId: transform.object.userData.linkId,
       pointIndex: transform.object.userData.linkPointIndex,
     } : null;
-    topologyTransform = tool === 'translate' ? (nodeId ? { nodeId } : linkPoint) : null;
+    topologyTransform = tool === 'translate' ? (nodeId ? { nodeId, counterpartId: mirroredNodeId(nodeId), plane: { ...mirrorMode } } : linkPoint) : null;
     return;
   }
   if (subgridTransform) {
@@ -634,13 +639,13 @@ transform.addEventListener('dragging-changed', e => {
       });
     } else setTool(tool);
   } else if (topologyTransform) {
-    const { nodeId, linkId, pointIndex } = topologyTransform;
+    const { nodeId, linkId, pointIndex, counterpartId, plane } = topologyTransform;
     topologyTransform = null;
     try {
       if (nodeId) {
         const point = quantizeWorldVector(transform.object?.position);
         if (!point) throw new Error('节点位置超出整数格范围');
-        const result = moveNodeAndMerge(topology, nodeId, point);
+        const result = moveMirroredNode(topology, nodeId, point, counterpartId, plane);
         commitTopology(result, result.merged ? '已移动并合并节点' : '已移动节点');
         selectTopologyNode(result.idMap[nodeId] || nodeId);
       } else if (linkId) {
@@ -651,15 +656,26 @@ transform.addEventListener('dragging-changed', e => {
         commitTopology({ ...topology, links: result.links }, '已移动连接折点');
         selectLinkPoint(linkId, pointIndex);
       }
-    } catch (error) { reportError(nodeId ? '移动节点失败：{error}' : '移动连接折点失败：{error}', error); }
+    } catch (error) {
+      if (nodeId) {
+        replaceTopologyVisual(buildTopologyVisual(topology, componentEntries()));
+        selectTopologyNode(nodeId);
+      }
+      reportError(nodeId ? '移动节点失败：{error}' : '移动连接折点失败：{error}', error);
+    }
   } else if (multiTransform) {
     const active = multiTransform;
     updateMultiTransform();
     clearMultiTransform();
     const changed = active.items.some(item => item.object.position.distanceTo(item.position) > 1e-9 || 1 - Math.abs(item.object.quaternion.dot(item.quaternion)) > 1e-9);
-    if (changed) commit(active.mode === 'rotate' ? '旋转选中组件' : '移动选中组件');
+    if (changed) commitMirroredTransforms(active.items, active.mode === 'rotate' ? '旋转选中组件' : '移动选中组件');
     inspect();
-  } else { commit(); inspect(); }
+  } else {
+    const active = componentMirrorTransform; componentMirrorTransform = null;
+    if (active) commitMirroredTransforms([active], tool === 'rotate' ? '旋转选中组件' : '移动选中组件');
+    else commit();
+    inspect();
+  }
 });
 transform.addEventListener('objectChange', () => {
   if (subgridTransform) {
@@ -688,8 +704,12 @@ transform.addEventListener('objectChange', () => {
     return;
   }
   if (multiTransform) { updateMultiTransform(); return; }
+  if (componentMirrorTransform) { syncMirroredComponent(componentMirrorTransform); return; }
   if (!topologyTransform) return;
-  if (topologyTransform.nodeId && transform.object?.userData?.nodeId === topologyTransform.nodeId) updateTopologyPreview(topologyTransform.nodeId, transform.object.position);
+  if (topologyTransform.nodeId && transform.object?.userData?.nodeId === topologyTransform.nodeId) {
+    const { nodeId, counterpartId, plane } = topologyTransform;
+    updateTopologyPreview(nodeId, transform.object.position, counterpartId, counterpartId && counterpartId !== nodeId ? mirrorPositionPreview(transform.object.position, plane) : null);
+  }
   if (topologyTransform.linkId && transform.object?.userData?.linkId === topologyTransform.linkId) updateLinkPointPreview(topologyTransform.linkId, topologyTransform.pointIndex, transform.object.position);
 });
 const hemisphereLight = new THREE.HemisphereLight(0xc5e4ff, 0x26384e, 1.1);
@@ -1053,16 +1073,17 @@ function buildTopologyVisual(state, components = new Map()) {
 function topologyNodeMarker(nodeId) {
   return topologyLayer.children.find(object => object.userData.topology === 'node' && object.userData.nodeId === nodeId) || null;
 }
-function updateTopologyPreview(nodeId, value) {
+function updateTopologyPreview(nodeId, value, counterpartId = null, counterpartValue = null) {
   const point = new THREE.Vector3(value.x, value.y, value.z);
   const positions = new Map(topology.nodes.map(node => [node.id, new THREE.Vector3(node.position.x, node.position.y, node.position.z)]));
   positions.set(nodeId, point);
+  if (counterpartId && counterpartId !== nodeId && counterpartValue) positions.set(counterpartId, new THREE.Vector3(counterpartValue.x, counterpartValue.y, counterpartValue.z));
   for (const object of topologyLayer.children) {
-    if (object.userData.topology === 'node' && object.userData.nodeId === nodeId) object.position.copy(point);
+    if (object.userData.topology === 'node' && positions.has(object.userData.nodeId)) object.position.copy(positions.get(object.userData.nodeId));
     if (object.userData.topology === 'edge') {
       const edge = topology.edges.find(value => value.id === object.userData.edgeId);
       if (edge && !object.userData.topologyJunction) updateEdgeMesh(object, positions.get(edge.a), positions.get(edge.b), { size: edge.size });
-      if (object.userData.topologyJunction && object.userData.nodeId === nodeId) object.position.copy(point);
+      if (object.userData.topologyJunction && positions.has(object.userData.nodeId)) object.position.copy(positions.get(object.userData.nodeId));
     }
     if (object.userData.topology === 'plate') {
       const nodeIds = object.userData.nodeIds;
@@ -1488,6 +1509,39 @@ function clearMultiTransform() {
   multiTransform.pivot.removeFromParent();
   multiTransform = null;
 }
+function mirrorTransformItem(object, counterpart = null) {
+  return {
+    object, counterpart, plane: { ...mirrorMode },
+    position: object.position.clone(), quaternion: object.quaternion.clone(),
+    counterpartPosition: counterpart?.position.clone(), counterpartQuaternion: counterpart?.quaternion.clone(),
+  };
+}
+function syncMirroredComponent(item, snap = false) {
+  if (!item.counterpart) return;
+  const point = snap ? quantizeWorldVector(item.object.position) : item.object.position;
+  if (!point) throw new Error('组件位置超出整数格范围');
+  if (snap) item.object.position.set(point.x, point.y, point.z);
+  const reflected = snap ? mirrorPoint(point, item.plane) : mirrorPositionPreview(point, item.plane);
+  const rotation = mirrorRotation(item.object.rotation, item.plane);
+  item.counterpart.position.set(reflected.x, reflected.y, reflected.z);
+  item.counterpart.rotation.set(rotation.x, rotation.y, rotation.z);
+}
+function commitMirroredTransforms(items, label) {
+  try {
+    items.forEach(item => syncMirroredComponent(item, true));
+    commit(label);
+  } catch (error) {
+    for (const item of items) {
+      item.object.position.copy(item.position); item.object.quaternion.copy(item.quaternion);
+      if (item.counterpart) {
+        item.counterpart.position.copy(item.counterpartPosition);
+        item.counterpart.quaternion.copy(item.counterpartQuaternion);
+      }
+    }
+    reportError('镜像变换失败：{error}', error);
+    setTool(tool);
+  }
+}
 function attachMultiTransform() {
   const items = selectedObjects();
   if (items.length < 2 || selectedTopologyIds.size || referencePreview) return false;
@@ -1500,11 +1554,21 @@ function attachMultiTransform() {
   pivot.name = 'multi-component-transform-pivot';
   pivot.position.set(center.x, center.y, center.z);
   scene.add(pivot);
+  const selected = new Set(items.map(object => object.userData.id)), handled = new Set();
+  const ordered = mirrorMode.active ? [...items].sort((a, b) => Number(!!a.userData.mirror) - Number(!!b.userData.mirror)) : items;
+  const drivers = [];
+  for (const object of ordered) {
+    if (handled.has(object.userData.id)) continue;
+    const counterpart = mirrorMode.active ? mirroredComponentObject(object) : null;
+    drivers.push(mirrorTransformItem(object, counterpart));
+    handled.add(object.userData.id);
+    if (counterpart && selected.has(counterpart.userData.id)) handled.add(counterpart.userData.id);
+  }
   multiTransform = {
     pivot,
     initialPosition: pivot.position.clone(),
     initialQuaternion: pivot.quaternion.clone(),
-    items: items.map(object => ({ object, position: object.position.clone(), quaternion: object.quaternion.clone() })),
+    items: drivers,
     mode: tool,
   };
   transform.setSpace('world');
@@ -1525,6 +1589,7 @@ function updateMultiTransform() {
       item.object.position.copy(item.position).sub(initialPosition).applyQuaternion(rotation).add(initialPosition).add(delta);
       item.object.quaternion.copy(rotation).multiply(item.quaternion);
     }
+    syncMirroredComponent(item);
   }
 }
 function selectSubgridForMove(gridId) {
@@ -1818,13 +1883,10 @@ const subgridDiagnosticReasons = {
   'missing-edge-node': '梁引用了不存在的节点。',
   'invalid-plate': '面板少于三个不同节点。',
   'missing-plate-node': '面板引用了不存在的节点。',
-  'unmounted-node': '节点未连接到组件的安装边界。',
   'unreferenced-node': '节点未被梁或面板引用。',
   'missing-link-component': '连接引用了不存在的组件。',
   'cross-grid-link': '连接跨越了现有子网格。',
-  'dangling-edge': '梁的端点未连接到组件。',
   'cross-grid-edge': '梁跨越了现有子网格。',
-  'dangling-plate': '面板连接到组件的节点少于三个。',
   'cross-grid-plate': '面板跨越了现有子网格。',
   'mixed-grid-island': '同一结构岛包含多个现有子网格。',
 };
@@ -2237,6 +2299,7 @@ async function restore(items, nextTopology = topology, nextTransparencyGroups = 
       const definition = await catalog.definition(type); definitions.set(type, definition);
     }));
     next.push(...await Promise.all(candidate.objects.map(data => createObject(data))));
+    visual = buildTopologyVisual(candidate.topology, componentEntries(candidate.objects));
   } catch (error) { next.forEach(disposeObject); throw error; }
   cancelTopologyDraft();
   transform.detach(); selected = null; selectedIds.clear(); selectedTopologyIds.clear(); selectedSubgridId = null;
@@ -2249,7 +2312,6 @@ async function restore(items, nextTopology = topology, nextTransparencyGroups = 
   subgrids = candidate.grids || [{ id: 'grid-1' }];
   if (!subgrids.some(grid => grid.id === activeGridId)) activeGridId = subgrids[0].id;
   applySubgridViewMaterials();
-  visual = buildTopologyVisual(candidate.topology, componentEntries(candidate.objects));
   replaceTopologyVisual(visual);
   refreshConnectionPorts();
   inspect(); refresh(); renderSubgridList();
@@ -2323,6 +2385,7 @@ async function place(point) {
         },
       } : {}),
       position: reflectedPosition,
+      rotation: mirrorRotation(source.rotation, mirrorMode),
       mirror: { axis: mirrorMode.axis, offset: mirrorMode.offset },
     });
     scene.add(mirror); objects.push(mirror);
@@ -2361,10 +2424,10 @@ async function placeImportedSubgrid(point) {
     status('已放置导入载具子网格 {id}；可直接拖动移动手柄调整', { id: placed.gridId });
   }
 }
-async function remove(object) {
+async function remove(object, { selectedGroup = true } = {}) {
   if (!object) return;
   const items = snapshot();
-  const ids = new Set(selectedIds.has(object.userData.id) ? selectedObjectIds() : [object.userData.id]);
+  const ids = new Set(selectedGroup && selectedIds.has(object.userData.id) ? selectedObjectIds() : [object.userData.id]);
   if (mirrorMode.active) for (const id of [...ids]) {
     const counterpart = mirroredComponentId(id, items);
     if (counterpart) ids.add(counterpart);
@@ -2392,7 +2455,8 @@ function structuralCopy() {
   });
 }
 function updateMirrorGuide() {
-  mirrorGuide.visible = mirrorMode.active && !referencePreview;
+  mirrorGuide.visible = mirrorMode.active && !mirrorMode.hidePlane && !referencePreview;
+  $('#viewport').dataset.mirrorGuideVisible = String(mirrorGuide.visible);
   mirrorGuide.position.set(0, 0, 0);
   mirrorGuide.rotation.set(0, 0, 0);
   mirrorGuide.position[mirrorMode.axis] = mirrorMode.offset;
@@ -2455,8 +2519,15 @@ function mirroredComponentId(componentId, items = snapshot()) {
   const source = items.find(item => item.id === componentId);
   if (!source || source.nativeProjected) return null;
   const position = mirroredTopologyPoint(source.position);
-  const match = items.find(item => item.type === source.type && item.gridId === source.gridId && sameGridPoint(item.position, position));
+  if (sameGridPoint(source.position, position)) return null;
+  const isCurrentMirror = item => item.mirror?.axis === mirrorMode.axis && item.mirror.offset === mirrorMode.offset;
+  const match = items.find(item => item.id !== source.id && item.type === source.type && item.gridId === source.gridId
+    && sameGridPoint(item.position, position) && (isCurrentMirror(source) ? !item.mirror : isCurrentMirror(item)));
   return match?.id || null;
+}
+function mirroredComponentObject(object) {
+  const id = mirroredComponentId(object.userData.id);
+  return id ? objects.find(item => item.userData.id === id) || null : null;
 }
 function mirroredNodeId(nodeId, state = topology) {
   if (!mirrorMode.active) return null;
@@ -2538,6 +2609,7 @@ function updateMirrorToolbar() {
   for (const button of mirrorToolbar.querySelectorAll('[data-mirror-axis]')) button.classList.toggle('active', button.dataset.mirrorAxis === mirrorMode.axis);
   $('#mirror-offset-input').value = String(cells);
   $('#mirror-offset-range').value = String(Math.max(-500, Math.min(500, cells)));
+  $('#mirror-hide-plane').checked = mirrorMode.hidePlane;
   applyTranslations($('#mirror-action'));
   updateMirrorGuide();
 }
@@ -2557,11 +2629,13 @@ function setMirrorOffsetCells(value) {
   if (!Number.isSafeInteger(cells) || Math.abs(cells) > 125000) return;
   mirrorMode = { ...mirrorMode, offset: cellToWorld(cells) };
   updateMirrorToolbar();
+  if (multiTransform) setTool(tool);
 }
 function structuralMirror() {
   if (busy) return;
   mirrorMode = { ...mirrorMode, active: !mirrorMode.active };
   updateMirrorToolbar();
+  if (multiTransform) setTool(tool);
   status(mirrorMode.active ? '镜像模式已开启：后续建造将在镜像平面另一侧同步创建' : '镜像模式已关闭');
 }
 function structuralSplit() {
@@ -2598,10 +2672,15 @@ for (const button of mirrorToolbar.querySelectorAll('[data-mirror-axis]')) {
   button.addEventListener('click', () => {
     mirrorMode = { ...mirrorMode, axis: button.dataset.mirrorAxis };
     updateMirrorToolbar();
+    if (multiTransform) setTool(tool);
   });
 }
 $('#mirror-offset-range').addEventListener('input', event => setMirrorOffsetCells(event.target.value));
 $('#mirror-offset-input').addEventListener('change', event => setMirrorOffsetCells(event.target.value));
+$('#mirror-hide-plane').addEventListener('change', event => {
+  mirrorMode = { ...mirrorMode, hidePlane: event.target.checked };
+  updateMirrorGuide();
+});
 function moveMirrorGuideFromRay() {
   const nearest = raycaster.ray.closestPointToPoint(mirrorGuide.position, new THREE.Vector3());
   const cells = Math.round(nearest[mirrorMode.axis] / CELL_SIZE_WORLD);
@@ -2686,8 +2765,23 @@ function inspect() {
         const value = Number(input.value);
         const invalid = busy || !input.value.trim() || !Number.isFinite(value) || Math.abs(value) > 10000 || (field === 'position' && !object.userData.nativeProjected && !Number.isInteger(value)) || (field === 'scale' && (value <= 0 || value > 100));
         if (invalid) { status('输入超出合法范围'); inspect(); return; }
-        object[field][axis] = field === 'position' ? cellToWorld(value) : field === 'rotation' ? THREE.MathUtils.degToRad(value) : value;
-        commit(); inspect();
+        const counterpart = ['position', 'rotation'].includes(field) ? mirroredComponentObject(object) : null;
+        const item = counterpart ? mirrorTransformItem(object, counterpart) : null;
+        const previous = object[field][axis];
+        try {
+          object[field][axis] = field === 'position' ? cellToWorld(value) : field === 'rotation' ? THREE.MathUtils.degToRad(value) : value;
+          if (item) syncMirroredComponent(item, true);
+          commit();
+        } catch (error) {
+          if (item) {
+            object.position.copy(item.position);
+            object.quaternion.copy(item.quaternion);
+            counterpart.position.copy(item.counterpartPosition);
+            counterpart.quaternion.copy(item.counterpartQuaternion);
+          } else object[field][axis] = previous;
+          reportError('镜像变换失败：{error}', error);
+        }
+        inspect();
       });
       label.append(input); group.append(label);
     }
@@ -3247,77 +3341,7 @@ function pickTopologyNode(includeHidden = false, maxPixels = 22) {
   }
   return result;
 }
-function pickTopology() {
-  const nodeId = pickTopologyNode();
-  if (nodeId) return { kind: 'node', id: nodeId };
-  const surface = pickTopologySurface();
-  if (surface) return surface;
-  if (!selectableKinds.link) return null;
-  const hit = raycaster.intersectObjects(topologyLayer.children.filter(object => object.visible && object.userData.topology === 'link'), true)[0];
-  if (!hit) return null;
-  let object = hit.object;
-  while (object && object.parent !== topologyLayer) object = object.parent;
-  return object?.userData.topology === 'link' ? { kind: 'link', id: object.userData.linkId, point: hit.point, object } : null;
-}
-function pickTopologySurface() {
-  const allowed = ['edge', 'plate'].filter(kind => selectableKinds[kind]);
-  if (!allowed.length) return null;
-  const hits = raycaster.intersectObjects(topologyLayer.children.filter(object => object.visible && allowed.includes(object.userData.topology)), true);
-  // At a perimeter, a plate can be a fraction closer than its supporting
-  // edge. Prefer the edge there so both structure kinds remain selectable.
-  const hit = hits.find(value => value.object.userData.topology === 'edge') || hits[0];
-  const expandedEdge = pickEdgeByScreenTolerance();
-  if (expandedEdge) return expandedEdge;
-  if (!hit) {
-    const rect = renderer.domElement.getBoundingClientRect();
-    const project = value => value.clone().project(camera);
-    const distanceToSegment = (point, a, b) => {
-      const ax = (a.x + 1) * rect.width / 2; const ay = (1 - a.y) * rect.height / 2;
-      const bx = (b.x + 1) * rect.width / 2; const by = (1 - b.y) * rect.height / 2;
-      const px = (point.x + 1) * rect.width / 2; const py = (1 - point.y) * rect.height / 2;
-      const dx = bx - ax; const dy = by - ay; const lengthSq = dx * dx + dy * dy;
-      const t = lengthSq ? Math.max(0, Math.min(1, ((px - ax) * dx + (py - ay) * dy) / lengthSq)) : 0;
-      return Math.hypot(px - (ax + t * dx), py - (ay + t * dy));
-    };
-    let nearest = null;
-    const edgeThreshold = 18;
-    for (const edge of selectableKinds.edge ? topology.edges : []) {
-      if (edge.hidden) continue;
-      const a = topology.nodes.find(node => node.id === edge.a)?.position;
-      const b = topology.nodes.find(node => node.id === edge.b)?.position;
-      if (!a || !b) continue;
-      const distance = distanceToSegment(pointer, project(new THREE.Vector3(a.x, a.y, a.z)), project(new THREE.Vector3(b.x, b.y, b.z)));
-      if (distance <= edgeThreshold && (!nearest || distance < nearest.distance)) nearest = { kind: 'edge', id: edge.id, object: topologyObject('edge', edge.id), distance };
-    }
-    if (nearest) return nearest;
-    if (selectableKinds.plate) {
-      const positions = new Map(topology.nodes.map(node => [node.id, new THREE.Vector3(node.position.x, node.position.y, node.position.z)]));
-      for (const plate of topology.plates) {
-        if (plate.hidden) continue;
-        const boundary = plateSurfaceBoundary(plate.nodeIds, positions, {
-          normalOffset: plate.normalOffset ?? CELL_SIZE_WORLD / 2,
-          surfaceDirection: plate.surfaceDirection,
-        }).map(project);
-        if (boundary.length < 3) continue;
-        let inside = false;
-        for (let i = 0, j = boundary.length - 1; i < boundary.length; j = i++) {
-          const xi = (boundary[i].x + 1) * rect.width / 2; const yi = (1 - boundary[i].y) * rect.height / 2;
-          const xj = (boundary[j].x + 1) * rect.width / 2; const yj = (1 - boundary[j].y) * rect.height / 2;
-          const px = (pointer.x + 1) * rect.width / 2; const py = (1 - pointer.y) * rect.height / 2;
-          if ((yi > py) !== (yj > py) && px < (xj - xi) * (py - yi) / ((yj - yi) || 1e-9) + xi) inside = !inside;
-        }
-        if (inside) return { kind: 'plate', id: plate.id, object: topologyObject('plate', plate.id) };
-      }
-    }
-    return null;
-  }
-  let object = hit.object;
-  while (object && object.parent !== topologyLayer) object = object.parent;
-  const kind = object?.userData.topology;
-  if (!['edge', 'plate'].includes(kind)) return null;
-  return { kind, id: object.userData[`${kind}Id`], point: hit.point, object };
-}
-function pickSelectionTarget() {
+function pickSelectionTarget({ anchorFallback = true } = {}) {
   const roots = [
     ...(selectableKinds.component ? objects.filter(object => object.visible) : []),
     ...topologyLayer.children.filter(object => object.visible && canSelectKind(object.userData.topology)),
@@ -3349,7 +3373,7 @@ function pickSelectionTarget() {
   // every selectable piece of geometry. A real hit above must always win so
   // an edge or plate cannot steal selection from a closer component, nor can
   // an anchor select a component through any visible topology.
-  const component = pick();
+  const component = anchorFallback ? pick() : null;
   return component ? {
     kind: 'component',
     id: component.userData.id,
@@ -3361,7 +3385,19 @@ function pickSelectionTarget() {
 function pickSelectable() {
   return pickSelectionTarget()?.object || null;
 }
+function pickEraseTarget() {
+  const hit = pickSelectionTarget({ anchorFallback: false });
+  if (hit) return hit;
+  if (selectableKinds.structure) {
+    const nodeId = pickTopologyNode();
+    if (nodeId) return { kind: 'node', id: nodeId, object: topologyObject('node', nodeId) };
+    const edge = pickEdgeByScreenTolerance();
+    if (edge) return edge;
+  }
+  return pickSelectionTarget();
+}
 function pickInteractionHover() {
+  if (tool === 'erase') return pickEraseTarget()?.object || null;
   if (tool === 'hide') return pickPaintTarget()?.object || null;
   if (tool === 'translate') {
     const linkPoint = pickLinkPoint();
@@ -3917,7 +3953,7 @@ function handleTopologyClick(point) {
       return true;
     }
     if (selectedTopologyNode) {
-      const result = moveNodeAndMerge(topology, selectedTopologyNode, point);
+      const result = moveMirroredNode(topology, selectedTopologyNode, point, mirroredNodeId(selectedTopologyNode), mirrorMode);
       commitTopology(result, result.merged ? '已移动并合并节点' : '已移动节点');
       clearNodeSelection();
       return true;
@@ -4074,8 +4110,12 @@ renderer.domElement.addEventListener('pointerup', event => {
     if (!point || point.length() > 1000) return;
     void placeImportedSubgrid(point);
   } else if (tool === 'erase') {
-    const hit = pickTopology();
-    if (hit) deleteTopology(hit.kind, hit.id); else transact(async () => { await remove(pick()); });
+    const target = pickEraseTarget();
+    if (!target) return;
+    hoveredObject = null;
+    updateInteractionHighlights();
+    if (target.kind === 'component') transact(async () => { await remove(target.object, { selectedGroup: false }); });
+    else deleteTopology(target.kind, target.id);
   } else if (tool === 'translate' && pickLinkPoint()) {
     const linkPoint = pickLinkPoint();
     selectLinkPoint(linkPoint.linkId, linkPoint.pointIndex);
@@ -4616,6 +4656,16 @@ async function importNativeVehicle(vehicleIds) {
   }
   return imported;
 }
+
+mountModelImportTool($('#resources-tab-panel'), {
+  generate: async (nextTopology, name) => transact(async () => {
+    await restore([], nextTopology, [], [{ id: 'grid-1' }], name);
+    activeGridId = 'grid-1'; nativeSceneShift.set(0, 0, 0);
+    setTool('select');
+    commit('从 3D 模型生成载具'); fit({ reference: false });
+    status('已新建模型载具，可使用撤销恢复原载具。');
+  }),
+});
 
 async function saveNativeVehicle() {
   if (busy) return;
