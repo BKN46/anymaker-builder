@@ -1,6 +1,9 @@
 import { Project, Vehicle, Grid, Component, Node, Edge, Plate, Link, validateProject } from '../editor/model.js';
 import { CELL_SIZE_WORLD } from '../editor/grid.js';
 import { validateNativeProperties } from '../editor/component-properties.js';
+import { reflectNativePoint, reflectNativeRotation } from './coordinates.js';
+import { nearestNativePaintIndex } from '../editor/native-paint.js';
+import { orientMechanicalLink } from '../editor/connection-ports.js';
 
 const vector = value => ({ x: Number(value?.[0] ?? 0), y: Number(value?.[1] ?? 0), z: Number(value?.[2] ?? 0) });
 const matrix = value => Array.isArray(value) && value.length === 9 && value.every(number => Number.isFinite(number)) ? [...value] : null;
@@ -189,7 +192,11 @@ const nativeIdentity = [1, 0, 0, 0, 1, 0, 0, 0, 1];
 
 function nativeCells(position) {
   if (!position || nativeAxes.some(axis => !Number.isFinite(position[axis]))) throw new Error('Native export requires finite positions');
-  return nativeAxes.map(axis => position[axis] / CELL_SIZE_WORLD);
+  position = reflectNativePoint(position);
+  return nativeAxes.map(axis => {
+    const value = position[axis] / CELL_SIZE_WORLD;
+    return Math.abs(value - Math.round(value)) <= 1e-8 ? Math.round(value) : value;
+  });
 }
 
 function nativeRotation(rotation) {
@@ -203,16 +210,23 @@ function nativeRotation(rotation) {
   // terms (it was effectively a different Euler order), which made any
   // combined rotation come back with a different heading and could make a
   // vehicle appear mirrored after it was saved and loaded by the game.
-  const rowMajor = [
+  const rowMajor = reflectNativeRotation([
     cy * cz, -cy * sz, sy,
     sx * sy * cz + cx * sz, cx * cz - sx * sy * sz, -sx * cy,
     sx * sz - cx * sy * cz, sx * cz + cx * sy * sz, cx * cy,
-  ];
+  ]);
   return [rowMajor[0], rowMajor[3], rowMajor[6], rowMajor[1], rowMajor[4], rowMajor[7], rowMajor[2], rowMajor[5], rowMajor[8]];
 }
 
 function nativeColor(value) {
   return Number.isInteger(value) && value >= 0 && value <= 255 ? value : undefined;
+}
+
+function nativePaintIndex(color, existing, label) {
+  if (color === undefined) return nativeColor(existing);
+  const index = nearestNativePaintIndex(color);
+  if (index === null) throw new Error(`Native export ${label} must be a Hex RGB color`);
+  return index;
 }
 
 function nativeBounds(points) {
@@ -226,14 +240,20 @@ function nativeBounds(points) {
 // Build a complete observed-native-schema pair from an editor snapshot. This
 // deliberately has no dependency on a previously imported .data/.meta pair:
 // saving a new vehicle must not require users to supply a template first.
-export function toNativePairFromEditor(document, { vehicleId = 1 } = {}) {
+export function toNativePairFromEditor(document, { vehicleId = 1, componentDefinitions = new Map() } = {}) {
   if (!document || !Array.isArray(document.objects) || !Number.isInteger(vehicleId)) throw new Error('Native export requires a valid editor project');
   const topology = document.topology || { nodes: [], edges: [], plates: [], links: [] };
   const hostObjects = document.objects;
+  const objectsById = new Map(hostObjects.map(object => [object.id, object]));
   const definitions = [...new Set(hostObjects.map(object => object.type))];
   const definitionIndex = new Map(definitions.map((id, index) => [id, index]));
   const componentIds = new Map(hostObjects.map((object, index) => [object.id, index + 1]));
-  const nodeIds = new Map((topology.nodes || []).map((node, index) => [node.id, index + 1]));
+  const referencedNodeIds = new Set();
+  for (const edge of topology.edges || []) { referencedNodeIds.add(edge.a); referencedNodeIds.add(edge.b); }
+  for (const plate of topology.plates || []) for (const id of plate.nodeIds || []) referencedNodeIds.add(id);
+  const exportNodes = (topology.nodes || []).filter(node => referencedNodeIds.has(node.id));
+  if (exportNodes.length !== referencedNodeIds.size) throw new Error('Native export has a structural reference to a missing node');
+  const nodeIds = new Map(exportNodes.map((node, index) => [node.id, index + 1]));
   const components = hostObjects.map(object => {
     const result = {
       def: definitionIndex.get(object.type),
@@ -241,7 +261,9 @@ export function toNativePairFromEditor(document, { vehicleId = 1 } = {}) {
       pos: nativeCells(object.position),
       rot: nativeRotation(object.rotation),
     };
-    if (Array.isArray(object.colors) && object.colors.every(color => nativeColor(color) !== undefined)) result.colors = [...object.colors];
+    const paintedIndex = nativePaintIndex(object.paintColor, undefined, 'component paint');
+    if (paintedIndex !== undefined) result.colors = Array.from({ length: object.colors?.length || 1 }, () => paintedIndex);
+    else if (Array.isArray(object.colors) && object.colors.every(color => nativeColor(color) !== undefined)) result.colors = [...object.colors];
     if (Array.isArray(object.nativeExtension) && object.nativeExtension.length === 3 && object.nativeExtension.every(Number.isInteger)) result.ext = [...object.nativeExtension];
     const nativeProperties = validateNativeProperties(object.nativeProperties);
     if (nativeProperties) Object.assign(result, nativeProperties);
@@ -262,25 +284,28 @@ export function toNativePairFromEditor(document, { vehicleId = 1 } = {}) {
     if (object.scale && nativeAxes.every(axis => Number.isFinite(object.scale[axis])) && Math.abs(object.scale.x - object.scale.y) < 1e-9 && Math.abs(object.scale.x - object.scale.z) < 1e-9 && Math.abs(object.scale.x - 1) > 1e-9) result.scale = object.scale.x;
     return result;
   });
-  const nodes = (topology.nodes || []).map(node => ({ id: nodeIds.get(node.id), pos: nativeCells(node.position) }));
+  const nodes = exportNodes.map(node => ({ id: nodeIds.get(node.id), pos: nativeCells(node.position) }));
   const edges = (topology.edges || []).map(edge => {
     const result = { n0: nodeIds.get(edge.a), n1: nodeIds.get(edge.b) };
-    const color = nativeColor(edge.col); if (color !== undefined) result.col = color;
+    const color = nativePaintIndex(edge.color, edge.col, 'edge paint'); if (color !== undefined) result.col = color;
     return result;
   });
   const plates = (topology.plates || []).map((plate, index) => {
-    const result = { id: index + 1, nodes: plate.nodeIds.map(id => nodeIds.get(id)), glass_impacts: [] };
-    const front = nativeColor(plate.col_front); const back = nativeColor(plate.col_back);
+    const result = { id: index + 1, nodes: [...plate.nodeIds].reverse().map(id => nodeIds.get(id)), glass_impacts: [] };
+    const front = nativePaintIndex(plate.color_front, plate.col_front, 'plate front paint');
+    const back = nativePaintIndex(plate.color_back, plate.col_back, 'plate back paint');
     if (front !== undefined) result.col_front = front;
     if (back !== undefined) result.col_back = back;
     if (plate.type === 'window') result.type = 'window';
     return result;
   });
-  const links = Object.fromEntries(['electric', 'mechanical', 'liquid', 'gas', 'belt', 'data'].map(kind => [`${kind}_links`, (topology.links || []).filter(link => link.kind === kind).flatMap(link => {
+  const links = Object.fromEntries(['electric', 'mechanical', 'liquid', 'gas', 'belt', 'data'].map(kind => [`${kind}_links`, (topology.links || []).filter(link => link.kind === kind).flatMap(original => {
+    const link = orientMechanicalLink(original, objectsById, componentDefinitions);
     const first = componentIds.get(link.from?.componentId); const second = componentIds.get(link.to?.componentId);
     if (!first || !second) return [];
-    const endpoint = (value, id) => ({ comp: id, ...(Number.isInteger(value?.port) ? { pos: value.port } : {}) });
-    return [{ p0: endpoint(link.from, first), p1: endpoint(link.to, second), ...(Array.isArray(link.points) ? { points: link.points.map(nativeCells) } : {}) }];
+    const endpoint = (value, id) => ({ comp: id, ...(Number.isInteger(value?.port) && value.port !== 0 ? { pos: value.port } : {}) });
+    const color = nativePaintIndex(link.paintColor, link.color, 'connection paint');
+    return [{ p0: endpoint(link.from, first), p1: endpoint(link.to, second), ...(Array.isArray(link.points) ? { points: link.points.map(nativeCells) } : {}), ...(color !== undefined ? { color } : {}) }];
   })]));
   const vehicle = {
     id: vehicleId,

@@ -1,37 +1,24 @@
-// These indices are observed in test-vehicle. They are diagnostic previews,
-// not a reverse-engineered Anymaker palette or shader implementation.
-const observed = new Map([
-  [26, '#bd2636'],
-  [28, '#631a24'],
-  [49, '#2b3440'],
-  [79, '#20252c'],
-]);
+import { GAME_PALETTE } from './game-palette.js';
 
-function byte(value) { return Math.round(Math.max(0, Math.min(1, value)) * 255).toString(16).padStart(2, '0'); }
+export function officialPaintColors() {
+  return GAME_PALETTE;
+}
 
 export function nativePaintColor(index) {
-  if (observed.has(index)) return observed.get(index);
-  const hue = (index * .61803398875) % 1;
-  const saturation = .62; const lightness = .46;
-  const chroma = (1 - Math.abs(2 * lightness - 1)) * saturation;
-  const segment = hue * 6; const middle = chroma * (1 - Math.abs(segment % 2 - 1));
-  const [red, green, blue] = segment < 1 ? [chroma, middle, 0] : segment < 2 ? [middle, chroma, 0] : segment < 3 ? [0, chroma, middle] : segment < 4 ? [0, middle, chroma] : segment < 5 ? [middle, 0, chroma] : [chroma, 0, middle];
-  const offset = lightness - chroma / 2;
-  return '#' + byte(red + offset) + byte(green + offset) + byte(blue + offset);
+  return Number.isInteger(index) ? GAME_PALETTE[index] || null : null;
 }
 
 function rgb(hex) {
   return [1, 3, 5].map(index => Number.parseInt(hex.slice(index, index + 2), 16));
 }
 
-// The editor receives RGB input but native component records retain palette
-// indices. Select the closest diagnostic palette entry deterministically so
-// component paint survives project snapshots and native export.
+// The texture stores opaque game colors at indices 0..84. Transparent padding
+// must never be selected for an RGB color, even if its RGB bytes are white.
 export function nearestNativePaintIndex(color) {
   if (typeof color !== 'string' || !/^#[\da-f]{6}$/i.test(color)) return null;
   const target = rgb(color);
   let closest = 0; let distance = Infinity;
-  for (let index = 0; index <= 255; index++) {
+  for (let index = 0; index < GAME_PALETTE.length; index++) {
     const candidate = rgb(nativePaintColor(index));
     const nextDistance = candidate.reduce((sum, value, channel) => sum + (value - target[channel]) ** 2, 0);
     if (nextDistance < distance) { closest = index; distance = nextDistance; }

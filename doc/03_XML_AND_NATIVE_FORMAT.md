@@ -8,6 +8,7 @@
 {
   "format": "anymaker-web-project",
   "version": 1,
+  "projectName": "anymaker-vehicle",
   "grids": [{"id": "grid-1"}],
   "objects": [
     {
@@ -22,6 +23,8 @@
 }
 ```
 
+`projectName` 是编辑器项目名称，随历史记录和本地自动恢复保存。导出时会作为 `.data`、`.meta`、工程 JSON 和中间 XML 的文件基名；不适用于文件名的字符会被替换，空名称回退为 `anymaker-vehicle`。它当前不写入游戏原生载具字段。
+
 可选的 `grids` 是编辑器子网格目录。每项仅包含唯一的字母、数字、`_` 或 `-` 组成的 `id`；它允许空的手动子网格在保存、撤销和本地恢复后继续存在。组件和结构节点、梁、面板可用同一 `gridId` 归属到该目录；缺失归属的旧工程按 `grid-1` 处理。此目录是编辑器状态，当前不代表已验证的原生载具子网格导出语义。
 
 组件可选的 `nativeProperties` 保存 Properties Tool 的可序列化原生字段。它只接受有限数值、布尔值、文本及有大小/层级限制的 JSON 状态；组件/载具连接引用不会作为该字段写入。导入时会保留可安全验证的原生属性，Inspector 可编辑已有属性及已通过游戏说明和 GCL 符号确认的默认项（例如换挡杆档位数、变速箱各档齿比、机械偏移/缩放）。保存 `.data/.meta` 时这些字段回写到对应组件记录。复杂运行状态只读展示；该映射尚未通过真实游戏加载验证。
@@ -31,6 +34,8 @@
 导入时检查格式版本、组件 ID 唯一性、定义存在性、有限数值、变换范围和缩放正值。工程不保存本地绝对路径，不保存用户选择的文件对象。
 
 编辑器空间晶格固定为 `1 格 = 8 cm = 0.08` 世界单位。`objects[].position`、`mirror.offset` 和 `topology.nodes[].position` 的每个世界 X/Y/Z 分量都必须是整数格；真正的非格点值会拒绝导入，只有 8 cm 倍数上的浮点残差会规范化。梁端点由节点引用，面板只引用节点，因此也保持整格。`scale` 是无量纲比例，不表示格数。
+
+`topology.nodes[].standalone: true` 表示用户通过节点工具显式创建、即使暂未连接梁或面板也应保留的独立节点。结构操作提交时，编辑器会自动删除不被任何梁或面板引用、也不是独立节点或原生投影节点的编辑残留。隐藏状态不是删除依据；仍被有效结构引用的隐藏节点会完整保留。
 
 `topology.edges[].color`、`topology.plates[].color_front` 和 `topology.plates[].color_back` 是可选的 `#RRGGBB` 编辑器 RGB 颜色，用于涂色工具和渲染；原生导入保留的 `col`、`col_front`、`col_back` 仍是可选的 0–255 编号，作为未验证的原生颜色数据。`topology.plates[].normalOffset` 是有限世界单位值。新建面板以 `0.04`（半格）偏离其节点面。这些字段均是编辑器工程字段；中间 XML 及当前试验性原生回写尚未编码它们，不能据此推断游戏兼容性。
 
@@ -49,7 +54,7 @@
 ```xml
 <?xml version="1.0" encoding="UTF-8"?>
 <!-- EDITOR INTERCHANGE ONLY. Not a verified Anymaker vehicle save. -->
-<anymaker-web-project version="1" game-compatible="false" coordinate-unit="world" grid-cell-size-cm="8">
+<anymaker-web-project version="1" name="anymaker-vehicle" game-compatible="false" coordinate-unit="world" grid-cell-size-cm="8">
   <component instance="instance-uuid" definition="engine">
     <position x="0.000000" y="0.000000" z="0.000000"/>
     <rotation-radians-xyz x="0.000000" y="0.000000" z="0.000000"/>
@@ -88,9 +93,13 @@ XML 属性和文本都必须转义。此格式没有原生载具的节点、梁�
 
 原生适配器应保留省略字段与未知字段。没有证据时不向原生文件强行填入编辑器 scale 或欧拉角。
 
+涂色索引来自本地 ROM 的 `textures/color_palette.txtr`：文件为 `TXTR` v2、256×1 的 RGBA8 数据，前 85 槽（0–84）不透明，其余槽 alpha 为 0、仅是占位。`scripts/extract-color-palette.mjs` 校验布局并生成自包含的 `src/editor/game-palette.js`；当前来源 SHA-256 为 `ed7f5ca7a55ab5e71769298b5d523d9f81d98563755845968dc684932160027e`。编辑器 RGB 涂色在原生导出时按 8-bit RGB 平方距离取最近的不透明槽，距离相同时取最小索引，分别写入组件 `colors`、梁 `col`、面板 `col_front/col_back` 和连接 `color`；未涂色的原生索引保留。色板仅证明索引对应的纹理 RGB，不等于已复刻游戏光照或材质。
+
 2026-09-25 已按游戏 GCL 函数体修正组件子网格投影，证据见 [子网格变换记录](evidence/native-grid-transform.json) 与 [反编译说明](06_REVERSE_ENGINEERING.md)。省略的 `origin` 为 `[0,0,0]`，省略的 `dir` 为 `[0,1,0]`；只有这两个值同时匹配时使用基础网格的身份变换。其他网格以 `Y = normalize(dir)` 为法线，参考向上方向为世界 Y（仅当 `dir` 平行 Y 时改用世界 Z），`X = normalize(dir × up)`、`Z = normalize(X × Y)`。此前投影世界 X 的方法会转错车门平面内的坐标轴。
 
 子网格的有效原点还包含安装偏移（以下均为格单位）：`origin + 0.5 * sign(dir) + 0.5 * normalize(dir)`。其中逐轴 `sign` 项来自游戏节点立方体朝该法线的面中心、边中点或角；后一项是组件基座的半格法线位移。不能只套旋转而省略这些位移。组件 `pos` 和原生列主序 `rot` 都组合完整网格帧，再按每格 0.08 转换位置。原生节点、梁、面板及连接路径仍属于 vehicle 坐标；适配器将其暂存于第一个 grid 并不改变其坐标归属。
+
+编辑器与原生载具的 X 轴方向相反。导入时先在原生坐标中完成网格和附件变换，再跨 YZ 平面反射位置；旋转矩阵使用 `S R S`（`S = diag(-1, 1, 1)`），Mesh 局部视觉和连接端口同步反射，面板节点顺序反转以保持正反面朝向。导出执行同一逆变换，覆盖组件、结构节点和连接路径点；`.meta` 范围由变换后的原生坐标重算。此映射有非对称结构的自动化往返测试，仍需在游戏中进行同机位视觉对照与加载验收。
 
 当前车辆关联锚点在网格投影后按多体约束枢轴求差。`hinge_knuckle.constraint_position` 已接入；`tow_hitch` 的 surface/logic 位置未替用为约束枢轴。每个子载具的全部已记录锚点须求得同一偏移，不一致会中止投影。斜面网格以 `nativeProjected` 标记保留非整数世界格坐标。上述子网格规则有静态游戏代码证据；完整动态子载具姿态、原生编辑回写和游戏加载兼容性仍未验收。
 

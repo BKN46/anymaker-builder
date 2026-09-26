@@ -8,11 +8,12 @@ import { History, project, validateDocument, migrateDocument, toIntermediateXml 
 import { copyObjects, mirrorObjects, moveObjects, removeObjects, splitGrid, mergeGrids, gridIds } from '../src/editor/operations.js';
 import { Project, Vehicle, Grid, Component, Node, Edge, Plate, Link, fromEditorDocument, toEditorDocument, toEditorTopology, validateProject, nativeGridFrame, nativeGridLocalDelta } from '../src/editor/model.js';
 import { parseNativePair, nativeStats, toNativeData, toNativePair, toNativePairFromEditor, verifyNativePairRoundTrip } from '../src/native/anymaker-data.js';
-import { createNode, moveNode, moveNodeAndMerge, mergeNodes, removeNode, removeEdge, removePlate, createEdge, createEdgeFromPoints, splitEdge, createPlate, createPlateFromEdges, createGlassPlateFromEdges, triangulatePlate, validateTopologyState } from '../src/editor/topology.js';
+import { createNode, moveNode, moveNodeAndMerge, mergeNodes, removeNode, removeEdge, removePlate, createEdge, createEdgeFromPoints, splitEdge, createPlate, createPlateFromEdges, createGlassPlateFromEdges, triangulatePlate, validateTopologyState, pruneUnusedTopology } from '../src/editor/topology.js';
 import { LINK_COLORS, LINK_KINDS, LINK_RENDER_STYLES, createLink, moveLinkPoint, removeLink, validateLinks } from '../src/editor/connections.js';
 import * as THREE from 'three';
-import { correctGeometryNormals, reflectGeometry } from '../src/assets/geometry-ops.js';
-import { cameraBuildFrame, projectBuildPoint, resolveEdgePoint, resolvePlacementPoint, edgeMeasurements, createEdgeMesh, createEdgeJointMesh, createConnectionRoute, updateEdgeMesh, setEdgeOutline, edgeConnectionCorners, plateSurfaceBoundary, plateSurfaceVertices, cameraFacingPlateOffset, cameraFacingPlateDirection, rayFacingPlateSide } from '../src/editor/construction-view.js';
+import { LineMaterial } from 'three/addons/lines/LineMaterial.js';
+import { correctGeometryNormals, reflectGeometry, reflectVisualBasis } from '../src/assets/geometry-ops.js';
+import { NODE_PLACEMENT_BOUNDS, cameraBuildFrame, projectBuildPoint, resolveEdgePoint, resolvePlacementPoint, edgeMeasurements, createEdgeMesh, createEdgeJointMesh, createConnectionRoute, createDashedConnection, updateEdgeMesh, setEdgeOutline, edgeConnectionCorners, plateSurfaceBoundary, plateSurfaceVertices, cameraFacingPlateOffset, cameraFacingPlateDirection, rayFacingPlateSide } from '../src/editor/construction-view.js';
 import { CELL_SIZE_WORLD, CELL_SIZE_CM, assertGridVector, cellToWorld, quantizeWorldVector, worldToCell } from '../src/editor/grid.js';
 import { categoryInfo } from '../src/catalog/category-icons.js';
 import { normalizeSettings, createLocalStore, AUTOSAVE_INTERVAL } from '../src/editor/local-storage.js';
@@ -21,16 +22,38 @@ import { applyMeshTransform, staticMeshParts, stitchTiledMeshParts, WHEEL_TYRE_O
 import { DEPTH_SUBLAYERS, LOG_DEPTH_LAYER_STEP, LOG_DEPTH_SUBLAYER_STEP, RENDER_DEPTH_LAYERS, assignOpaqueDepthOrder, configureOpaqueDepthLayer, depthBias, logDepthBias, stableDepthRank } from '../src/editor/render-depth.js';
 import { t, setLocale, addMessages } from '../src/i18n.js';
 import { connectionDescriptorLabel, connectionNetworkLabel, connectionPortRoleLabel } from '../src/editor/connection-port-labels.js';
-import { logicNodePort, logicNodePortsForNetwork, logicNodeCellPosition } from '../src/editor/connection-ports.js';
+import { connectionDirectionVector, connectionRouteCellPosition, logicNodePort, logicNodePortsForNetwork, logicNodeCellPosition, orientMechanicalLink } from '../src/editor/connection-ports.js';
 import { componentPropertyDescriptors, updateNativeProperty, validateNativeProperties } from '../src/editor/component-properties.js';
-import { nativePaintColor, nearestNativePaintIndex } from '../src/editor/native-paint.js';
+import { nativePaintColor, nearestNativePaintIndex, officialPaintColors } from '../src/editor/native-paint.js';
+import { paintColorValue } from '../src/editor/paint-color.js';
+import { DEFAULT_PROJECT_NAME, normalizeProjectName, projectFileBaseName } from '../src/editor/project-name.js';
+import { isSaveCancelled, saveFilePair, saveSingleFile } from '../src/editor/file-save.js';
 import { mirrorPoint, mirrorSurfaceDirection, sameGridPoint } from '../src/editor/mirror-mode.js';
-import { accessoryOptionsForComponent, createNativeAccessoryItem, nativeAccessoryDefinition } from '../src/editor/native-accessories.js';
-import { extensionAxes, extensionHandlePosition, extensionVector, stretchMeshPositions, updateExtension } from '../src/editor/component-extension.js';
+import { accessoryOptionsForComponent, createNativeAccessoryItem, defaultAccessoryForPlacement, nativeAccessoryDefinition } from '../src/editor/native-accessories.js';
+import { extensionAxes, extensionControlValue, extensionHandlePosition, extensionVector, stretchMeshPositions, updateExtension, updateExtensionFromControl } from '../src/editor/component-extension.js';
 import { placementOrientation, updatePlacementOrientation } from '../src/editor/placement-orientation.js';
 import { gridSelectionClosure } from '../src/editor/selection-closure.js';
 import { createMicrocontrollerVariable, microcontrollerState, updateMicrocontrollerState } from '../src/editor/microcontroller.js';
 import { stageImportedSubgrid, translateImportedSubgrid, translateSubgridTopology } from '../src/editor/imported-subgrid.js';
+import { analyzeSubgridIntegrity, partitionSubgrids } from '../src/editor/subgrid-connectivity.js';
+import { locatableSubgridErrors } from '../src/editor/subgrid-error-markers.js';
+import { LITERS_PER_CELL, tankCapacityCells, tankCapacityLiters } from '../src/editor/tank-capacity.js';
+
+test('native file pairs download directly while XML can use a save picker', async () => {
+  const files = [{ name: 'vehicle.data', content: '{"data":1}', type: 'application/json' }, { name: 'vehicle.meta', content: '{"meta":1}', type: 'application/json' }];
+  const downloads = [];
+  assert.equal(await saveFilePair(files, { download: file => downloads.push(file.name) }), 'downloaded');
+  assert.deepEqual(downloads, files.map(file => file.name));
+  const xml = { name: 'vehicle.xml', content: '<vehicle/>', type: 'application/xml', description: 'Debug XML' };
+  let selectedName;
+  const pickFile = async options => {
+    selectedName = options.suggestedName;
+    return { async createWritable() { return { async write(content) { assert.equal(content, xml.content); }, async close() {} }; } };
+  };
+  assert.equal(await saveSingleFile(xml, { pickFile, download: () => { throw new Error('Unexpected download'); } }), 'saved');
+  assert.equal(selectedName, 'vehicle.xml');
+  assert.equal(isSaveCancelled({ name: 'AbortError' }), true);
+});
 
 test('mirror mode reflects integer-grid points on every plane without moving points on the plane', () => {
   assert.deepEqual(mirrorPoint({ x: cell(3), y: cell(-2), z: cell(4) }, { axis: 'x', offset: cell(1) }), { x: cell(-1), y: cell(-2), z: cell(4) });
@@ -39,6 +62,92 @@ test('mirror mode reflects integer-grid points on every plane without moving poi
   const onPlane = { x: cell(1), y: 0, z: 0 };
   assert.equal(sameGridPoint(mirrorPoint(onPlane, { axis: 'x', offset: cell(1) }), onPlane), true);
   assert.deepEqual(mirrorSurfaceDirection({ x: .5, y: -.25, z: .75 }, { axis: 'y' }), { x: .5, y: .25, z: .75 });
+});
+
+test('subgrid connectivity partitions touching, linked and structural records', () => {
+  const box = (x, z) => ({ min: { x, y: 0, z }, max: { x: x + .08, y: .08, z: z + .08 } });
+  const groups = partitionSubgrids({
+    components: [{ id: 'a', bounds: box(0, 0) }, { id: 'b', bounds: box(.08, 0) }, { id: 'c', bounds: box(1, 0) }],
+    topology: {
+      nodes: [{ id: 'n1', position: { x: .04, y: 0, z: .04 } }, { id: 'n2', position: { x: 1, y: 0, z: 0 } }],
+      edges: [{ id: 'e1', a: 'n1', b: 'n2' }], plates: [],
+      links: [{ id: 'link', kind: 'mechanical', from: { componentId: 'b' }, to: { componentId: 'c' }, points: [] }],
+    }, padding: 0,
+  });
+  assert.equal(groups.length, 1);
+  assert.deepEqual(new Set(groups[0].components), new Set(['a', 'b', 'c']));
+  assert.deepEqual(new Set(groups[0].topology.map(item => item.id)), new Set(['n1', 'n2', 'e1']));
+  const isolated = partitionSubgrids({ components: [{ id: 'a', bounds: box(0, 0) }, { id: 'b', bounds: box(1, 0) }] });
+  assert.equal(isolated.length, 2);
+});
+
+test('subgrid integrity rejects padded overlap and deep interior nodes', () => {
+  const box = (x, z) => ({ min: { x, y: 0, z }, max: { x: x + .08, y: .08, z: z + .08 } });
+  const result = analyzeSubgridIntegrity({
+    components: [{ id: 'a', bounds: { min: { x: 0, y: 0, z: 0 }, max: { x: .24, y: .24, z: .24 } }, gridId: 'grid-1' }, { id: 'b', bounds: box(.4, 0), gridId: 'grid-1' }],
+    topology: { nodes: [{ id: 'inside', position: { x: .12, y: .12, z: .12 } }], edges: [], plates: [], links: [] },
+  });
+  assert.equal(result.groups.filter(group => group.components.length).length, 2);
+  assert.equal(result.diagnostics.some(item => item.code === 'unmounted-node'), true);
+  assert.equal(result.diagnostics.some(item => item.code === 'multiple-islands'), true);
+});
+
+test('subgrid integrity reports a mounted but unreferenced node', () => {
+  const result = analyzeSubgridIntegrity({
+    components: [{ id: 'a', bounds: { min: { x: 0, y: 0, z: 0 }, max: { x: .08, y: .08, z: .08 } } }],
+    topology: { nodes: [{ id: 'orphan', position: { x: .04, y: 0, z: 0 } }], edges: [], plates: [], links: [] },
+  });
+  assert.equal(result.diagnostics.some(item => item.code === 'unreferenced-node'), true);
+});
+
+test('subgrid integrity prefers definition occupancy over visual bounds', () => {
+  const result = analyzeSubgridIntegrity({
+    components: [{
+      id: 'visual-large',
+      bounds: { min: { x: 0, y: 0, z: 0 }, max: { x: .8, y: .8, z: .8 } },
+      occupancyBounds: { min: { x: 0, y: 0, z: 0 }, max: { x: .08, y: .08, z: .08 } },
+    }],
+    topology: { nodes: [{ id: 'visual-only', position: { x: .8, y: .4, z: .4 } }], edges: [], plates: [], links: [] },
+  });
+  assert.equal(result.diagnostics.some(item => item.code === 'unmounted-node'), true);
+  assert.equal(result.diagnostics.some(item => item.code === 'missing-occupancy-bounds'), false);
+});
+
+test('subgrid integrity reports dangling structure and keeps existing grid IDs unchanged', () => {
+  const result = analyzeSubgridIntegrity({
+    components: [{ id: 'a', gridId: 'grid-2', bounds: { min: { x: 0, y: 0, z: 0 }, max: { x: .08, y: .08, z: .08 } } }],
+    topology: {
+      nodes: [{ id: 'n', position: { x: .04, y: 0, z: 0 } }],
+      edges: [{ id: 'e', a: 'n', b: 'missing' }], plates: [], links: [],
+    },
+  });
+  assert.equal(result.isValid, false);
+  assert.equal(result.diagnostics.some(item => item.code === 'missing-edge-node'), true);
+  assert.equal(result.diagnostics.some(item => item.code === 'dangling-edge'), true);
+  assert.equal(result.groups.find(group => group.components.includes('a')).components[0], 'a');
+});
+
+test('subgrid error markers locate only known faulty grid points and merge coincident errors', () => {
+  const topology = {
+    nodes: [
+      { id: 'a', position: { x: 0, y: 0, z: 0 } },
+      { id: 'b', position: { x: 0, y: 0, z: 0 } },
+      { id: 'c', position: { x: .08, y: 0, z: 0 } },
+    ],
+    plates: [{ id: 'plate', nodeIds: ['c', 'a'] }],
+  };
+  const diagnostics = [
+    { code: 'unmounted-node', severity: 'error', entityIds: ['a'] },
+    { code: 'unmounted-node', severity: 'error', entityIds: ['b'] },
+    { code: 'dangling-edge', severity: 'error', entityIds: ['edge', 'a', 'c'] },
+    { code: 'invalid-plate', severity: 'error', entityIds: ['plate'] },
+    { code: 'missing-edge-node', severity: 'error', entityIds: ['edge', 'missing'] },
+    { code: 'unreferenced-node', severity: 'warning', entityIds: ['c'] },
+  ];
+  assert.deepEqual(locatableSubgridErrors(diagnostics, topology), [
+    { position: { x: 0, y: 0, z: 0 }, nodeIds: ['a', 'b'], codes: ['unmounted-node', 'dangling-edge'] },
+    { position: { x: .08, y: 0, z: 0 }, nodeIds: ['c'], codes: ['invalid-plate'] },
+  ]);
 });
 
 test('placement orientation maps JKL rotations and UIO local mirrors to their axes', () => {
@@ -62,6 +171,31 @@ test('placement orientation maps JKL rotations and UIO local mirrors to their ax
   assert.match(toIntermediateXml(document), /<local-mirror axes="x z"\/>/);
 });
 
+test('tank capacity uses definition cells and native extensions', () => {
+  assert.equal(LITERS_PER_CELL, 0.5);
+  const definition = {
+    zones: [{ bounds_min: [0, 0, 0], bounds_max: [1, 1, 1] }],
+    mode_x: 'stretch', mode_y: 'stretch', mode_z: 'stretch',
+  };
+  assert.equal(tankCapacityLiters(definition), 4);
+  assert.equal(tankCapacityLiters(definition, [1, 2, 3]), 30);
+  assert.equal(tankCapacityCells(12), 24);
+  assert.equal(tankCapacityLiters({ zones: [{ bounds_min: [0, 0, 0], bounds_max: [2, 3, 4] }] }), 30);
+  assert.equal(tankCapacityLiters({ zones: [
+    { bounds_min: [0, 0, 0], bounds_max: [2, 1, 1] },
+    { bounds_min: [0, 0, 0], bounds_max: [1, 2, 1] },
+  ] }), 12);
+  assert.equal(tankCapacityLiters({ zones: [{ bounds_min: [0, 0], bounds_max: [1, 1, 1] }] }), null);
+  assert.equal(tankCapacityLiters({ zones: [{ bounds_max: [1, 1, 1] }] }), 4);
+  assert.equal(tankCapacityLiters({ zones: [{}] }), null);
+  const liquidTank = JSON.parse(readFileSync('public/data/definitions/liquid_tank.json', 'utf8'));
+  const gasTank = JSON.parse(readFileSync('public/data/definitions/gas_tank_a.json', 'utf8'));
+  assert.equal(tankCapacityLiters(liquidTank, [0, 1, 2]), 12);
+  assert.equal(tankCapacityLiters(liquidTank, [5, 0, 3]), 35);
+  assert.equal(tankCapacityLiters(gasTank), 18);
+  assert.equal(tankCapacityLiters(gasTank, [0, 2, 0]), 27);
+});
+
 test('native linear component extensions use definition modes, intervals and stretch centres', () => {
   const driveShaft = { mode_z: 'stretch', interval: [0, 0, 1], ext_max: [10, 10, 40], center_stretch: [0, 0, .5] };
   assert.deepEqual(extensionAxes(driveShaft), [{ axis: 'z', index: 2, mode: 'stretch', interval: 1, max: 40 }]);
@@ -72,6 +206,12 @@ test('native linear component extensions use definition modes, intervals and str
   assert.ok(Math.abs(extensionHandlePosition(driveShaft, [0, 0, 3], CELL_SIZE_WORLD)[2] - .28) < 1e-12);
   const engine = { mode_z: 'tile', interval: [0, 0, 2] };
   assert.deepEqual(updateExtension(engine, undefined, 'z', 5), [0, 0, 6]);
+  assert.equal(extensionControlValue(engine, [0, 0, 4], 'z'), 6);
+  assert.deepEqual(updateExtensionFromControl(engine, [0, 0, 4], 'z', 8), [0, 0, 6]);
+  const radiator = { mode_x: 'stretch', mode_y: 'tile', interval: [1, 1, 0] };
+  assert.equal(extensionControlValue(radiator, [2, 3, 0], 'x'), 3);
+  assert.equal(extensionControlValue(radiator, [2, 3, 0], 'y'), 4);
+  assert.deepEqual(updateExtensionFromControl(radiator, [2, 3, 0], 'x', 4), [3, 3, 0]);
   assert.ok(Math.abs(stretchMeshPositions(engine, [0, 0, 6], new Float32Array([0, 0, .2]), CELL_SIZE_WORLD)[2] - .2) < 1e-6);
 });
 
@@ -79,14 +219,22 @@ test('tiled component meshes use interior intervals between their two caps', () 
   const staticMesh = 'meshes/components/engine_block_a_0_0_0.mesh';
   const middle = 'meshes/components/engine_block_a_0_0_1.mesh';
   const end = 'meshes/components/engine_block_a_0_0_2.mesh';
-  const definition = { mode_z: 'tile', interval: [0, 0, 2], mesh_static: { mesh_path: staticMesh } };
+  const definition = { class: 'engine', mode_z: 'tile', interval: [0, 0, 2], mesh_static: { mesh_path: staticMesh } };
   const manifest = { entries: { [staticMesh]: {}, [middle]: {}, [end]: {} } };
   const parts = staticMeshParts(definition, { staticMesh }, [0, 0, 4], manifest);
   assert.deepEqual(parts, [
     { path: staticMesh, transform: null },
     { path: middle, transform: { position: [0, 0, 2 * CELL_SIZE_WORLD] } },
+    { path: middle, transform: { position: [0, 0, 4 * CELL_SIZE_WORLD] } },
     { path: end, transform: { position: [0, 0, 4 * CELL_SIZE_WORLD] } },
   ]);
+  const radiator = { class: 'radiator', mode_y: 'tile', interval: [1, 1, 0] };
+  const radiatorMesh = 'meshes/components/radiator_a_0_0_0.mesh';
+  const radiatorMiddle = 'meshes/components/radiator_a_0_1_0.mesh';
+  const radiatorEnd = 'meshes/components/radiator_a_0_2_0.mesh';
+  assert.equal(staticMeshParts(radiator, { staticMesh: radiatorMesh }, [2, 3, 0], {
+    entries: { [radiatorMiddle]: {}, [radiatorEnd]: {} },
+  }).length, 4);
 });
 
 test('tiled Mesh variants join their real local bounds without empty grid cells', () => {
@@ -204,14 +352,14 @@ test('reference primary vehicle converts every renderable record into an editor 
   assert.deepEqual(Object.fromEntries(LINK_KINDS.map(kind => [kind, document.topology.links.filter(link => link.kind === kind).length])), { electric: 17, mechanical: 20, liquid: 6, gas: 6, belt: 6, data: 18 });
   assert.ok(document.topology.links.every(link => document.objects.some(object => object.id === link.from.componentId) && document.objects.some(object => object.id === link.to.componentId)));
   const node69 = document.topology.nodes.find(node => node.id === 'grid-553-1:69')?.position;
-  assert.deepEqual(Object.fromEntries(['x', 'y', 'z'].map(axis => [axis, worldToCell(node69[axis])])), { x: 69, y: 17, z: 247 });
+  assert.deepEqual(Object.fromEntries(['x', 'y', 'z'].map(axis => [axis, worldToCell(node69[axis])])), { x: -69, y: 17, z: 247 });
   assert.deepEqual(document.objects.find(object => object.id === '553:grid-553-1:12')?.colors, [79, 79, 79, 79, 79, 79, 79, 79, 79, 79]);
   assert.deepEqual(document.objects.find(object => object.id === '553:grid-553-1:12')?.nativeExtension, [0, 0, 6]);
   assert.deepEqual(document.objects.find(object => object.id === '553:grid-553-1:124')?.nativeProperties, { throttle: 1, gear_count: 3, user_defined_alias: 'Gear_stick_auto' });
   // Wheel hub meshes have an outboard local tyre offset. Native component
   // rotations must therefore put the left and right hubs on opposite sides.
-  assert.ok(Math.abs(document.objects.find(object => object.id === '553:grid-553-1:71')?.rotation.y + Math.PI / 2) < 1e-6);
-  assert.ok(Math.abs(document.objects.find(object => object.id === '553:grid-553-1:73')?.rotation.y - Math.PI / 2) < 1e-6);
+  assert.ok(Math.abs(document.objects.find(object => object.id === '553:grid-553-1:71')?.rotation.y - Math.PI / 2) < 1e-6);
+  assert.ok(Math.abs(document.objects.find(object => object.id === '553:grid-553-1:73')?.rotation.y + Math.PI / 2) < 1e-6);
   const tyres = document.objects.filter(object => object.nativeAccessory?._type === 'wheel_5_prong_tread');
   assert.equal(tyres.length, 4);
   assert.deepEqual(tyres.map(object => object.id).sort(), [
@@ -226,7 +374,7 @@ test('reference primary vehicle converts every renderable record into an editor 
   // `hinge_knuckle.constraint_position` is one native cell behind its
   // component origin. Resolving that pivot (rather than averaging component
   // origins) produces one exact rigid offset for every recorded attachment.
-  assert.deepEqual(document.topology.nodes.find(node => node.id === 'grid-551-1:1')?.position, { x: 6.72, y: 1.6, z: 19.52 });
+  assert.deepEqual(document.topology.nodes.find(node => node.id === 'grid-551-1:1')?.position, { x: -6.72, y: 1.6, z: 19.52 });
   const objectPosition = id => document.objects.find(object => object.id === id)?.position;
   const assertSamePosition = (actual, expected) => assert.ok(['x', 'y', 'z'].every(axis => Math.abs(actual[axis] - expected[axis]) < 1e-12));
   for (const [parentId, childId] of [
@@ -250,11 +398,11 @@ test('reference primary vehicle converts every renderable record into an editor 
   assert.equal(dashboard.length, 5);
   const dashboardDisplay = document.objects.find(object => object.id === '553:grid-553-2:180');
   assert.equal(dashboardDisplay?.nativeProjected, true);
-  assert.ok(Math.abs(dashboardDisplay.position.x - 5.28) < 1e-12);
+  assert.ok(Math.abs(dashboardDisplay.position.x + 5.28) < 1e-12);
   assert.ok(Math.abs(dashboardDisplay.position.y - 2.2314855054991165) < 1e-12);
   assert.ok(Math.abs(dashboardDisplay.position.z - 19.25102139319956) < 1e-12);
   const primaryBounds = JSON.parse(meta).vehicles.vehicles.find(vehicle => vehicle.id === 553).bounds;
-  assert.ok(dashboard.every(object => ['x', 'y', 'z'].every((axis, index) => object.position[axis] >= primaryBounds.min[index] && object.position[axis] <= primaryBounds.max[index])));
+  assert.ok(dashboard.every(object => ['x', 'y', 'z'].every((axis, index) => object.position[axis] >= (axis === 'x' ? -primaryBounds.max[index] : primaryBounds.min[index]) && object.position[axis] <= (axis === 'x' ? -primaryBounds.min[index] : primaryBounds.max[index]))));
   const validated = validateDocument(document, catalogDefinitions);
   assert.equal(validated.objects.length, 159);
   assert.equal(validated.topology.edges.length, 493);
@@ -296,9 +444,9 @@ test('UI preferences default to English and reject unsafe or unsupported values'
   assert.equal(normalizeSettings({ version: 1, edgeSize: 2 }).edgeSize, 1);
   assert.deepEqual(defaults.connectionVisibility, { electric: true, mechanical: true, liquid: true, gas: true, belt: true, data: true });
   assert.equal(defaults.paintColor, '#dddddd');
-  assert.deepEqual(defaults.paintQuickColors, ['#dddddd', '#bd2636', '#631a24', '#2b3440', '#20252c']);
+  assert.deepEqual(defaults.paintQuickColors, ['#ecece7', '#861a22', '#3e2022', '#191e28', '#374345']);
   assert.equal(normalizeSettings({ version: 1, paintColor: '#7C3AED' }).paintColor, '#7c3aed');
-  assert.deepEqual(normalizeSettings({ version: 1, paintQuickColors: ['#7C3AED', 26] }).paintQuickColors, ['#7c3aed', '#bd2636']);
+  assert.deepEqual(normalizeSettings({ version: 1, paintQuickColors: ['#7C3AED', 26] }).paintQuickColors, ['#7c3aed', '#861a22']);
   assert.deepEqual(normalizeSettings({ version: 1, paintQuickColors: ['#7C3AED', '#bad'] }).paintQuickColors, defaults.paintQuickColors);
   assert.equal(normalizeSettings({ version: 1, edgeAxisSnap: true }).edgeAxisSnap, true);
   assert.equal(normalizeSettings({ version: 1, connectionVisibility: { liquid: false } }).connectionVisibility.liquid, false);
@@ -330,8 +478,8 @@ test('local backup validates data, restores previous valid record and survives q
   const storage = { getItem: key => records.get(key) ?? null, setItem: (key, value) => { if (blocked) throw new Error('QuotaExceededError'); records.set(key, value); } };
   const store = createLocalStore(() => storage, '/test/');
   const validate = value => migrateDocument(value, new Map());
-  const empty = project([], { nodes: [], edges: [], plates: [] });
-  const edge = project([], createEdgeFromPoints({}, { x: 0, y: 0, z: 0 }, { x: cell(1), y: 0, z: 0 }));
+  const empty = project([], { nodes: [], edges: [], plates: [] }, undefined, undefined, DEFAULT_PROJECT_NAME);
+  const edge = project([], createEdgeFromPoints({}, { x: 0, y: 0, z: 0 }, { x: cell(1), y: 0, z: 0 }), undefined, undefined, DEFAULT_PROJECT_NAME);
   assert.equal(store.saveProject(empty, validate, 10).ok, true);
   assert.equal(store.saveProject(edge, validate, 20).ok, true);
   assert.deepEqual(store.loadProject(validate).record.document, edge);
@@ -439,6 +587,14 @@ test('known legacy document schema migrates only integer grid coordinates', () =
   assert.deepEqual(migrated.objects[0].scale, { x: 1, y: 1, z: 1 });
   assert.throws(() => migrateDocument({ ...legacy, components: [{ ...legacy.components[0], position: { x: .1, y: 0, z: 0 } }] }, definitions), /整数格/);
   assert.throws(() => migrateDocument({ format: 'anymaker-web-project', version: 99, objects: [] }, definitions), /Unsupported/);
+});
+test('current v1 migration preserves pre-provenance orphan nodes as authored data', () => {
+  const migrated = migrateDocument({
+    format: 'anymaker-web-project', version: 1, objects: [],
+    topology: { nodes: [{ id: 'legacy-orphan', position: { x: 0, y: 0, z: 0 } }], edges: [], plates: [] },
+  }, new Map());
+  assert.equal(migrated.topology.nodes[0].standalone, true);
+  assert.equal(pruneUnusedTopology(migrated.topology).nodes.length, 1);
 });
 test('history undo / redo and branching are snapshots, not aliases', () => {
   const h = new History([]); const values = [structuredClone(object)]; h.commit(values); values[0].position.x = 7;
@@ -580,6 +736,17 @@ test('native logic-link ports retain their definition index and wheel node posit
   assert.deepEqual(logicNodeCellPosition({ pos: [-1, 2, 1] }, [7, 9, 11], [0, 1, 1]), [-1, 11, 1]);
 });
 
+test('connection route endpoints extend one cell along the definition face direction', () => {
+  assert.deepEqual(connectionDirectionVector(1), [1, 0, 0]);
+  assert.deepEqual(connectionDirectionVector(2), [0, -1, 0]);
+  assert.deepEqual(connectionDirectionVector(3), [0, 1, 0]);
+  assert.deepEqual(connectionDirectionVector(4), [0, 0, -1]);
+  assert.deepEqual(connectionDirectionVector(5), [0, 0, 1]);
+  assert.equal(connectionDirectionVector(undefined), null);
+  assert.deepEqual(connectionRouteCellPosition({ pos: [2, 3, 4], direction: 4 }), [2, 3, 3]);
+  assert.deepEqual(connectionRouteCellPosition({ pos: [1, 1, 0], dir: 1 }, [2, 0, 0], [0, 0, 0]), [4, 1, 0]);
+});
+
 test('published component metadata cannot introduce Chinese into English names or port labels', () => {
   const definitionDirectory = new URL('../public/data/definitions/', import.meta.url);
   for (const file of readdirSync(definitionDirectory)) {
@@ -604,17 +771,51 @@ test('editor projects export a self-contained observed native data and meta pair
   const pair = toNativePairFromEditor(document);
   assert.deepEqual(pair.data.definitions.components, ['engine']);
   assert.equal(pair.data.vehicles.vehicles[0].grids[0].components[0].def, 0);
-  assert.deepEqual(pair.data.vehicles.vehicles[0].grids[0].components[0].pos, [1, 2, 3]);
+  assert.deepEqual(pair.data.vehicles.vehicles[0].grids[0].components[0].pos, [-1, 2, 3]);
   assert.deepEqual(pair.data.vehicles.vehicles[0].grids[0].components[0].colors, [26]);
   assert.deepEqual(pair.data.vehicles.vehicles[0].edges[0], { n0: 1, n1: 2, col: 26 });
-  assert.deepEqual(pair.data.vehicles.vehicles[0].plates[0].nodes, [1, 2, 3]);
+  assert.deepEqual(pair.data.vehicles.vehicles[0].plates[0].nodes, [3, 2, 1]);
   assert.equal(pair.data.vehicles.vehicles[0].plates[0].type, 'window');
-  assert.deepEqual(pair.data.vehicles.vehicles[0].electric_links[0].points, [[1, 0, 0]]);
+  assert.deepEqual(pair.data.vehicles.vehicles[0].electric_links[0].points, [[-1, 0, 0]]);
   assert.deepEqual(pair.meta.vehicles.vehicles[0].transform, { m: [1, 0, 0, 0, 1, 0, 0, 0, 1], t: [0, 0, 0] });
   const restored = toEditorDocument(parseNativePair(pair.data, pair.meta));
   assert.deepEqual(restored.objects[0].position, object.position);
   assert.equal(restored.topology.edges.length, 1);
   assert.equal(restored.topology.plates.length, 1);
+});
+test('native mechanical export reverses input-first links and omits default port zero', () => {
+  const definitions = new Map([
+    ['electric_relay', { logic_nodes: [{ type: 'mechanical_in' }] }],
+    ['button_push_round_off', { logic_nodes: [{}] }],
+  ]);
+  const relay = { ...object, id: 'relay', type: 'electric_relay' };
+  const button = { ...object, id: 'button', type: 'button_push_round_off', position: { x: cell(1), y: 0, z: 0 } };
+  const link = {
+    id: 'control', kind: 'mechanical', from: { componentId: 'relay', port: 0 }, to: { componentId: 'button', port: 0 },
+    points: [{ x: 0, y: 0, z: 0 }, { x: cell(1), y: 0, z: 0 }],
+  };
+  const byId = new Map([['relay', relay], ['button', button]]);
+  const oriented = orientMechanicalLink(link, byId, definitions);
+  assert.equal(oriented.from.componentId, 'button');
+  assert.deepEqual(oriented.points, [...link.points].reverse());
+  assert.equal(link.from.componentId, 'relay');
+  assert.equal(orientMechanicalLink({ ...link, kind: 'electric' }, byId, definitions).from.componentId, 'relay');
+  const vehicle = toNativePairFromEditor(project([relay, button], { nodes: [], edges: [], plates: [], links: [link] }), { componentDefinitions: definitions }).data.vehicles.vehicles[0];
+  assert.deepEqual(vehicle.mechanical_links, [{ p0: { comp: 2 }, p1: { comp: 1 }, points: [[-1, 0, 0], [0, 0, 0]] }]);
+});
+test('native export omits unreferenced editor nodes and keeps structural references intact', () => {
+  const document = project([], {
+    nodes: [
+      { id: 'orphan', position: { x: cell(2), y: 0, z: 0 }, standalone: true },
+      { id: 'a', position: { x: 0, y: 0, z: 0 } },
+      { id: 'b', position: { x: cell(1), y: 0, z: 0 } },
+    ],
+    edges: [{ id: 'edge', a: 'a', b: 'b' }], plates: [],
+  });
+  const vehicle = toNativePairFromEditor(document).data.vehicles.vehicles[0];
+  assert.deepEqual(vehicle.nodes.map(node => node.pos), [[0, 0, 0], [-1, 0, 0]]);
+  assert.deepEqual(vehicle.edges, [{ n0: 1, n1: 2 }]);
+  assert.throws(() => toNativePairFromEditor({ objects: [], topology: { nodes: [], edges: [{ a: 'missing', b: 'also-missing' }], plates: [] } }), /missing node/);
 });
 test('installed native items remain on their host component and export back into its element', () => {
   const native = {
@@ -649,6 +850,16 @@ test('regular wheel exposes every verified compatible wheel and tread accessory'
   assert.deepEqual(accessoryOptionsForComponent('battery_b'), ['battery_b']);
   assert.deepEqual(createNativeAccessoryItem('battery_a', 100), { _type: 'battery_a', id: 100 });
   assert.deepEqual(nativeAccessoryDefinition('battery_a').meshBinding.dynamicMeshes, [{ index: 0, path: 'meshes/components/battery_a.mesh', addComponentTool: false }]);
+  assert.deepEqual(accessoryOptionsForComponent('oil_filter'), ['oil_filter']);
+  assert.deepEqual(accessoryOptionsForComponent('air_filter'), ['air_filter']);
+  assert.deepEqual(accessoryOptionsForComponent('air_filter_b'), ['air_filter_b']);
+  assert.equal(defaultAccessoryForPlacement('oil_filter'), 'oil_filter');
+  assert.equal(defaultAccessoryForPlacement('air_filter'), 'air_filter');
+  assert.equal(defaultAccessoryForPlacement('air_filter_b'), 'air_filter_b');
+  assert.equal(defaultAccessoryForPlacement('battery_a'), null);
+  assert.deepEqual(createNativeAccessoryItem('oil_filter', 101), { _type: 'oil_filter', id: 101 });
+  assert.deepEqual(nativeAccessoryDefinition('oil_filter').meshBinding.dynamicMeshes, [{ index: 0, path: 'meshes/components/oil_filter_a.mesh', position: [0, .08, 0], addComponentTool: false }]);
+  assert.deepEqual(nativeAccessoryDefinition('air_filter').meshBinding.dynamicMeshes, [{ index: 0, path: 'meshes/components/air_filter_a.mesh', position: [.04, .16, .04], addComponentTool: false }]);
 });
 test('battery cells remain attached to their battery host at the native acc.item path', () => {
   const native = {
@@ -668,10 +879,61 @@ test('battery cells remain attached to their battery host at the native acc.item
   assert.deepEqual(exported.acc, native.vehicles.vehicles[0].grids[0].components[0].acc);
   assert.equal(exported.element, undefined);
 });
+test('filter media remain attached to their filter host at the native acc.item path', () => {
+  const native = {
+    definitions: { components: ['oil_filter'] },
+    vehicles: { vehicles: [{ id: 1, grids: [{ components: [{
+      def: 0, id: 33, pos: [2, 3, 4],
+      acc: { item: { _type: 'oil_filter', id: 40531 } },
+    }] }] }] },
+  };
+  const document = toEditorDocument(parseNativePair(native, {}));
+  const filter = document.objects.find(object => object.type === 'oil_filter');
+  assert.deepEqual(filter.nativeAccessory, native.vehicles.vehicles[0].grids[0].components[0].acc.item);
+  assert.equal(filter.nativeAccessoryContainer, 'acc');
+  const pair = toNativePairFromEditor(validateDocument(document, new Map([['oil_filter', {}]])));
+  const exported = pair.data.vehicles.vehicles[0].grids[0].components[0];
+  assert.deepEqual(exported.acc, native.vehicles.vehicles[0].grids[0].components[0].acc);
+  assert.equal(exported.element, undefined);
+});
 test('component paint RGB values resolve to deterministic native palette slots', () => {
-  assert.equal(nearestNativePaintIndex('#bd2636'), 26);
-  assert.equal(nativePaintColor(nearestNativePaintIndex('#bd2636')), '#bd2636');
+  assert.equal(paintColorValue(undefined), null);
+  assert.equal(paintColorValue(null), null);
+  assert.equal(paintColorValue('#AbC123'), '#abc123');
+  assert.equal(paintColorValue('not-a-color'), null);
+  assert.equal(officialPaintColors().length, 85);
+  assert.equal(nativePaintColor(0), '#cdba88');
+  assert.equal(nativePaintColor(26), '#861a22');
+  assert.equal(nativePaintColor(49), '#191e28');
+  assert.equal(nativePaintColor(84), '#0e0e10');
+  assert.equal(nativePaintColor(85), null);
+  assert.equal(nearestNativePaintIndex('#861a22'), 26);
+  assert.equal(nearestNativePaintIndex('#bd2636'), 35);
+  assert.ok(nearestNativePaintIndex('#ffffff') < 85);
   assert.equal(nearestNativePaintIndex('bd2636'), null);
+});
+test('native export maps RGB paint across components, edges, plate faces and links', () => {
+  const document = project([{ ...object, id: 'painted', colors: [79, 49], paintColor: '#861a22' }, { ...object, id: 'untouched', colors: [49] }], {
+    nodes: [{ id: 'a', position: { x: 0, y: 0, z: 0 } }, { id: 'b', position: { x: cell(1), y: 0, z: 0 } }, { id: 'c', position: { x: 0, y: cell(1), z: 0 } }],
+    edges: [{ id: 'painted-edge', a: 'a', b: 'b', col: 49, color: '#861a22' }, { id: 'untouched-edge', a: 'b', b: 'c', col: 49 }],
+    plates: [{ id: 'plate', nodeIds: ['a', 'b', 'c'], col_front: 49, col_back: 79, color_front: '#861a22' }],
+    links: [{ id: 'link', kind: 'electric', from: { componentId: 'painted' }, to: { componentId: 'untouched' }, points: [], color: 49, paintColor: '#861a22' }],
+  });
+  const vehicle = toNativePairFromEditor(document).data.vehicles.vehicles[0];
+  assert.deepEqual(vehicle.grids[0].components.map(component => component.colors), [[26, 26], [49]]);
+  assert.deepEqual(vehicle.edges.map(edge => edge.col), [26, 49]);
+  assert.deepEqual([vehicle.plates[0].col_front, vehicle.plates[0].col_back], [26, 79]);
+  assert.equal(vehicle.electric_links[0].color, 26);
+  assert.throws(() => toNativePairFromEditor(project([{ ...object, paintColor: 'red' }])), /Hex RGB/);
+});
+test('project names persist in documents and produce safe export file names', () => {
+  assert.equal(normalizeProjectName('  Research Vehicle  '), 'Research Vehicle');
+  assert.equal(normalizeProjectName('   '), DEFAULT_PROJECT_NAME);
+  assert.equal(projectFileBaseName('Test: Vehicle / Mk*2'), 'Test_ Vehicle _ Mk_2');
+  assert.equal(projectFileBaseName('CON'), DEFAULT_PROJECT_NAME);
+  const document = validateDocument(project([], undefined, undefined, undefined, 'Research Vehicle'), definitions);
+  assert.equal(document.projectName, 'Research Vehicle');
+  assert.match(toIntermediateXml(document), /name="Research Vehicle"/);
 });
 test('native component properties survive editor validation and native export', () => {
   const document = validateDocument(project([{ ...object, type: 'engine', nativeProperties: { user_defined_alias: 'Port engine', gear_count: 4, enabled: true } }]), definitions);
@@ -718,6 +980,44 @@ test('native export preserves combined XYZ component rotations', () => {
   const actual = restored.objects[0].rotation;
   for (const axis of ['x', 'y', 'z']) assert.ok(Math.abs(actual[axis] - rotation[axis]) < 1e-12, `${axis}: ${actual[axis]} !== ${rotation[axis]}`);
 });
+test('native YZ-plane conversion round-trips asymmetric structure, routes and orientation', () => {
+  const native = { definitions: { components: ['engine'] }, vehicles: { vehicles: [{ id: 1,
+    grids: [{ components: [
+      { def: 0, id: 1, pos: [-3, 2, 1], rot: [0, 0, -1, 0, 1, 0, 1, 0, 0] },
+      { def: 0, id: 2, pos: [1, -2, 0], rot: [1, 0, 0, 0, 1, 0, 0, 0, 1] },
+    ] }],
+    nodes: [{ id: 1, pos: [-4, 0, 0] }, { id: 2, pos: [2, 0, 0] }, { id: 3, pos: [2, 2, 0] }],
+    edges: [{ n0: 1, n1: 2 }],
+    plates: [{ id: 1, nodes: [1, 2, 3], col_front: 26, col_back: 49 }],
+    electric_links: [{ p0: { comp: 1, pos: 0 }, p1: { comp: 2, pos: 1 }, points: [[-2, 1, 0]] }],
+  }] } };
+  const document = toEditorDocument(parseNativePair(native, {}));
+  assert.deepEqual(document.objects.map(value => value.position.x), [.24, -.08]);
+  assert.ok(Math.abs(document.objects[0].rotation.y + Math.PI / 2) < 1e-12);
+  assert.deepEqual(document.topology.nodes.map(value => value.position.x), [.32, -.16, -.16]);
+  assert.deepEqual(document.topology.plates[0].nodeIds, ['grid-1-1:3', 'grid-1-1:2', 'grid-1-1:1']);
+  assert.deepEqual(document.topology.links[0].points, [{ x: .16, y: .08, z: 0 }]);
+  const pair = toNativePairFromEditor(document);
+  const output = pair.data.vehicles.vehicles[0];
+  assert.deepEqual(output.grids[0].components.map(value => value.pos), [[-3, 2, 1], [1, -2, 0]]);
+  for (const [index, value] of output.grids[0].components[0].rot.entries()) assert.ok(Math.abs(value - native.vehicles.vehicles[0].grids[0].components[0].rot[index]) < 1e-12);
+  assert.deepEqual(output.nodes.map(value => value.pos), [[-4, 0, 0], [2, 0, 0], [2, 2, 0]]);
+  assert.deepEqual(output.plates[0].nodes, [1, 2, 3]);
+  assert.deepEqual(output.electric_links[0].points, [[-2, 1, 0]]);
+  assert.deepEqual(pair.meta.vehicles.vehicles[0].bounds, { min: [-.32, -.16, 0], max: [.16, .16, .08] });
+});
+test('native Mesh visual basis mirrors local X without changing serialized component scale', () => {
+  const object = new THREE.Group();
+  const mesh = new THREE.Mesh(new THREE.BoxGeometry(.08, .08, .08));
+  mesh.position.x = .24;
+  object.add(mesh);
+  reflectVisualBasis(object, 'x');
+  object.position.x = .4;
+  object.updateMatrixWorld(true);
+  assert.equal(object.scale.x, 1);
+  assert.ok(Math.abs(mesh.getWorldPosition(new THREE.Vector3()).x - .16) < 1e-12);
+  mesh.geometry.dispose();
+});
 test('native surface grids use the game basis and mounting offset without moving vehicle topology', () => {
   const native = { definitions: { components: ['engine'] }, vehicles: { vehicles: [
     { id: 1, nodes: [{ id: 1, pos: [2, 5, 7] }], grids: [{ origin: [10, 20, 30], dir: [0, 3, 4], components: [{ def: 0, id: 1, pos: [2, 5, 7], rot: [1, 0, 0, 0, 1, 0, 0, 0, 1], connected_vehicle: 2, connected_component: 2 }] }], mechanical_links: [{ p0: { comp: 1, pos: 0 }, p1: { comp: 1, pos: 1 }, points: [[2, 5, 7]] }] },
@@ -732,7 +1032,7 @@ test('native surface grids use the game basis and mounting offset without moving
   // Y = (0, .6, .8), Z = X × Y = (0, .8, -.6).
   // get_transform adds node edge midpoint (0, .5, .5) + normal * .5.
   assert.equal(parent.nativeProjected, true);
-  assert.ok(Math.abs(parent.position.x - .64) < 1e-12);
+  assert.ok(Math.abs(parent.position.x + .64) < 1e-12);
   assert.ok(Math.abs(parent.position.y - 2.352) < 1e-12);
   assert.ok(Math.abs(parent.position.z - 2.456) < 1e-12);
   const rotation = new THREE.Matrix4().makeRotationFromEuler(new THREE.Euler(parent.rotation.x, parent.rotation.y, parent.rotation.z));
@@ -741,7 +1041,7 @@ test('native surface grids use the game basis and mounting offset without moving
   // Attachment offsets use the already transformed anchors, so a child
   // vehicle's connector occupies exactly the parent's grid-frame position.
   assert.deepEqual(childAnchor.position, parent.position);
-  assert.deepEqual(document.topology.nodes[0].position, { x: .16, y: .4, z: .56 });
+  assert.deepEqual(document.topology.nodes[0].position, { x: -.16, y: .4, z: .56 });
   assert.deepEqual(document.topology.links[0].points[0], document.topology.nodes[0].position);
   const validated = validateDocument(document, new Map([['engine', {}]]));
   assert.equal(validated.objects.length, 2);
@@ -782,9 +1082,9 @@ test('reference door handles align with the game surface grid on both door faces
     const object = document.objects.find(value => value.id === expected.id);
     assert.equal(object.type, 'mechanical_handle');
     const rotation = new THREE.Matrix4().makeRotationFromEuler(new THREE.Euler(object.rotation.x, object.rotation.y, object.rotation.z));
-    for (const [index, axis] of ['x', 'y', 'z'].entries()) assert.ok(Math.abs(object.position[axis] - expected.worldPosition[index]) < 1e-12, `${expected.id} ${axis}`);
+    for (const [index, axis] of ['x', 'y', 'z'].entries()) assert.ok(Math.abs(object.position[axis] - (axis === 'x' ? -expected.worldPosition[index] : expected.worldPosition[index])) < 1e-12, `${expected.id} ${axis}`);
     const normal = new THREE.Vector3(0, 1, 0).applyMatrix4(rotation);
-    assert.ok(normal.distanceTo(new THREE.Vector3(...expected.mountingNormal)) < 1e-12, `${expected.id} mounting normal`);
+    assert.ok(normal.distanceTo(new THREE.Vector3(-expected.mountingNormal[0], expected.mountingNormal[1], expected.mountingNormal[2])) < 1e-12, `${expected.id} mounting normal`);
     // Editing deltas must invert the same frame, without reapplying its origin.
     const grid = { origin: { x: 500, y: -70, z: 900 }, dir: Object.fromEntries(['x', 'y', 'z'].map((axis, index) => [axis, expected.gridDirection[index]])) };
     const delta = nativeGridLocalDelta(grid, { x: normal.x * .08, y: normal.y * .08, z: normal.z * .08 });
@@ -899,7 +1199,7 @@ test('connection commands preserve six link families and validate endpoints', ()
   assert.deepEqual(LINK_RENDER_STYLES, {
     electric: { radius: .009, radialSegments: 8 }, mechanical: { radius: .022, radialSegments: 8 },
     liquid: { radius: .021, radialSegments: 8 }, gas: { radius: .019, radialSegments: 8 },
-    belt: { radius: .014, radialSegments: 8 }, data: { radius: .0075, radialSegments: 8 },
+    belt: { linewidth: 3, dashSize: .04, gapSize: .025 }, data: { radius: .0075, radialSegments: 8 },
   });
   const componentIds = new Set(['source', 'target']);
   let links = [];
@@ -939,6 +1239,11 @@ test('node movement atomically merges coincident logical nodes and preserves val
   assert.deepEqual(validateTopologyState(merged), { nodes: merged.nodes, edges: merged.edges, plates: [] });
   assert.throws(() => moveNodeAndMerge(state, 'node-1', { x: .1, y: 0, z: 0 }), /整数格/);
   assert.deepEqual(state, before);
+  const authored = mergeNodes(
+    [{ ...state.nodes[0], standalone: true }, state.nodes[1], state.nodes[2]],
+    state.edges, state.plates, 'node-1', 'node-2',
+  );
+  assert.equal(authored.nodes.find(node => node.id === 'node-2').standalone, true);
 });
 test('topology deletion commands remove dependent references and keep the state valid', () => {
   const state = {
@@ -955,6 +1260,31 @@ test('topology deletion commands remove dependent references and keep the state 
   const withoutNode = removeNode(state, 'node-2');
   assert.deepEqual(withoutNode, { nodes: [state.nodes[0], state.nodes[2]], edges: [], plates: [] });
   assert.deepEqual(validateTopologyState(withoutNode), withoutNode);
+});
+test('unused generated topology nodes are collected while meaningful standalone and native nodes remain', () => {
+  const state = {
+    nodes: [
+      { id: 'used-a', position: { x: 0, y: 0, z: 0 } },
+      { id: 'used-b', position: { x: cell(1), y: 0, z: 0 } },
+      { id: 'plate-only', position: { x: 0, y: cell(1), z: 0 } },
+      { id: 'generated-orphan', position: { x: cell(2), y: 0, z: 0 } },
+      { id: 'standalone', position: { x: cell(3), y: 0, z: 0 }, standalone: true },
+      { id: 'native', position: { x: .13, y: .27, z: .41 }, nativeProjected: true },
+    ],
+    edges: [{ id: 'edge-1', a: 'used-a', b: 'used-b' }],
+    plates: [{ id: 'plate-1', nodeIds: ['used-a', 'used-b', 'plate-only'] }],
+  };
+  const cleaned = pruneUnusedTopology(state);
+  assert.deepEqual(cleaned.nodes.map(node => node.id), ['used-a', 'used-b', 'plate-only', 'standalone', 'native']);
+  assert.deepEqual(validateTopologyState(cleaned), cleaned);
+  assert.throws(() => validateTopologyState({ ...state, nodes: [{ id: 'bad', position: { x: 0, y: 0, z: 0 }, standalone: false }] }), /独立节点标记/);
+});
+test('deleting the last edge allows its generated endpoints to be collected', () => {
+  const state = createEdgeFromPoints({}, { x: 0, y: 0, z: 0 }, { x: cell(1), y: 0, z: 0 });
+  const cleaned = pruneUnusedTopology(removeEdge(state, state.edges[0].id));
+  assert.deepEqual(cleaned, { nodes: [], edges: [], plates: [] });
+  const standalone = { ...state, nodes: state.nodes.map((node, index) => index === 0 ? { ...node, standalone: true } : node) };
+  assert.deepEqual(pruneUnusedTopology(removeEdge(standalone, standalone.edges[0].id)).nodes.map(node => node.id), [state.nodes[0].id]);
 });
 test('edge creation is atomic and reuses logical endpoints', () => {
   const empty = { nodes: [], edges: [], plates: [] };
@@ -1227,8 +1557,39 @@ test('edge joints and connection routes cover shared nodes and route corners', (
   ], material, { radius: .02, radialSegments: 8 });
   assert.equal(route.children.length, 3);
   assert.equal(route.children.filter(child => child.geometry.type === 'CylinderGeometry').length, 2);
-  assert.equal(route.children.filter(child => child.geometry.type === 'SphereGeometry').length, 1);
+  assert.equal(route.children.filter(child => child.geometry.type === 'ConnectionElbowGeometry').length, 1);
+  assert.equal(material.flatShading, true);
+  const segment = route.children.find(child => child.geometry.type === 'CylinderGeometry');
+  assert.equal(segment.geometry.parameters.radialSegments, 8);
+  const ring = segment.geometry.attributes.position;
+  const top = Math.max(...Array.from({ length: 8 }, (_, index) => ring.getX(index)));
+  assert.equal(Array.from({ length: 8 }, (_, index) => Math.abs(ring.getX(index) - top) < 1e-6).filter(Boolean).length, 2);
+  assert.equal(route.children.find(child => child.geometry.type === 'ConnectionElbowGeometry').geometry.attributes.position.count, 8 * 8 * 6);
+  const stubbed = createConnectionRoute([
+    { x: 0, y: 0, z: 0 }, { x: cell(1), y: 0, z: 0 },
+    { x: cell(1), y: cell(1), z: 0 }, { x: cell(2), y: cell(1), z: 0 },
+  ], material, { radius: .02, radialSegments: 8, jointUserData: index => ({ pathIndex: index }) });
+  assert.equal(stubbed.children.filter(child => child.geometry.type === 'ConnectionElbowGeometry').length, 2);
+  assert.deepEqual(stubbed.children.filter(child => child.geometry.type === 'ConnectionElbowGeometry').map(child => child.userData.pathIndex), [0, 1]);
+  const noOffset = createConnectionRoute([
+    { x: 0, y: 0, z: 0 }, { x: 0, y: 0, z: 0 }, { x: cell(1), y: 0, z: 0 },
+  ], material);
+  assert.equal(noOffset.children.some(child => child.geometry.type === 'SphereGeometry'), false);
+  noOffset.traverse(object => object.geometry?.dispose());
+  stubbed.traverse(object => object.geometry?.dispose());
   joint.geometry.dispose(); route.traverse(object => object.geometry?.dispose()); material.dispose();
+});
+test('belt connection is one dashed node-to-node line with measured distances', () => {
+  const material = new LineMaterial({ color: 0x98a2b3, ...LINK_RENDER_STYLES.belt, dashed: true });
+  const line = createDashedConnection({ x: 0, y: 0, z: 0 }, { x: cell(3), y: cell(4), z: 0 }, material);
+  assert.equal(line.isLine2, true);
+  assert.equal(material.linewidth, 3);
+  assert.equal(material.dashed, true);
+  assert.equal(line.geometry.getAttribute('instanceStart').count, 1);
+  assert.equal(line.geometry.getAttribute('instanceDistanceStart').getX(0), 0);
+  assert.ok(Math.abs(line.geometry.getAttribute('instanceDistanceEnd').getX(0) - cell(5)) < 1e-6);
+  assert.equal(line.children.length, 0);
+  line.geometry.dispose(); material.dispose();
 });
 test('camera projection quantizes every world axis to the fixed integer grid', () => {
   const anchor = new THREE.Vector3(0, cell(2), 0);
@@ -1245,14 +1606,37 @@ test('camera projection quantizes every world axis to the fixed integer grid', (
     assert.ok(projectBuildPoint(ray.ray, frame).distanceTo(original) < 1e-9);
   }
 });
-test('component placement moves one block toward the camera from its nearest vehicle hit', () => {
+test('component placement follows the real Mesh surface normal without double offsetting', () => {
   const vehicle = new THREE.Mesh(new THREE.PlaneGeometry(1, 1), new THREE.MeshBasicMaterial({ side: THREE.DoubleSide }));
   vehicle.rotation.x = -Math.PI / 2; vehicle.position.y = .5;
   vehicle.updateMatrixWorld(true);
   const pointer = new THREE.Raycaster(new THREE.Vector3(.17, 1, .17), new THREE.Vector3(0, -1, 0));
   const workPlane = new THREE.Plane(new THREE.Vector3(0, 1, 0), 0);
   assert.deepEqual(resolvePlacementPoint(pointer, [vehicle], workPlane).toArray(), [cell(2), cell(7), cell(2)]);
+  const halfCell = CELL_SIZE_WORLD / 2;
+  const centredBlock = new THREE.Box3(new THREE.Vector3(-halfCell, -halfCell, -halfCell), new THREE.Vector3(halfCell, halfCell, halfCell));
+  assert.deepEqual(resolvePlacementPoint(pointer, [vehicle], workPlane, { placementBounds: centredBlock }).toArray(), [cell(2), cell(7), cell(2)]);
   assert.deepEqual(resolvePlacementPoint(pointer, [], workPlane).toArray(), [cell(2), 0, cell(2)]);
+  vehicle.geometry.dispose(); vehicle.material.dispose();
+});
+test('component placement uses side-face normals and the placed Mesh bounds', () => {
+  const vehicle = new THREE.Mesh(new THREE.BoxGeometry(CELL_SIZE_WORLD, CELL_SIZE_WORLD, CELL_SIZE_WORLD), new THREE.MeshBasicMaterial());
+  vehicle.position.set(0, cell(2), 0); vehicle.updateMatrixWorld(true);
+  const pointer = new THREE.Raycaster(new THREE.Vector3(1, cell(2), 0), new THREE.Vector3(-1, 0, 0));
+  const workPlane = new THREE.Plane(new THREE.Vector3(0, 1, 0), 0);
+  const halfCell = CELL_SIZE_WORLD / 2;
+  const placedBounds = new THREE.Box3(new THREE.Vector3(-CELL_SIZE_WORLD * 1.5, -halfCell, -halfCell), new THREE.Vector3(CELL_SIZE_WORLD * 1.5, halfCell, halfCell));
+  assert.deepEqual(resolvePlacementPoint(pointer, [vehicle], workPlane, { placementBounds: placedBounds }).toArray(), [cell(2), cell(2), 0]);
+  vehicle.geometry.dispose(); vehicle.material.dispose();
+});
+test('edge endpoint cube snaps outside component side faces', () => {
+  const vehicle = new THREE.Mesh(new THREE.BoxGeometry(CELL_SIZE_WORLD, CELL_SIZE_WORLD, CELL_SIZE_WORLD), new THREE.MeshBasicMaterial());
+  vehicle.position.set(0, cell(2), 0); vehicle.updateMatrixWorld(true);
+  const pointer = new THREE.Raycaster(new THREE.Vector3(1, cell(2), 0), new THREE.Vector3(-1, 0, 0));
+  const workPlane = new THREE.Plane(new THREE.Vector3(0, 1, 0), 0);
+  const point = resolvePlacementPoint(pointer, [vehicle], workPlane, { placementBounds: NODE_PLACEMENT_BOUNDS });
+  assert.deepEqual(point.toArray(), [cell(1), cell(2), 0]);
+  assert.ok(point.x + NODE_PLACEMENT_BOUNDS.min.x >= CELL_SIZE_WORLD / 2 - 1e-9);
   vehicle.geometry.dispose(); vehicle.material.dispose();
 });
 test('placement snaps to the outward side of nearby component envelopes', () => {

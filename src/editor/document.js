@@ -3,6 +3,7 @@ import { validateTopologyState } from './topology.js';
 import { assertGridScalar, assertGridVector, CELL_SIZE_CM } from './grid.js';
 import { validateNativeProperties } from './component-properties.js';
 import { validateNativeAccessory } from './native-accessories.js';
+import { normalizeProjectName } from './project-name.js';
 
 export const FORMAT = 'anymaker-web-project';
 export const VERSION = 1;
@@ -137,7 +138,7 @@ export function validateDocument(input, definitions) {
     }
     return result;
   });
-  const result = { format: FORMAT, version: VERSION, objects };
+  const result = { format: FORMAT, version: VERSION, projectName: normalizeProjectName(input.projectName), objects };
   if (input.topology !== undefined) result.topology = validateTopologyState(input.topology, new Set(objects.map(object => object.id)));
   const grids = normalizedGrids(input.grids, objects, result.topology);
   if (grids) result.grids = grids;
@@ -151,7 +152,23 @@ export function validateDocument(input, definitions) {
 
 export function migrateDocument(input, definitions) {
   if (!input || input.format !== FORMAT) throw new Error('Unsupported editor project format');
-  if (input.version === VERSION) return validateDocument(input, definitions);
+  if (input.version === VERSION) {
+    // Version 1 projects created before standalone node provenance existed may
+    // contain legitimate user-authored orphan nodes. Their shape is identical
+    // to historical construction residue, so migration must preserve them
+    // instead of silently guessing and deleting user data.
+    const migrated = structuredClone(input);
+    const topology = migrated.topology;
+    if (Array.isArray(topology?.nodes)) {
+      const referenced = new Set();
+      for (const edge of topology.edges || []) { referenced.add(edge.a); referenced.add(edge.b); }
+      for (const plate of topology.plates || []) for (const nodeId of plate.nodeIds || []) referenced.add(nodeId);
+      topology.nodes = topology.nodes.map(node => node && !referenced.has(node.id) && node.nativeProjected !== true && node.standalone === undefined
+        ? { ...node, standalone: true }
+        : node);
+    }
+    return validateDocument(migrated, definitions);
+  }
   if (input.version !== 0) throw new Error('Unsupported editor project schema version: ' + input.version);
   const source = Array.isArray(input.objects) ? input.objects : Array.isArray(input.components) ? input.components : [];
   const objects = source.map((value, index) => ({
@@ -162,11 +179,12 @@ export function migrateDocument(input, definitions) {
     rotation: value.rotation || { x: 0, y: 0, z: 0 },
     scale: value.scale || { x: 1, y: 1, z: 1 },
   }));
-  return validateDocument({ format: FORMAT, version: VERSION, objects, topology: input.topology, visibilityGroups: input.visibilityGroups, grids: input.grids }, definitions);
+  return validateDocument({ format: FORMAT, version: VERSION, projectName: input.projectName, objects, topology: input.topology, visibilityGroups: input.visibilityGroups, grids: input.grids }, definitions);
 }
 
-export function project(objects, topology, visibilityGroups, grids) {
+export function project(objects, topology, visibilityGroups, grids, projectName) {
   const result = { format: FORMAT, version: VERSION, objects: structuredClone(objects) };
+  if (projectName !== undefined) result.projectName = normalizeProjectName(projectName);
   if (topology !== undefined) result.topology = validateTopologyState(topology, new Set(objects.map(object => object.id)));
   if (visibilityGroups?.length) result.visibilityGroups = structuredClone(visibilityGroups);
   if (grids !== undefined) result.grids = structuredClone(grids);
@@ -191,7 +209,7 @@ export function toIntermediateXml(document) {
   const nodes = topology.nodes.map(node => '  <node id="' + escapeXml(node.id) + '" x="' + node.position.x.toFixed(6) + '" y="' + node.position.y.toFixed(6) + '" z="' + node.position.z.toFixed(6) + '"/>');
   const edges = topology.edges.map(edge => '  <edge id="' + escapeXml(edge.id) + '" a="' + escapeXml(edge.a) + '" b="' + escapeXml(edge.b) + '"/>');
   const plates = topology.plates.map(plate => '  <plate id="' + escapeXml(plate.id) + '" nodes="' + plate.nodeIds.map(escapeXml).join(' ') + '"/>');
-  return ['<?xml version="1.0" encoding="UTF-8"?>', '<!-- EDITOR INTERCHANGE ONLY. Not a verified Anymaker vehicle save. -->', `<anymaker-web-project version="1" game-compatible="false" coordinate-unit="world" grid-cell-size-cm="${CELL_SIZE_CM}">`, '<topology>', ...nodes, ...edges, ...plates, '</topology>', ...components, '</anymaker-web-project>'].join(String.fromCharCode(10));
+  return ['<?xml version="1.0" encoding="UTF-8"?>', '<!-- EDITOR INTERCHANGE ONLY. Not a verified Anymaker vehicle save. -->', `<anymaker-web-project version="1" name="${escapeXml(normalizeProjectName(document.projectName))}" game-compatible="false" coordinate-unit="world" grid-cell-size-cm="${CELL_SIZE_CM}">`, '<topology>', ...nodes, ...edges, ...plates, '</topology>', ...components, '</anymaker-web-project>'].join(String.fromCharCode(10));
 }
 
 export class History {

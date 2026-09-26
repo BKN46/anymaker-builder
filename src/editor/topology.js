@@ -45,6 +45,7 @@ export function validateTopologyState(state = {}, componentIds = null) {
   for (const node of nodes) {
     if (!node || typeof node.id !== 'string' || !node.id || nodeIds.has(node.id)) throw new Error('节点 ID 无效或重复');
     if (node.nativeProjected !== undefined && node.nativeProjected !== true) throw new Error('节点原生投影标记无效');
+    if (node.standalone !== undefined && node.standalone !== true) throw new Error('独立节点标记无效');
     if (node.hidden !== undefined && typeof node.hidden !== 'boolean') throw new Error('节点可见性无效');
     const nativeProjected = node.nativeProjected === true;
     const gridPosition = nativeProjected ? node.position : assertGridVector(node.position, '节点坐标');
@@ -79,6 +80,22 @@ export function validateTopologyState(state = {}, componentIds = null) {
     normalizedPlates.push({ ...clone(plate), ...(surfaceDirection ? { surfaceDirection } : {}) });
   }
   return { nodes: normalizedNodes, edges: clone(edges), plates: normalizedPlates, ...(state.links !== undefined ? { links } : {}) };
+}
+
+// Edge and panel construction creates endpoint nodes as an implementation
+// detail. Once no structural record references such a node, retaining it only
+// bloats project snapshots, history, rendering and native export. Explicitly
+// authored standalone nodes and native projected records remain meaningful
+// even without an edge or panel, so they are never collected here.
+export function pruneUnusedTopology(state = {}, { preserveNodeIds = [] } = {}) {
+  const next = validateTopologyState(state);
+  const referenced = new Set(preserveNodeIds);
+  for (const edge of next.edges) { referenced.add(edge.a); referenced.add(edge.b); }
+  for (const plate of next.plates) for (const nodeId of plate.nodeIds) referenced.add(nodeId);
+  return {
+    ...next,
+    nodes: next.nodes.filter(node => referenced.has(node.id) || node.standalone === true || node.nativeProjected === true),
+  };
 }
 
 function newId(values, prefix) {
@@ -125,7 +142,9 @@ export function moveNodeAndMerge(state, nodeId, value) {
 
 export function mergeNodes(nodes, edges, plates, sourceId, targetId, links) {
   if (sourceId === targetId) throw new Error('不能将节点合并到自身');
-  if (!nodes.some(node => node.id === sourceId) || !nodes.some(node => node.id === targetId)) throw new Error('合并节点不存在');
+  const sourceNode = nodes.find(node => node.id === sourceId);
+  const targetNode = nodes.find(node => node.id === targetId);
+  if (!sourceNode || !targetNode) throw new Error('合并节点不存在');
   const nextEdges = [];
   const seenEdges = new Set();
   for (const edge of edges) {
@@ -140,7 +159,10 @@ export function mergeNodes(nodes, edges, plates, sourceId, targetId, links) {
   const nextPlates = clone(plates).map(plate => ({ ...plate, nodeIds: plate.nodeIds.map(id => id === sourceId ? targetId : id) }))
     .map(plate => ({ ...plate, nodeIds: plate.nodeIds.filter((id, index, ids) => ids.indexOf(id) === index) }))
     .filter(plate => plate.nodeIds.length >= 3);
-  return { nodes: nodes.filter(node => node.id !== sourceId).map(clone), edges: nextEdges, plates: nextPlates, ...(links !== undefined ? { links: clone(links) } : {}), idMap: { [sourceId]: targetId } };
+  const nextNodes = nodes.filter(node => node.id !== sourceId).map(node => node.id === targetId && sourceNode.standalone === true
+    ? { ...clone(node), standalone: true }
+    : clone(node));
+  return { nodes: nextNodes, edges: nextEdges, plates: nextPlates, ...(links !== undefined ? { links: clone(links) } : {}), idMap: { [sourceId]: targetId } };
 }
 
 export function removeNode(state, nodeId) {

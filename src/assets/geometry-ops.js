@@ -69,3 +69,13 @@ export function reflectObject(object, axis) {
   });
   return object;
 }
+
+export function reflectVisualBasis(object, axis) {
+  if (axisIndex(axis) === undefined) throw new Error('Invalid reflection axis');
+  const visual = new THREE.Group();
+  visual.name = 'native-coordinate-basis';
+  while (object.children.length) visual.add(object.children[0]);
+  visual.scale[axis] = -1;
+  object.add(visual);
+  return object;
+}

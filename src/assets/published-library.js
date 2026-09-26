@@ -18,6 +18,10 @@ function isWheelTyreMesh(source) {
   return /\/car_wheel(?:_b_1|_trims_a)?\.mesh$/.test(source || '');
 }
 
+function isFilterMediaComponent(id) {
+  return ['oil_filter', 'air_filter', 'air_filter_b'].includes(id);
+}
+
 export function applyMeshTransform(mesh, transform) {
   if (transform?.position) mesh.position.set(...transform.position);
   // `preview_rot` in the native binding is a row-major 3×3 rotation
@@ -61,11 +65,10 @@ export function staticMeshParts(definition, binding, extension, manifest) {
     const end = variantPath(staticMesh, axis, 2);
     if (!middle || !end || !manifest.entries[middle] || !manifest.entries[end]) continue;
     const tiles = length / interval;
-    // Variant 0 and 2 are the anchored and far caps. Variant 1 fills only
-    // the intervals *between* them: inserting one for every extension
-    // interval adds a whole extra tile and turns even-length engines into
-    // visibly odd-length assemblies.
-    for (let tile = 1; tile < tiles; tile++) {
+    // Engine variant 1 represents each added interval. Other tiled parts
+    // use the far cap for the last interval instead.
+    const middleCount = definition.class === 'engine' ? tiles : tiles - 1;
+    for (let tile = 1; tile <= middleCount; tile++) {
       const position = [0, 0, 0]; position[index] = tile * interval * CELL_SIZE_WORLD;
       parts.push({ path: middle, transform: { position } });
     }
@@ -187,7 +190,9 @@ export class PublishedAssetLibrary {
       // separate native accessory. Older generated bindings appended these
       // three tyre meshes to the wheel, so deliberately ignore that legacy
       // binding tail while retaining the published files for the accessory.
-      const dynamicMeshes = (binding.dynamicMeshes || []).filter(item => item.path && !(definition.id === 'wheel' && isWheelTyreMesh(item.path)));
+      const dynamicMeshes = (binding.dynamicMeshes || []).filter(item => item.path
+        && !(definition.id === 'wheel' && isWheelTyreMesh(item.path))
+        && !isFilterMediaComponent(definition.id));
       const parts = [...staticParts, ...dynamicMeshes.map(item => ({ path: item.path, transform: item }))];
       if (!parts.length) return this.fallback.instantiate(definition, { nativeExtension: extension });
       const parsed = await Promise.all(parts.map(part => this.parse(part.path)));

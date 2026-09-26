@@ -69,12 +69,24 @@ const batteryAccessories = {
   battery_a: { name: 'Battery', name_zh: '电池', mesh: 'meshes/components/battery_a.mesh' },
   battery_b: { name: 'Battery', name_zh: '电池', mesh: 'meshes/components/battery_b.mesh' },
 };
-const accessories = { ...wheelAccessories, ...batteryAccessories };
+// Filter media are inventory items attached to their filter housing through
+// the native acc.item path, just like battery cells.
+const filterAccessories = {
+  oil_filter: { name: 'Oil Filter', name_zh: '机油滤清器', mesh: 'meshes/components/oil_filter_a.mesh', category: 'liquid', position: [0, .08, 0] },
+  air_filter: { name: 'Air Filter', name_zh: '空气滤清器', mesh: 'meshes/components/air_filter_a.mesh', category: 'gas', position: [.04, .16, .04] },
+  air_filter_b: { name: 'Air Filter', name_zh: '空气滤清器', mesh: 'meshes/components/air_filter_b.mesh', category: 'gas', position: [.04, .355, .04] },
+};
+const accessories = { ...wheelAccessories, ...batteryAccessories, ...filterAccessories };
 const tyreRotation = [1, 0, 0, 0, 0, -1, 0, 1, 0];
 
 export function accessoryOptionsForComponent(type) {
   if (['wheel', 'wheel_b'].includes(type)) return Object.keys(wheelAccessories);
+  if (filterAccessories[type]) return [type];
   return batteryAccessories[type] ? [type] : [];
+}
+
+export function defaultAccessoryForPlacement(type) {
+  return filterAccessories[type] ? type : null;
 }
 
 export function createNativeAccessoryItem(itemType, id) {
@@ -127,6 +139,21 @@ export function nativeAccessoryDefinition(itemType) {
         dynamicMeshes: [{ index: 0, path: battery.mesh, addComponentTool: false }],
       },
       meshes_dynamic: [{ path: battery.mesh }],
+    };
+  }
+  const filter = filterAccessories[itemType];
+  if (filter) {
+    return {
+      id: `native-accessory-${itemType}`,
+      name: filter.name,
+      name_zh: filter.name_zh,
+      category: filter.category,
+      class: 'native_accessory',
+      meshBinding: {
+        staticMesh: null,
+        dynamicMeshes: [{ index: 0, path: filter.mesh, position: filter.position, addComponentTool: false }],
+      },
+      meshes_dynamic: [{ path: filter.mesh, pos: filter.position }],
     };
   }
   return {

@@ -1,4 +1,6 @@
 import * as THREE from 'three';
+import { Line2 } from 'three/addons/lines/Line2.js';
+import { LineGeometry } from 'three/addons/lines/LineGeometry.js';
 import { CELL_SIZE_WORLD, AXES, assertGridVector, quantizeWorldVector, worldToCell } from './grid.js';
 
 export const GRID_SIZE = 20;
@@ -7,6 +9,10 @@ export const GRID_CELL_SIZE = CELL_SIZE_WORLD;
 export const EDGE_WIDTH = GRID_CELL_SIZE;
 export const EDGE_JOINT_SIZE = EDGE_WIDTH * 1.1;
 export const STRUCTURE_COLOR = 0xcccccc;
+export const NODE_PLACEMENT_BOUNDS = new THREE.Box3(
+  new THREE.Vector3(-EDGE_WIDTH / 2, -EDGE_WIDTH / 2, -EDGE_WIDTH / 2),
+  new THREE.Vector3(EDGE_WIDTH / 2, EDGE_WIDTH / 2, EDGE_WIDTH / 2),
+);
 const EPSILON = 1e-6;
 const PLACEMENT_SURFACE_EPSILON = CELL_SIZE_WORLD * .01;
 const EDGE_OUTLINE_NAME = 'edge-outline';
@@ -30,11 +36,49 @@ export function projectBuildPoint(ray, frame) {
   return gridPoint ? vector(gridPoint) : null;
 }
 
-function quantizePlacementPoint(point, direction = null, distance = 0) {
-  const adjusted = point.clone();
-  if (direction && distance) adjusted.addScaledVector(direction, distance);
-  const gridPoint = quantizeWorldVector(adjusted);
-  return gridPoint ? vector(gridPoint) : null;
+function placementBoundsCorners(bounds) {
+  if (!bounds || bounds.isEmpty()) return null;
+  const corners = [];
+  for (const x of [bounds.min.x, bounds.max.x]) for (const y of [bounds.min.y, bounds.max.y]) for (const z of [bounds.min.z, bounds.max.z]) {
+    corners.push(new THREE.Vector3(x, y, z));
+  }
+  return corners;
+}
+
+function quantizePlacementPoint(point, direction = null, distance = 0, placementBounds = null) {
+  const corners = placementBoundsCorners(placementBounds);
+  if (!direction || !corners) {
+    const adjusted = point.clone();
+    if (direction && distance) adjusted.addScaledVector(direction, distance);
+    const gridPoint = quantizeWorldVector(adjusted);
+    return gridPoint ? vector(gridPoint) : null;
+  }
+  const outward = direction.clone().normalize();
+  const minimumProjection = Math.min(...corners.map(corner => corner.dot(outward)));
+  const desired = point.clone().addScaledVector(outward, -minimumProjection);
+  const rounded = quantizeWorldVector(desired);
+  if (!rounded) return null;
+  const base = vector(rounded);
+  const surfaceProjection = point.dot(outward);
+  let best = null;
+  // Independent XYZ rounding can move an oblique component back through the
+  // hit triangle. Search the neighbouring grid points for the closest origin
+  // whose nearest bound remains on the outward side of the real Mesh plane.
+  for (const dx of [-1, 0, 1]) for (const dy of [-1, 0, 1]) for (const dz of [-1, 0, 1]) {
+    const candidate = base.clone().add(new THREE.Vector3(dx, dy, dz).multiplyScalar(CELL_SIZE_WORLD));
+    if (candidate.dot(outward) + minimumProjection < surfaceProjection - PLACEMENT_SURFACE_EPSILON) continue;
+    const score = candidate.distanceToSquared(desired);
+    if (!best || score < best.score) best = { point: candidate, score };
+  }
+  return best?.point || base;
+}
+
+function hitWorldNormal(hit, ray) {
+  const normal = hit?.face?.normal?.clone();
+  if (!normal || !hit.object) return ray.direction.clone().negate().normalize();
+  normal.applyMatrix3(new THREE.Matrix3().getNormalMatrix(hit.object.matrixWorld)).normalize();
+  if (normal.dot(ray.direction) > 0) normal.negate();
+  return normal;
 }
 
 function adjacentPlacementHit(ray, targets, padding = CELL_SIZE_WORLD / 2) {
@@ -53,25 +97,26 @@ function adjacentPlacementHit(ray, targets, padding = CELL_SIZE_WORLD / 2) {
     if (normal.lengthSq() <= EPSILON) continue;
     normal.normalize();
     if (normal.dot(ray.direction) > 0) normal.negate();
-    nearest = { point, normal, distance };
+    nearest = { point: closest, normal, distance };
   }
   return nearest;
 }
 
 // Structural coordinates identify cells, rather than their visible boundary
-// lines. Component placement uses the closest real hit, displaced by one
-// block towards the camera so the new item stays outside the collided mesh.
-// It then falls back to an expanded component envelope and finally Y=0.
-export function resolvePlacementPoint(pointerRaycaster, targets, workPlane, { adjacentTargets = [], adjacentPadding = CELL_SIZE_WORLD / 2, hitPadding = CELL_SIZE_WORLD } = {}) {
+// lines. Component placement uses the closest real triangle and its world
+// normal together with the placed Mesh bounds. It falls back to an expanded
+// component envelope and finally the Y=0 work plane.
+export function resolvePlacementPoint(pointerRaycaster, targets, workPlane, { adjacentTargets = [], adjacentPadding = CELL_SIZE_WORLD / 2, hitPadding = CELL_SIZE_WORLD, placementBounds = null } = {}) {
   const ray = pointerRaycaster.ray;
   const hit = pointerRaycaster.intersectObjects(targets, true)[0];
-  const point = hit && quantizePlacementPoint(hit.point, ray.direction.clone().negate(), hitPadding);
+  const point = hit && quantizePlacementPoint(hit.point, hitWorldNormal(hit, ray), hitPadding, placementBounds);
   if (point) return point;
   const adjacent = adjacentPlacementHit(ray, adjacentTargets, adjacentPadding);
-  const adjacentPoint = adjacent && quantizePlacementPoint(adjacent.point, adjacent.normal, PLACEMENT_SURFACE_EPSILON);
+  const adjacentPoint = adjacent && quantizePlacementPoint(adjacent.point, adjacent.normal, PLACEMENT_SURFACE_EPSILON, placementBounds);
   if (adjacentPoint) return adjacentPoint;
   const planePoint = ray.intersectPlane(workPlane, new THREE.Vector3());
-  const planeGridPoint = planePoint && quantizeWorldVector(planePoint);
+  if (!planePoint) return null;
+  const planeGridPoint = quantizeWorldVector(planePoint);
   return planeGridPoint ? vector(planeGridPoint) : null;
 }
 
@@ -427,15 +472,35 @@ export function rayFacingPlateSide(faceNormal, matrixWorld, rayDirection) {
   return normal.lengthSq() > EPSILON && normal.dot(rayDirection) > 0 ? 'back' : 'front';
 }
 
-function routeSegment(start, end, material, radius, radialSegments) {
-  const mesh = new THREE.Mesh(new THREE.CylinderGeometry(.5, .5, 1, radialSegments), material);
-  const direction = end.clone().sub(start);
-  const length = direction.length();
-  if (length <= EPSILON) { mesh.visible = false; return mesh; }
-  const localY = direction.multiplyScalar(1 / length);
+function facetedRouteMaterial(material) {
+  // Connection pipes use deliberately faceted normals so an octagonal
+  // section remains legible under the standard material lighting.
+  if (material?.isMaterial && material.flatShading !== true) {
+    material.flatShading = true;
+    material.needsUpdate = true;
+  }
+  return material;
+}
+
+function routeFrame(direction) {
+  const localY = direction.clone().normalize();
   const reference = Math.abs(localY.z) < .999 ? new THREE.Vector3(0, 0, 1) : new THREE.Vector3(1, 0, 0);
   const localZ = reference.addScaledVector(localY, -reference.dot(localY)).normalize();
   const localX = new THREE.Vector3().crossVectors(localY, localZ).normalize();
+  return { localX, localY, localZ };
+}
+
+function routeSegment(start, end, material, radius, radialSegments) {
+  const geometry = new THREE.CylinderGeometry(.5, .5, 1, radialSegments);
+  // Roll the section by half a facet step so the octagon presents a flat
+  // upper face instead of a vertex. The roll is carried through the segment
+  // quaternion below for every world-axis direction.
+  geometry.rotateY(Math.PI / radialSegments);
+  const mesh = new THREE.Mesh(geometry, material);
+  const direction = end.clone().sub(start);
+  const length = direction.length();
+  if (length <= EPSILON) { mesh.visible = false; return mesh; }
+  const { localX, localY, localZ } = routeFrame(direction);
   mesh.position.copy(start).add(end).multiplyScalar(.5);
   mesh.quaternion.setFromRotationMatrix(new THREE.Matrix4().makeBasis(localX, localY, localZ));
   mesh.scale.set(radius * 2, length, radius * 2);
@@ -443,16 +508,86 @@ function routeSegment(start, end, material, radius, radialSegments) {
   return mesh;
 }
 
-// Build each link as solid segments and blend every route corner with a small
-// sphere. This retains the save's exact routed points while avoiding the
-// disjoint dashed-line appearance and open corners of independent segments.
+function routeElbow(entry, corner, exit, radius, radialSegments) {
+  const curve = new THREE.QuadraticBezierCurve3(entry, corner, exit);
+  const steps = Math.max(8, radialSegments);
+  const frames = [];
+  for (let index = 0; index <= steps; index++) {
+    const tangent = curve.getTangent(index / steps).normalize();
+    const localZ = index === 0 ? routeFrame(tangent).localZ : frames[index - 1].localZ.clone()
+      .applyQuaternion(new THREE.Quaternion().setFromUnitVectors(frames[index - 1].tangent, tangent));
+    localZ.addScaledVector(tangent, -localZ.dot(tangent)).normalize();
+    frames.push({ point: curve.getPoint(index / steps), tangent, localZ });
+  }
+  const final = frames.at(-1);
+  const targetZ = routeFrame(final.tangent).localZ;
+  const correction = Math.atan2(
+    final.tangent.dot(new THREE.Vector3().crossVectors(final.localZ, targetZ)),
+    final.localZ.dot(targetZ),
+  );
+  const rings = frames.map((frame, index) => {
+    const localZ = frame.localZ.clone().applyAxisAngle(frame.tangent, correction * index / steps);
+    const localX = new THREE.Vector3().crossVectors(frame.tangent, localZ).normalize();
+    return Array.from({ length: radialSegments }, (_, side) => {
+      const angle = (side * 2 + 1) * Math.PI / radialSegments;
+      return frame.point.clone().addScaledVector(localX, Math.sin(angle) * radius)
+        .addScaledVector(localZ, Math.cos(angle) * radius);
+    });
+  });
+  const positions = [];
+  for (let step = 0; step < steps; step++) for (let side = 0; side < radialSegments; side++) {
+    const next = (side + 1) % radialSegments;
+    for (const point of [rings[step][side], rings[step][next], rings[step + 1][side],
+      rings[step][next], rings[step + 1][next], rings[step + 1][side]]) positions.push(...point.toArray());
+  }
+  const geometry = new THREE.BufferGeometry();
+  geometry.setAttribute('position', new THREE.Float32BufferAttribute(positions, 3));
+  geometry.computeVertexNormals();
+  geometry.type = 'ConnectionElbowGeometry';
+  return geometry;
+}
+
+export function createDashedConnection(start, end, material) {
+  const geometry = new LineGeometry().setPositions([...vector(start).toArray(), ...vector(end).toArray()]);
+  const line = new Line2(geometry, material);
+  line.computeLineDistances();
+  return line;
+}
+
+// Keep route points exact while replacing sharp segment joins with short,
+// same-radius elbows. The geometry alone is trimmed; saved points do not move.
 export function createConnectionRoute(points, material, { radius = .015, radialSegments = 8, jointUserData = null } = {}) {
   const route = new THREE.Group();
+  facetedRouteMaterial(material);
   const path = points.map(point => vector(point));
-  for (let index = 1; index < path.length; index++) route.add(routeSegment(path[index - 1], path[index], material, radius, radialSegments));
+  const trim = path.map(() => 0);
   for (let index = 1; index < path.length - 1; index++) {
-    const joint = new THREE.Mesh(new THREE.SphereGeometry(radius, radialSegments, Math.max(4, Math.ceil(radialSegments / 2))), material);
-    joint.position.copy(path[index]); joint.castShadow = true; joint.receiveShadow = true;
+    const before = path[index].distanceTo(path[index - 1]);
+    const after = path[index + 1].distanceTo(path[index]);
+    if (before > EPSILON && after > EPSILON) trim[index] = Math.min(radius * 1.4, before * .35, after * .35);
+  }
+  for (let index = 1; index < path.length; index++) {
+    const direction = path[index].clone().sub(path[index - 1]).normalize();
+    const start = path[index - 1].clone().addScaledVector(direction, trim[index - 1]);
+    const end = path[index].clone().addScaledVector(direction, -trim[index]);
+    route.add(routeSegment(start, end, material, radius, radialSegments));
+  }
+  for (let index = 1; index < path.length - 1; index++) {
+    if (trim[index] <= EPSILON) continue;
+    const corner = path[index];
+    const incoming = corner.clone().sub(path[index - 1]).normalize();
+    const outgoing = path[index + 1].clone().sub(corner).normalize();
+    let geometry;
+    if (incoming.dot(outgoing) > -.999) {
+      const entry = corner.clone().addScaledVector(incoming, -trim[index]);
+      const exit = corner.clone().addScaledVector(outgoing, trim[index]);
+      geometry = routeElbow(entry, corner, exit, radius, radialSegments);
+    } else {
+      geometry = new THREE.SphereGeometry(radius, radialSegments, Math.max(4, Math.ceil(radialSegments / 2)));
+    }
+    const joint = new THREE.Mesh(geometry, material);
+    if (geometry.type !== 'ConnectionElbowGeometry') joint.position.copy(corner);
+    joint.castShadow = true; joint.receiveShadow = true;
     if (jointUserData) Object.assign(joint.userData, jointUserData(index - 1) || {});
     route.add(joint);
   }

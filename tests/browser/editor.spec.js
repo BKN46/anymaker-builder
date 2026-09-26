@@ -38,6 +38,7 @@ test('GitHub build status remains visible when no Pages run succeeds', async ({ 
 });
 
 test('Mesh → placement → transforms → history → files on Pages subpath', async ({ page }) => {
+  await page.addInitScript(() => { window.showSaveFilePicker = undefined; });
   const errors = []; page.on('pageerror', error => errors.push(error.message));
   await page.goto('./');
   await expect(page.locator('#viewport')).toHaveAttribute('data-ready', 'true');
@@ -196,9 +197,12 @@ test('native JSON maps through the domain model and imports components', async (
   await expect(page.locator('#native-export-btn')).toBeEnabled();
   const freshNativeDownloads = [];
   page.on('download', download => freshNativeDownloads.push(download));
+  await expect(page.locator('#project-name')).toHaveValue('anymaker-vehicle');
+  await page.locator('#project-name').fill('My: Vehicle');
+  await page.locator('#project-name').press('Tab');
   await page.locator('#save-btn').click();
   await expect.poll(() => freshNativeDownloads.length).toBe(2);
-  expect((await Promise.all(freshNativeDownloads.map(download => download.suggestedFilename()))).sort()).toEqual(['anymaker-vehicle.data', 'anymaker-vehicle.meta']);
+  expect((await Promise.all(freshNativeDownloads.map(download => download.suggestedFilename()))).sort()).toEqual(['My_ Vehicle.data', 'My_ Vehicle.meta']);
   await page.locator('#library-btn').click();
   await expect(page.locator('#right-sidebar')).toBeVisible();
   await expect(page.locator('#right-tab-resources')).toHaveAttribute('aria-selected', 'true');
@@ -212,6 +216,7 @@ test('native JSON maps through the domain model and imports components', async (
     { name: 'vehicle.data', mimeType: 'application/json', buffer: Buffer.from(JSON.stringify(native)) },
     { name: 'vehicle.meta', mimeType: 'application/json', buffer: Buffer.from(JSON.stringify(meta)) },
   ]);
+  await expect(page.locator('#project-name')).toHaveValue('vehicle');
   await expect(page.locator('#object-count')).toHaveText('1 个组件', { timeout: 30000 });
   await expect(page.locator('#native-summary')).toContainText('已导入 vehicle.data / vehicle.meta');
   await expect(page.locator('#native-import-btn')).toHaveCount(0);
@@ -234,6 +239,95 @@ test('native JSON maps through the domain model and imports components', async (
   await page.locator('#native-input').setInputFiles({ name: 'other.data', mimeType: 'application/json', buffer: Buffer.from(JSON.stringify(native)) });
   await expect(page.locator('#native-export-btn')).toBeEnabled();
   await expect(page.locator('#native-summary')).toContainText('请同时选择一份 .data 和一份 .meta 文件');
+});
+
+test('native import centers a half-cell-wide structure without moving nodes off the construction grid', async ({ page }) => {
+  await page.goto('./');
+  await expect(page.locator('#viewport')).toHaveAttribute('data-ready', 'true');
+  const native = {
+    definitions: { components: [] },
+    vehicles: { vehicles: [{
+      id: 1,
+      transform: { m: [1, 0, 0, 0, 1, 0, 0, 0, 1], t: [0, 0, 0] },
+      nodes: [{ id: 1, pos: [0, 0, 0] }, { id: 2, pos: [3, 0, 0] }],
+      edges: [{ n0: 1, n1: 2 }],
+      plates: [], grids: [{ components: [] }],
+    }] },
+  };
+  await page.locator('#native-input').setInputFiles([
+    { name: 'half-cell.data', mimeType: 'application/json', buffer: Buffer.from(JSON.stringify(native)) },
+    { name: 'half-cell.meta', mimeType: 'application/json', buffer: Buffer.from('{}') },
+  ]);
+  await expect(page.locator('#topology-count')).toContainText('2 节点');
+  const imported = await saveProject(page);
+  expect(imported.topology.edges).toHaveLength(1);
+  const xPositions = imported.topology.nodes.map(node => node.position.x).sort((a, b) => a - b);
+  expect(xPositions[1] - xPositions[0]).toBeCloseTo(3 * .08, 10);
+  for (const node of imported.topology.nodes) for (const axis of ['x', 'y', 'z']) {
+    expect(node.position[axis] / .08).toBeCloseTo(Math.round(node.position[axis] / .08), 6);
+  }
+  await page.locator('#left-tab-subgrids').click();
+  await page.locator('#subgrid-check-btn').click();
+  await expect(page.locator('#subgrid-summary')).toHaveAttribute('data-subgrid-valid', 'false');
+  await expect(page.locator('#viewport')).toHaveAttribute('data-subgrid-error-marker-count', '2');
+  await expect(page.locator('#subgrid-error-markers .subgrid-error-marker')).toHaveCount(2);
+  await expect(page.locator('#subgrid-error-markers .subgrid-error-marker').first()).toBeVisible();
+  await page.locator('#viewport').screenshot({ path: 'test-results/subgrid-error-markers.png' });
+  await page.locator('#subgrid-error-toggle').uncheck();
+  await expect(page.locator('#subgrid-error-markers')).toBeHidden();
+  await page.locator('#subgrid-error-toggle').check();
+  await expect(page.locator('#subgrid-error-markers .subgrid-error-marker').first()).toBeVisible();
+  await expect(page.locator('#subgrid-diagnostics [data-code="unmounted-node"]')).toHaveCount(2);
+  await expect(page.locator('#subgrid-diagnostics [data-code="dangling-edge"]')).toContainText('梁的端点未连接到组件。');
+  await expect(page.locator('#subgrid-diagnostics')).toContainText('节点 grid-1-1:1：X');
+  await page.locator('#language-select').selectOption('en');
+  await expect(page.locator('#subgrid-diagnostics [data-code="dangling-edge"]')).toContainText('Edge has an endpoint that is not mounted to a component.');
+  await page.locator('#new-btn').click();
+  await expect(page.locator('#subgrid-diagnostics')).toBeHidden();
+  await expect(page.locator('#subgrid-error-markers .subgrid-error-marker')).toHaveCount(0);
+  await page.locator('#undo-btn').click();
+  await expect(page.locator('#subgrid-error-markers .subgrid-error-marker')).toHaveCount(0);
+});
+
+test('native pair downloads directly while XML still uses a save path', async ({ page }) => {
+  await page.addInitScript(() => {
+    window.savedFiles = [];
+    const fileHandle = name => ({
+      async createWritable() {
+        return { async write(content) { window.savedFiles.push({ name, content }); }, async close() {} };
+      },
+    });
+    window.showDirectoryPicker = async () => { throw new Error('Native save must not open a directory picker'); };
+    window.showSaveFilePicker = async options => {
+      window.fileOptions = options;
+      return fileHandle(options.suggestedName);
+    };
+  });
+  await page.goto('./');
+  await expect(page.locator('#viewport')).toHaveAttribute('data-ready', 'true');
+  await page.locator('#project-name').fill('Chosen Vehicle');
+  await page.locator('#project-name').press('Tab');
+  const nativeDownloads = [];
+  page.on('download', download => nativeDownloads.push(download));
+  await page.locator('#save-btn').click();
+  await expect.poll(() => nativeDownloads.length).toBe(2);
+  const nativeFiles = await Promise.all(nativeDownloads.map(async download => {
+    const stream = await download.createReadStream(); let content = '';
+    for await (const chunk of stream) content += chunk;
+    return { name: download.suggestedFilename(), content: JSON.parse(content) };
+  }));
+  expect(nativeFiles.map(file => file.name)).toEqual(['Chosen Vehicle.data', 'Chosen Vehicle.meta']);
+  expect(nativeFiles[0].content).toHaveProperty('vehicles');
+  expect(nativeFiles[1].content.vehicles.vehicles[0]).toHaveProperty('bounds');
+
+  await openRightSidebar(page);
+  await page.locator('#right-tab-resources').click();
+  await page.locator('#export-btn').click();
+  await expect.poll(() => page.evaluate(() => window.savedFiles.length)).toBe(1);
+  const xml = await page.evaluate(() => ({ file: window.savedFiles[0], options: window.fileOptions }));
+  expect(xml.file.name).toBe('Chosen Vehicle.xml');
+  expect(xml.file.content).toContain('game-compatible="false"');
+  expect(xml.options.suggestedName).toBe('Chosen Vehicle.xml');
 });
 
 test('native vehicle can be staged as a ghost subgrid and placed into the current project', async ({ page }) => {
@@ -259,6 +353,23 @@ test('native vehicle can be staged as a ghost subgrid and placed into the curren
   expect(saved.grids).toContainEqual({ id: 'imported-vehicle-1' });
 });
 
+test('subgrid list deletes an authored subgrid as one undoable action', async ({ page }) => {
+  await page.goto('./');
+  await expect(page.locator('#viewport')).toHaveAttribute('data-ready', 'true');
+  await page.locator('#left-tab-subgrids').click();
+  await page.locator('#subgrid-new-id').fill('temporary-grid');
+  await page.locator('#subgrid-create-btn').click();
+  const row = page.locator('.subgrid-row', { hasText: 'Grid temporary-grid' });
+  await expect(row).toBeVisible();
+  page.once('dialog', dialog => dialog.accept());
+  await row.locator('.subgrid-delete').click();
+  await expect(row).toHaveCount(0);
+  const saved = await saveProject(page);
+  expect(saved.grids.map(grid => grid.id)).toEqual(['grid-1']);
+  await page.locator('#undo-btn').click();
+  await expect(page.locator('.subgrid-row', { hasText: 'Grid temporary-grid' })).toBeVisible();
+});
+
 test('extendable components expose native linear dimensions instead of transform scale', async ({ page }) => {
   await page.goto('./');
   await expect(page.locator('#viewport')).toHaveAttribute('data-ready', 'true');
@@ -279,6 +390,19 @@ test('extendable components expose native linear dimensions instead of transform
     return JSON.parse(localStorage.getItem('anymaker:' + location.pathname + ':autosave:v1')).document;
   });
   expect(document.objects[0].nativeExtension).toEqual([0, 0, 3]);
+});
+
+test('tank capacity includes base cells as well as native extensions', async ({ page }) => {
+  await page.goto('./');
+  await expect(page.locator('#viewport')).toHaveAttribute('data-ready', 'true');
+  await page.locator('#language-select').selectOption('en');
+  const tank = { id: 'tank', type: 'liquid_tank', gridId: 'grid-1', position: { x: 0, y: 0, z: 0 }, rotation: { x: 0, y: 0, z: 0 }, scale: { x: 1, y: 1, z: 1 }, nativeExtension: [0, 1, 2] };
+  await page.locator('#file-input').setInputFiles({ name: 'tank.json', mimeType: 'application/json', buffer: Buffer.from(JSON.stringify({ format: 'anymaker-web-project', version: 1, objects: [tank] })) });
+  await expect(page.locator('#object-count')).toHaveText('1 components');
+  const canvas = page.locator('canvas'); const bounds = await canvas.boundingBox();
+  await canvas.click({ position: { x: bounds.width / 2, y: bounds.height / 2 } });
+  await openRightSidebar(page); await page.locator('#right-tab-inspector').click();
+  await expect(page.getByTestId('tank-capacity')).toHaveText('Max capacity: 12 L (24 cells × 0.5 L)');
 });
 
 test('microcontroller saves script and typed global variables without executing code', async ({ page }) => {
@@ -331,12 +455,21 @@ test('paint and connection context toolbars expose saved colors, network ports a
   await page.goto('./');
   await expect(page.locator('#viewport')).toHaveAttribute('data-ready', 'true');
   await expect(page.locator('#selection-filter-toolbar')).toBeVisible();
-  await expect(page.locator('#selection-filter-toolbar [data-selectable-kind]')).toHaveCount(5);
+  const filterBounds = await page.locator('#selection-filter-toolbar').boundingBox();
+  const toolbarBounds = await page.locator('.top-tool-section').boundingBox();
+  expect(Math.abs(filterBounds.y - toolbarBounds.y)).toBeLessThan(1);
+  expect(filterBounds.x - (toolbarBounds.x + toolbarBounds.width)).toBeGreaterThanOrEqual(8);
+  await page.locator('#right-sidebar-toggle').click();
+  const openSidebarFilterBounds = await page.locator('#selection-filter-toolbar').boundingBox();
+  expect(openSidebarFilterBounds.y).toBeGreaterThan(toolbarBounds.y + toolbarBounds.height);
+  await page.locator('#right-sidebar-toggle').click();
+  await expect(page.locator('#selection-filter-toolbar [data-selectable-kind]')).toHaveCount(6);
   await expect(page.locator('#selection-filter-toggle')).toHaveAttribute('aria-expanded', 'false');
   await expect(page.locator('#selection-filter-options')).toBeHidden();
   await page.locator('#selection-filter-toggle').click();
   await expect(page.locator('#selection-filter-toggle')).toHaveAttribute('aria-expanded', 'true');
   await expect(page.locator('#selection-filter-options')).toBeVisible();
+  await expect(page.locator('[data-selectable-kind="structure"]')).not.toBeChecked();
   await page.locator('#selection-filter-toolbar [data-selectable-kind="edge"]').uncheck();
   await expect(page.locator('#selection-filter-toolbar [data-selectable-kind="edge"]')).not.toBeChecked();
   await page.locator('#selection-filter-toolbar [data-selectable-kind="edge"]').check();
@@ -362,6 +495,14 @@ test('paint and connection context toolbars expose saved colors, network ports a
 
   await page.locator('[data-tool="paint"]').click();
   await expect(page.locator('#paint-toolbar')).toBeVisible();
+  const paintToolbarBounds = await page.locator('#paint-toolbar').boundingBox();
+  const viewportBounds = await page.locator('#viewport').boundingBox();
+  expect(Math.abs((paintToolbarBounds.x + paintToolbarBounds.width / 2) - (viewportBounds.x + viewportBounds.width / 2))).toBeLessThan(1);
+  await page.locator('#official-palette-toggle').click();
+  await expect(page.locator('#official-palette .official-palette-swatch')).toHaveCount(85);
+  await page.locator('#official-palette [data-index="26"]').click();
+  await expect(page.locator('#paint-toolbar-hex')).toHaveValue('#861a22');
+  await expect(page.locator('#official-palette-toggle')).toHaveAttribute('aria-expanded', 'false');
   await canvas.hover({ position: { x: 420, y: 420 } });
   await expect(page.locator('#viewport')).toHaveAttribute('data-interaction-highlight-count', '1');
   await page.locator('#paint-toolbar-hex').fill('#7c3aed');
@@ -553,7 +694,8 @@ test('node tool hides IDs, toggles helpers and merges without orphaned data', as
   await canvas.click({ position: { x: 680, y: 450 } });
   await expect(page.locator('#topology-count')).toHaveText('1 节点 · 0 梁 · 0 面板');
   const saved = await saveProject(page);
-  expect(Object.keys(saved.topology.nodes[0]).sort()).toEqual(['id', 'position']);
+  expect(Object.keys(saved.topology.nodes[0]).sort()).toEqual(['gridId', 'id', 'position', 'standalone']);
+  expect(saved.topology.nodes[0].standalone).toBe(true);
   await canvas.click({ position: { x: 680, y: 450 } });
   await page.keyboard.press('Delete');
   await expect(page.locator('#topology-count')).toHaveText('0 节点 · 0 梁 · 0 面板');
@@ -696,7 +838,8 @@ test('front-view solid edges are pickable off the centerline and split with hidd
   for (const node of built.topology.nodes) expect(node.position.z).toBeCloseTo(0, 5);
   await page.locator('[data-tool="erase"]').click();
   await canvas.click({ position: { x: 600, y: 425 } });
-  await expect(page.locator('#topology-count')).toHaveText('2 节点 · 0 梁 · 0 面板');
+  await expect(page.locator('#topology-count')).toHaveText('0 节点 · 0 梁 · 0 面板');
+  expect((await saveProject(page)).topology.nodes).toEqual([]);
   await page.locator('#undo-btn').click();
   await expect(page.locator('#topology-count')).toHaveText('2 节点 · 1 梁 · 0 面板');
   await page.locator('[data-tool="edge"]').click();
@@ -707,6 +850,39 @@ test('front-view solid edges are pickable off the centerline and split with hidd
     expect(node.position.y).toBeCloseTo(built.topology.nodes[0].position.y, 5);
     expect(node.position.z).toBeCloseTo(0, 5);
   }
+});
+
+test('structural selection is opt-in without disabling construction tools', async ({ page }) => {
+  await page.goto('./');
+  await expect(page.locator('#viewport')).toHaveAttribute('data-ready', 'true');
+  await page.locator('[data-view="front"]').click();
+  await page.locator('[data-tool="edge"]').click();
+  const canvas = page.locator('canvas');
+  await canvas.click({ position: { x: 430, y: 420 } });
+  await canvas.click({ position: { x: 770, y: 420 } });
+  await expect(page.locator('#topology-count')).toHaveText('2 节点 · 1 梁 · 0 面板');
+  await page.locator('[data-tool="select"]').click();
+  await canvas.hover({ position: { x: 600, y: 420 } });
+  await expect(page.locator('#viewport')).toHaveAttribute('data-interaction-highlight-count', '0');
+  await canvas.click({ position: { x: 600, y: 420 } });
+  await expect(page.locator('#inspector-content')).not.toContainText('已选择 1 个结构对象');
+  await page.locator('#box-select-action').click();
+  await canvas.dragTo(canvas, { sourcePosition: { x: 570, y: 390 }, targetPosition: { x: 630, y: 450 } });
+  await expect(page.locator('#inspector-content')).not.toContainText('已选择 1 个结构对象');
+
+  await page.locator('#selection-filter-toggle').click();
+  const structure = page.locator('[data-selectable-kind="structure"]');
+  await expect(structure).not.toBeChecked();
+  await structure.check();
+  await canvas.click({ position: { x: 600, y: 420 } });
+  await expect(page.locator('#inspector-content')).toContainText('已选择 1 个结构对象');
+  await page.locator('#box-select-action').click();
+  await canvas.dragTo(canvas, { sourcePosition: { x: 570, y: 390 }, targetPosition: { x: 630, y: 450 } });
+  await expect(page.locator('#inspector-content')).toContainText('已选择 1 个结构对象');
+  await structure.uncheck();
+  await expect(page.locator('#inspector-content')).not.toContainText('已选择 1 个结构对象');
+  await canvas.hover({ position: { x: 600, y: 420 } });
+  await expect(page.locator('#viewport')).toHaveAttribute('data-interaction-highlight-count', '0');
 });
 
 test('glass tool closes selected edges into an offset window panel and paint stores Hex RGB colors', async ({ page }) => {
@@ -723,6 +899,8 @@ test('glass tool closes selected edges into an offset window panel and paint sto
   }
   await expect(page.locator('#topology-count')).toHaveText('4 节点 · 4 梁 · 0 面板');
   await page.locator('[data-tool="paint"]').click();
+  await page.locator('#paint-toolbar-hex').fill('#bd2636');
+  await page.locator('#paint-toolbar-hex').press('Tab');
   await canvas.hover({ position: { x: 580, y: 560 } });
   await expect(page.locator('#viewport')).toHaveAttribute('data-edge-center-highlight-count', '1');
   await canvas.click({ position: { x: 580, y: 560 } });
@@ -764,6 +942,8 @@ test('glass tool closes selected edges into an offset window panel and paint sto
   await expect(page.locator('#pick-paint-color')).toHaveAttribute('aria-pressed', 'false');
 
   await page.locator('[data-tool="select"]').click();
+  await page.locator('#selection-filter-toggle').click();
+  await page.locator('[data-selectable-kind="structure"]').check();
   await canvas.hover({ position: { x: 560, y: 400 } });
   await expect(page.locator('#viewport')).toHaveAttribute('data-interaction-highlight-count', '1');
   await canvas.click({ position: { x: 560, y: 400 } });

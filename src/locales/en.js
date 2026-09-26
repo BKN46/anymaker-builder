@@ -2,6 +2,7 @@ import { operationMessages } from './operations-en.js';
 
 export const englishMessages = {
   ...operationMessages,
+  '\u6700\u5927\u5bb9\u91cf\uff1a{liters} L\uff08{cells} \u683c \u00d7 0.5 L\uff09': 'Max capacity: {liters} L ({cells} cells \u00d7 0.5 L)',
   '\u955c\u5934\u8f85\u52a9\u706f': 'Camera fill light', '\u955c\u5934\u8f85\u52a9\u706f\u5f3a\u5ea6': 'Camera fill intensity',
   '界面语言': 'Interface language', '正在加载定义…': 'Loading definitions…', '编辑工具': 'Build tools',
   '导入本地载具': 'Import local vehicle', '新建': 'New', '撤销': 'Undo', '重做': 'Redo', '保存载具': 'Save vehicle', '中间格式 XML': 'Debug XML',
@@ -26,7 +27,9 @@ export const englishMessages = {
   '选择': 'Select', '放置': 'Place', '删除': 'Erase', '移动': 'Move', '旋转': 'Rotate', '缩放': 'Scale', '节点': 'Node', '梁': 'Edge', '面板': 'Plate',
   '放置方向': 'Placement orientation', 'J / K / L：X / Y / Z 旋转 90°': 'J / K / L: rotate X / Y / Z by 90°', 'U / I / O：X / Y / Z 镜像': 'U / I / O: mirror X / Y / Z',
   '显示放置方向提示': 'Show placement direction hints',
-  '复制选中': 'Copy', '镜像 X': 'Mirror X', '拆分子网格': 'Split grid', '合并子网格': 'Merge grids',
+  '复制选中': 'Copy', '镜像 X': 'Mirror X', '拆分子网格': 'Split grid', '合并子网格': 'Merge grids', '子网格检查': 'Check subgrids', '子网格视图': 'Subgrid view', '子网格检查完成：{count} 个子网格': 'Subgrid check complete: {count} subgrids',
+  '子网格检查结果：{groups} 个结构岛；{errors} 个错误；{warnings} 个警告': 'Subgrid check: {groups} structural island(s); {errors} error(s); {warnings} warning(s)',
+  '子网格检查完成：{groups} 个结构岛；{errors} 个错误；{warnings} 个警告': 'Subgrid check complete: {groups} structural island(s); {errors} error(s); {warnings} warning(s)',
   '无法初始化 WebGL2。请启用硬件加速或更换浏览器。': 'WebGL2 could not start. Enable hardware acceleration or use another browser.',
   '{count} 个组件': '{count} components', '{nodes} 节点 · {edges} 梁 · {plates} 面板': '{nodes} nodes · {edges} edges · {plates} plates',
   '{count} 个组件没有真实 Mesh。': '{count} components have missing meshes.', '静态几何已加载。': 'Static geometry loaded.',

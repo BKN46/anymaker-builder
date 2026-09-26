@@ -2,6 +2,7 @@
 // this model to .data without importing Three.js or relying on scene objects.
 import { nativePropertiesFromState } from './component-properties.js';
 import { nativeAccessoryContainerFromState, nativeAccessoryFromState } from './native-accessories.js';
+import { reflectNativePoint, reflectNativeRotation } from '../native/coordinates.js';
 
 export const MODEL_FORMAT = 'anymaker-builder-domain';
 export const MODEL_VERSION = 1;
@@ -306,12 +307,12 @@ function nativeVehicleOffsets(vehicles, roots, frames) {
 
 function nativePosition(position, vehicleOffset, frame) {
   const cells = add(nativeCellPosition(position, frame), vehicleOffset);
-  return Object.fromEntries(AXES.map(axis => [axis, cells[axis] * NATIVE_CELL_WORLD]));
+  return reflectNativePoint(Object.fromEntries(AXES.map(axis => [axis, cells[axis] * NATIVE_CELL_WORLD])));
 }
 
 export function nativeGridLocalDelta(grid, worldDelta) {
   const frame = nativeGridFrame(grid);
-  const cells = scale(vector(worldDelta), 1 / NATIVE_CELL_WORLD);
+  const cells = scale(reflectNativePoint(vector(worldDelta)), 1 / NATIVE_CELL_WORLD);
   return multiplyMatrixVector(transposeMatrix(frame.rotation), cells);
 }
 
@@ -366,7 +367,7 @@ export function toEditorDocument(model, { vehicleIds = null } = {}) {
       ...(accessoryContainer ? { nativeAccessoryContainer: accessoryContainer } : {}),
       ...(nativeImport ? { nativeProjected: true } : {}),
       position,
-      rotation: nativeImport ? matrixToEulerXYZ(multiplyMatrices(frame.rotation, nativeComponentRotation(component))) : clone(component.transform.rotation),
+      rotation: nativeImport ? matrixToEulerXYZ(reflectNativeRotation(multiplyMatrices(frame.rotation, nativeComponentRotation(component)))) : clone(component.transform.rotation),
       scale: clone(component.transform.scale),
     });
   }
@@ -418,7 +419,7 @@ export function toEditorTopology(model, { vehicleIds = null } = {}) {
     edges.push(...grid.edges.map(edge => ({ id: prefix(edge.id), a: prefix(edge.a), b: prefix(edge.b), gridId: grid.id,
       ...(Number.isInteger(edge.extras?.native?.col) && edge.extras.native.col >= 0 && edge.extras.native.col <= 255 ? { col: edge.extras.native.col } : {}),
     })));
-    plates.push(...grid.plates.map(plate => ({ id: prefix(plate.id), nodeIds: plate.nodeIds.map(prefix), gridId: grid.id,
+    plates.push(...grid.plates.map(plate => ({ id: prefix(plate.id), nodeIds: (nativeImport ? [...plate.nodeIds].reverse() : plate.nodeIds).map(prefix), gridId: grid.id,
       ...(Number.isInteger(plate.extras?.native?.col_front) && plate.extras.native.col_front >= 0 && plate.extras.native.col_front <= 255 ? { col_front: plate.extras.native.col_front } : {}),
       ...(Number.isInteger(plate.extras?.native?.col_back) && plate.extras.native.col_back >= 0 && plate.extras.native.col_back <= 255 ? { col_back: plate.extras.native.col_back } : {}),
       ...(plate.extras?.native?.type === 'window' ? { type: 'window' } : {}),

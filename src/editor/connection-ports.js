@@ -29,6 +29,22 @@ export function logicNodePortsForNetwork(definition, kind) {
     .filter(node => logicNodeSupportsNetwork(node, kind));
 }
 
+// Observed native mechanical links put a control output in p0 and a
+// mechanical_in node in p1. Keep route points in the same direction when the
+// editor user selects the input first.
+export function orientMechanicalLink(link, componentsById, definitionsByType) {
+  if (link.kind !== 'mechanical') return link;
+  const role = endpoint => {
+    const type = componentsById.get(endpoint?.componentId)?.type;
+    const node = logicNodePort(definitionsByType.get(type), endpoint?.port ?? 0);
+    if (!node || !logicNodeSupportsNetwork(node, 'mechanical')) return null;
+    if (node.type === 'mechanical_in') return 'input';
+    return !node.type || node.type === 'mechanical_out' ? 'output' : null;
+  };
+  if (role(link.from) !== 'input' || role(link.to) !== 'output') return link;
+  return { ...link, from: link.to, to: link.from, points: [...(link.points || [])].reverse() };
+}
+
 // Decompiled game.gcl (logic_node.get_position_extended) starts with the
 // stored node `pos`, then, independently for X/Y/Z, adds `extend_size[axis]`
 // only when that coordinate is strictly beyond `center_stretch[axis]`.
@@ -40,5 +56,26 @@ export function logicNodeCellPosition(node, extension = undefined, centerStretch
   if (!Array.isArray(extension) || extension.length !== 3 || !extension.every(Number.isFinite)) return result;
   if (!Array.isArray(centerStretch) || centerStretch.length !== 3 || !centerStretch.every(Number.isFinite)) return result;
   for (let axis = 0; axis < 3; axis++) if (result[axis] > centerStretch[axis]) result[axis] += extension[axis];
+  return result;
+}
+
+// Definition directions identify the face that a game connection leaves from.
+// The route starts one cell beyond the logical node on that face; keep this
+// mapping independent of Three.js so native and authored connections share it.
+export function connectionDirectionVector(direction) {
+  switch (direction) {
+    case 1: return [1, 0, 0];
+    case 2: return [0, -1, 0];
+    case 3: return [0, 1, 0];
+    case 4: return [0, 0, -1];
+    case 5: return [0, 0, 1];
+    default: return null;
+  }
+}
+
+export function connectionRouteCellPosition(node, extension = undefined, centerStretch = undefined) {
+  const result = logicNodeCellPosition(node, extension, centerStretch);
+  const direction = connectionDirectionVector(node?.direction ?? node?.dir);
+  if (direction) direction.forEach((value, axis) => { result[axis] += value; });
   return result;
 }

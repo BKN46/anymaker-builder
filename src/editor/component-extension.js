@@ -45,6 +45,22 @@ export function updateExtension(definition, extension, axis, value) {
   return result;
 }
 
+// The build control shows the initial selectable span as well as `ext`.
+// Native data stores only the added cells; tile engines begin at one tile,
+// while stretch controls begin at one cell.
+export function extensionControlValue(definition, extension, axis) {
+  const descriptor = extensionAxes(definition).find(item => item.axis === axis);
+  if (!descriptor) throw new Error('Component axis is not linearly extendable');
+  return extensionVector(definition, extension)[descriptor.index]
+    + (descriptor.mode === 'tile' ? descriptor.interval : 1);
+}
+
+export function updateExtensionFromControl(definition, extension, axis, value) {
+  const descriptor = extensionAxes(definition).find(item => item.axis === axis);
+  if (!descriptor) throw new Error('Component axis is not linearly extendable');
+  return updateExtension(definition, extension, axis, value - (descriptor.mode === 'tile' ? descriptor.interval : 1));
+}
+
 // GCL `vehicle_component_util.stretch_vertex` applies an extension only to
 // coordinates strictly beyond the matching center_stretch coordinate. The
 // source mesh is expressed in world units while definitions/ext use cells.
