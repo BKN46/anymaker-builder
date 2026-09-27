@@ -238,6 +238,53 @@ function nativeBounds(points) {
   };
 }
 
+function nativePlateNodeOrderForExport(plate, nativePoints, edgeNodeIds) {
+  const order = [...plate.nodeIds].reverse();
+  const direction = plate.surfaceDirection;
+  if (direction && nativeAxes.every(axis => Number.isFinite(direction[axis]))) {
+    const desired = [-direction.x, direction.y, direction.z];
+    const normal = nativePlateNormal(order.map(id => nativePoints.get(id)));
+    if (normal && normal[0] * desired[0] + normal[1] * desired[1] + normal[2] * desired[2] < 0) order.reverse();
+  }
+  // A panel boundary in the game is a loop of structural edges. Older editor
+  // snapshots can retain a standalone node in that loop; remove it only when
+  // it is exactly collinear and lies between its two neighbouring boundary
+  // points. Other isolated nodes are left intact because their semantics is
+  // ambiguous in older native samples.
+  let changed = true;
+  while (changed) {
+    changed = false;
+    for (let index = 0; index < order.length; index++) {
+      const id = order[index];
+      if (edgeNodeIds.has(id)) continue;
+      if (order.length <= 3) continue;
+      const previous = nativePoints.get(order[(index - 1 + order.length) % order.length]);
+      const current = nativePoints.get(id);
+      const next = nativePoints.get(order[(index + 1) % order.length]);
+      if (!previous || !current || !next) continue;
+      const first = nativeAxes.map((_, axis) => current[axis] - previous[axis]);
+      const second = nativeAxes.map((_, axis) => next[axis] - current[axis]);
+      const cross = [
+        first[1] * second[2] - first[2] * second[1],
+        first[2] * second[0] - first[0] * second[2],
+        first[0] * second[1] - first[1] * second[0],
+      ];
+      const collinear = cross.every(value => Math.abs(value) <= 1e-9);
+      const between = nativeAxes.every((_, axis) => {
+        const min = Math.min(previous[axis], next[axis]);
+        const max = Math.max(previous[axis], next[axis]);
+        return current[axis] >= min - 1e-9 && current[axis] <= max + 1e-9;
+      });
+      if (!collinear || !between) continue;
+      order.splice(index, 1);
+      changed = true;
+      break;
+    }
+  }
+  if (order.length < 3) throw new Error(`Native export plate ${plate.id} has fewer than three boundary nodes`);
+  return order;
+}
+
 function mechanicalPortRole(component, port, componentDefinitions) {
   const definition = componentDefinitions.get(component?.type);
   if (!definition || !Number.isInteger(port) || port < 0) return null;
@@ -304,16 +351,6 @@ function nativePlateNormal(points) {
   return null;
 }
 
-function nativePlateNodeOrder(plate, nodeIds, nativePoints) {
-  let order = [...plate.nodeIds].reverse();
-  const direction = plate.surfaceDirection;
-  if (!direction || nativeAxes.some(axis => !Number.isFinite(direction[axis]))) return order.map(id => nodeIds.get(id));
-  const desired = [-direction.x, direction.y, direction.z];
-  const normal = nativePlateNormal(order.map(id => nativePoints.get(id)));
-  if (normal && normal[0] * desired[0] + normal[1] * desired[1] + normal[2] * desired[2] < 0) order.reverse();
-  return order.map(id => nodeIds.get(id));
-}
-
 // Build a complete observed-native-schema pair from an editor snapshot. This
 // deliberately has no dependency on a previously imported .data/.meta pair:
 // saving a new vehicle must not require users to supply a template first.
@@ -325,9 +362,12 @@ export function toNativePairFromEditor(document, { vehicleId = 1, componentDefin
   const definitions = [...new Set(hostObjects.map(object => object.type))];
   const definitionIndex = new Map(definitions.map((id, index) => [id, index]));
   const componentIds = new Map(hostObjects.map((object, index) => [object.id, index + 1]));
+  const nativeTopologyPoints = new Map((topology.nodes || []).map(node => [node.id, nativeCells(node.position)]));
+  const edgeNodeIds = new Set((topology.edges || []).flatMap(edge => [edge.a, edge.b]));
+  const exportPlateOrders = (topology.plates || []).map(plate => nativePlateNodeOrderForExport(plate, nativeTopologyPoints, edgeNodeIds));
   const referencedNodeIds = new Set();
   for (const edge of topology.edges || []) { referencedNodeIds.add(edge.a); referencedNodeIds.add(edge.b); }
-  for (const plate of topology.plates || []) for (const id of plate.nodeIds || []) referencedNodeIds.add(id);
+  for (const order of exportPlateOrders) for (const id of order) referencedNodeIds.add(id);
   const exportNodes = (topology.nodes || []).filter(node => referencedNodeIds.has(node.id));
   if (exportNodes.length !== referencedNodeIds.size) throw new Error('Native export has a structural reference to a missing node');
   const nodeIds = new Map(exportNodes.map((node, index) => [node.id, index + 1]));
@@ -369,7 +409,7 @@ export function toNativePairFromEditor(document, { vehicleId = 1, componentDefin
     return result;
   });
   const plates = (topology.plates || []).map((plate, index) => {
-    const result = { id: index + 1, nodes: nativePlateNodeOrder(plate, nodeIds, nativePoints), glass_impacts: [] };
+    const result = { id: index + 1, nodes: exportPlateOrders[index].map(id => nodeIds.get(id)), glass_impacts: [] };
     const front = nativePaintIndex(plate.color_front, plate.col_front, 'plate front paint');
     const back = nativePaintIndex(plate.color_back, plate.col_back, 'plate back paint');
     if (front !== undefined) result.col_front = front;

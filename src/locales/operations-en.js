@@ -1,5 +1,11 @@
 export const operationMessages = {
   '梁 1 格 · 点击起点': 'Edge 1 block · Click start', '梁 1 格 · 点击终点 · Esc 取消': 'Edge 1 block · Click end · Esc to cancel',
+  '梁终点微操': 'Edge endpoint micro control', '梁终点微操 · U/J I/K O/L 移动终点 · 点击或 Enter 完成 / Esc 取消': 'Edge endpoint micro control · U/J I/K O/L move the endpoint · click or press Enter to finish / Esc to cancel',
+  '梁终点微操 · U/J I/K O/L 移动 · 点击或 Enter 完成 / Esc 取消': 'Edge endpoint micro control · U/J I/K O/L move the endpoint · click or press Enter to finish / Esc to cancel',
+  '起点已定位；使用 U/J、I/K、O/L 移动终点，点击或按 Enter 完成': 'Start point set; use U/J, I/K, or O/L to move the endpoint, then click or press Enter to finish.',
+  '终点必须与起点不同；请使用 U/J、I/K、O/L 移动终点': 'The endpoint must differ from the start; use U/J, I/K, or O/L to move it.',
+  '梁终点沿 {axis} 轴正向移动：{key}': 'Move the edge endpoint along +{axis}: {key}',
+  '梁终点沿 {axis} 轴负向移动：{key}': 'Move the edge endpoint along -{axis}: {key}',
   '轴向吸附': 'Axis snap', '仅建梁：自动吸附单一世界轴（A 切换）': 'Edges only: snap to one world axis (A to toggle)', '仅建梁：自动吸附单一世界轴（A 切换，Shift 临时启用）': 'Edges only: snap to one world axis (A to toggle, hold Shift temporarily)',
   'XYZ 长度 · 整数格（1 格 = 8 cm）': 'XYZ lengths · Integer blocks (1 block = 8 cm)',
   '吸附 {axis} 轴': 'Snap to {axis} axis', '自由建梁': 'Free edge', '{axis} {cells} 格（{centimeters} cm）': '{axis} {cells} blocks ({centimeters} cm)', '{axis} {cells} 格': '{axis} {cells} blocks',

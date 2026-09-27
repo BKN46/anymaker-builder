@@ -21,6 +21,13 @@ function isInterfaceVertex(colors, vertex, gasInterface) {
 // A single geometry and at most two draw groups avoid overlapping meshes
 // and one material/draw call per coloured triangle.
 export function applyConnectionInterfaceColors(geometry, colors, source, bodyMaterial) {
+  // Packed game colours are only rendered by the isolated interface group.
+  // Keep the casing on its diagnostic material even when a caller reuses a
+  // material that previously had vertex colours enabled.
+  if (bodyMaterial?.vertexColors) {
+    bodyMaterial.vertexColors = false;
+    bodyMaterial.needsUpdate = true;
+  }
   geometry.setAttribute('gameColorBytes', new THREE.BufferAttribute(colors, 4, true));
   const index = geometry.getIndex();
   if (!index || !source.startsWith('meshes/components/')) return bodyMaterial;

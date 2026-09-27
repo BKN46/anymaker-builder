@@ -39,8 +39,9 @@ import { DEFAULT_PROJECT_NAME, normalizeProjectName, projectFileBaseName } from 
 import { isSaveCancelled, saveFilePair, saveSingleFile } from '../src/editor/file-save.js';
 import { mirrorPoint, mirrorPositionPreview, mirrorRotation, mirrorSurfaceDirection, moveMirroredNode, sameGridPoint } from '../src/editor/mirror-mode.js';
 import { accessoryOptionsForComponent, createNativeAccessoryItem, defaultAccessoryForPlacement, nativeAccessoryDefinition } from '../src/editor/native-accessories.js';
-import { extensionAxes, extensionControlValue, extensionHandlePosition, extensionVector, stretchMeshPositions, updateExtension, updateExtensionFromControl } from '../src/editor/component-extension.js';
+import { extensionAxes, extensionControlValue, extensionHandlePosition, extensionVector, stretchMeshPositions, updateExtension, updateExtensionFromControl, updateExtensionFromDrag } from '../src/editor/component-extension.js';
 import { placementOrientation, updatePlacementOrientation } from '../src/editor/placement-orientation.js';
+import { EDGE_MICRO_KEYS, edgeMicroKeyBinding, moveEdgeMicroEndpoint } from '../src/editor/edge-micro.js';
 import { gridSelectionClosure } from '../src/editor/selection-closure.js';
 import { createMicrocontrollerVariable, microcontrollerState, updateMicrocontrollerState } from '../src/editor/microcontroller.js';
 import { stageImportedSubgrid, translateImportedSubgrid, translateSubgridTopology } from '../src/editor/imported-subgrid.js';
@@ -577,6 +578,8 @@ test('native linear component extensions use definition modes, intervals and str
   const driveShaft = { mode_z: 'stretch', interval: [0, 0, 1], ext_max: [10, 10, 40], center_stretch: [0, 0, .5] };
   assert.deepEqual(extensionAxes(driveShaft), [{ axis: 'z', index: 2, mode: 'stretch', interval: 1, max: 40 }]);
   assert.deepEqual(updateExtension(driveShaft, [0, 0, 1], 'z', 42), [0, 0, 40]);
+  assert.deepEqual(updateExtensionFromDrag(driveShaft, [0, 0, 1], 'z', -3), { extension: [0, 0, 3], signedValue: -3 });
+  assert.deepEqual(updateExtensionFromDrag(driveShaft, [0, 0, 1], 'z', -42), { extension: [0, 0, 40], signedValue: -40 });
   assert.deepEqual(extensionVector(driveShaft, [3, -1, 3]), [3, 0, 3]);
   const stretched = stretchMeshPositions(driveShaft, [0, 0, 3], new Float32Array([0, 0, .04, 0, 0, .041]), CELL_SIZE_WORLD);
   assert.ok(Math.abs(stretched[2] - .04) < 1e-6); assert.ok(Math.abs(stretched[5] - .281) < 1e-6);
@@ -676,6 +679,7 @@ test('an imported vehicle stages as one collision-free subgrid and keeps its int
       nodes: [{ id: 'node-a', gridId: 'source', position: { x: 0, y: 0, z: 0 } }, { id: 'node-b', gridId: 'source', position: { x: 1, y: 0, z: 0 } }],
       edges: [{ id: 'edge', a: 'node-a', b: 'node-b', gridId: 'source' }], plates: [],
       links: [{ id: 'data', kind: 'data', from: { componentId: 'component' }, to: { componentId: 'component-2' }, points: [] }],
+      mechanicalConnections: [{ id: 'hinge', type: 'hinge', from: 'component', to: 'component-2', position: { x: 0, y: 1, z: 0 }, limits: { min: 0, max: Math.PI } }],
     },
   };
   source.objects.push({ ...source.objects[0], id: 'component-2' });
@@ -685,9 +689,11 @@ test('an imported vehicle stages as one collision-free subgrid and keeps its int
   assert.equal(staged.topology.links[0].from.componentId, staged.objects[0].id);
   const placed = translateImportedSubgrid(staged, { x: 5, y: -2, z: 4 });
   assert.deepEqual(placed.objects[0].position, { x: 6, y: 0, z: 7 });
+  assert.deepEqual(placed.topology.mechanicalConnections[0].position, { x: 5, y: -1, z: 4 });
   const moved = translateSubgridTopology({ ...placed.topology, nodes: [...placed.topology.nodes, { id: 'outside', gridId: 'grid-1', position: { x: 0, y: 0, z: 0 } }] }, placed.objects.map(object => object.id), staged.gridId, { x: 1, y: 0, z: 0 });
   assert.equal(moved.nodes.find(node => node.id === 'outside').position.x, 0);
   assert.equal(moved.nodes[0].position.x, 6);
+  assert.equal(moved.mechanicalConnections[0].position.x, 6);
 });
 
 test('reference vehicle input files match the registered rendering baseline', () => {
@@ -816,6 +822,9 @@ test('UI preferences default to English and reject unsafe or unsupported values'
     assert.equal(normalized.nodeColor, defaults.nodeColor); assert.equal(normalized.nodeSize, defaults.nodeSize); assert.equal(normalized.nodeOpacity, defaults.nodeOpacity);
   }
   assert.equal(defaults.edgeAxisSnap, false);
+  assert.equal(defaults.edgeMicroMode, false);
+  assert.equal(normalizeSettings({ version: 1, edgeMicroMode: true }).edgeMicroMode, true);
+  for (const invalid of ['true', 1, null, {}]) assert.equal(normalizeSettings({ version: 1, edgeMicroMode: invalid }).edgeMicroMode, false);
   assert.equal(defaults.edgeSize, 1);
   assert.equal(defaults.hideMirrorPlane, false);
   assert.equal(normalizeSettings({ version: 1, hideMirrorPlane: true }).hideMirrorPlane, true);
@@ -1183,6 +1192,17 @@ test('native mechanical export reverses input-first links and omits default port
   const vehicle = toNativePairFromEditor(project([relay, button], { nodes: [], edges: [], plates: [], links: [link] }), { componentDefinitions: definitions }).data.vehicles.vehicles[0];
   assert.deepEqual(vehicle.mechanical_links, [{ p0: { comp: 2 }, p1: { comp: 1 }, points: [[-1, 0, 0], [0, 0, 0]] }]);
 });
+
+test('edge micro controls move the endpoint one block along paired axis keys', () => {
+  assert.deepEqual(Object.keys(EDGE_MICRO_KEYS), ['u', 'j', 'i', 'k', 'o', 'l']);
+  assert.deepEqual(edgeMicroKeyBinding('U'), { axis: 'x', direction: 1 });
+  const start = { x: 0, y: 0, z: 0 };
+  assert.deepEqual(moveEdgeMicroEndpoint(start, 'u'), { x: CELL_SIZE_WORLD, y: 0, z: 0 });
+  assert.deepEqual(moveEdgeMicroEndpoint(start, 'K'), { x: 0, y: -CELL_SIZE_WORLD, z: 0 });
+  assert.deepEqual(moveEdgeMicroEndpoint({ x: 0, y: 0, z: CELL_SIZE_WORLD }, 'o'), { x: 0, y: 0, z: CELL_SIZE_WORLD * 2 });
+  assert.equal(moveEdgeMicroEndpoint(start, 'q'), null);
+  assert.equal(moveEdgeMicroEndpoint(start, '__proto__'), null);
+});
 test('native mechanical export repairs a unique output port and drops input-only links', () => {
   const definitions = new Map([
     ['mechanical_junction_scale', { logic_nodes: [{ type: 'mechanical_in', direction: 4 }, { direction: 5 }], surfaces: [{}, {}, {}, {}, { dir: 5, gender: 1, type: 'mechanical' }] }],
@@ -1214,6 +1234,23 @@ test('native export omits unreferenced editor nodes and keeps structural referen
   assert.deepEqual(vehicle.nodes.map(node => node.pos), [[0, 0, 0], [-1, 0, 0]]);
   assert.deepEqual(vehicle.edges, [{ n0: 1, n1: 2 }]);
   assert.throws(() => toNativePairFromEditor({ objects: [], topology: { nodes: [], edges: [{ a: 'missing', b: 'also-missing' }], plates: [] } }), /missing node/);
+});
+test('native export removes a collinear isolated plate node before game island splitting', () => {
+  const point = (x, y, z) => ({ id: `${x}-${y}-${z}`, nativeProjected: true, position: { x: cell(x), y: cell(y), z: cell(z) } });
+  const left = point(-1, 0, 0); const isolated = point(0, 0, 0); const right = point(1, 0, 0);
+  const top = point(1, 1, 0);
+  const document = project([], {
+    nodes: [isolated, right, top, left],
+    edges: [
+      { id: 'right-top', a: right.id, b: top.id },
+      { id: 'top-left', a: top.id, b: left.id },
+      { id: 'left-right', a: left.id, b: right.id },
+    ],
+    plates: [{ id: 'plate', nodeIds: [isolated.id, right.id, top.id, left.id] }],
+  });
+  const vehicle = toNativePairFromEditor(document).data.vehicles.vehicles[0];
+  assert.deepEqual(vehicle.nodes.map(node => node.id), [1, 2, 3]);
+  assert.deepEqual(vehicle.plates[0].nodes, [3, 2, 1]);
 });
 test('installed native items remain on their host component and export back into its element', () => {
   const native = {
@@ -1534,6 +1571,44 @@ test('native child import rejects incompatible rigid attachment anchors', () => 
     ] }] },
   ] } };
   assert.throws(() => toEditorDocument(parseNativePair(native, {}), { vehicleIds: ['1'] }), /incompatible construction attachment anchors/);
+});
+test('native child import ignores logic ports when a rigid hinge anchor is present', () => {
+  const native = {
+    definitions: { components: ['hinge_knuckle', 'hinge_pin', 'electrical_interface_angle'] },
+    vehicles: { vehicles: [
+      { id: 1, grids: [{ components: [
+      { def: 0, id: 1, pos: [0, 0, 0], rot: [1, 0, 0, 0, 1, 0, 0, 0, 1], connected_vehicle: 2, connected_component: 1 },
+      { def: 2, id: 2, pos: [0, 0, 0], rot: [1, 0, 0, 0, 1, 0, 0, 0, 1], connected_vehicle: 2, connected_component: 2 },
+      ] }] },
+      { id: 2, grids: [{ components: [
+      { def: 1, id: 1, pos: [0, 0, 0], rot: [1, 0, 0, 0, 1, 0, 0, 0, 1] },
+      { def: 2, id: 2, pos: [1, 0, 0], rot: [1, 0, 0, 0, 1, 0, 0, 0, 1] },
+      ] }] },
+    ] },
+  };
+  const document = toEditorDocument(parseNativePair(native, {}), { vehicleIds: ['1'] });
+  assert.equal(document.objects.length, 4);
+});
+test('native component mates become physical connections for hinge and related connectors', () => {
+  const definitions = ['hinge_pin', 'hinge_knuckle', 'latch_pin', 'latch_knuckle', 'mounting_pin', 'mounting_knuckle', 'rail', 'rail_slider', 'rail_ballscrew', 'rail_ballscrew_slider', 'tow_bar', 'tow_hitch', 'truck_hitch_kingpin', 'truck_hitch'];
+  const components = [
+    ['hinge_pin', [0, 0, 0]], ['hinge_knuckle', [0, 0, 1]],
+    ['latch_pin', [0, 0, -1]], ['latch_knuckle', [0, 0, 0]],
+    ['mounting_pin', [2, 0, 0]], ['mounting_knuckle', [2, 0, 0]],
+    ['rail', [4, 0, 0]], ['rail_slider', [4, 0, 0]],
+    ['rail_ballscrew', [6, 0, 0]], ['rail_ballscrew_slider', [6, 0, 0]],
+    ['tow_bar', [8, 0, 0]], ['tow_hitch', [8, 0, 0]],
+    ['truck_hitch_kingpin', [10, 1, 0]], ['truck_hitch', [10, 1, 0]],
+  ].map(([type, pos], index) => ({ def: definitions.indexOf(type), id: index + 1, pos, rot: [1, 0, 0, 0, 1, 0, 0, 0, 1] }));
+  const model = parseNativePair({ definitions: { components: definitions }, vehicles: { vehicles: [{ id: 1, grids: [{ components }] }] } }, {});
+  const topology = toEditorTopology(model, { vehicleIds: ['1'] });
+  assert.deepEqual(topology.mechanicalConnections.map(connection => connection.type), ['hinge', 'latch', 'mounting', 'rail', 'rail_ballscrew', 'tow', 'tow']);
+  const hinge = topology.mechanicalConnections.find(connection => connection.type === 'hinge');
+  assert.deepEqual(hinge.from, '1:grid-1-1:1');
+  assert.deepEqual(hinge.to, '1:grid-1-1:2');
+  assert.deepEqual(hinge.position, { x: 0, y: 0, z: 0 });
+  assert.deepEqual(hinge.limits, { min: 0, max: Math.PI });
+  assert.equal(validateDocument(toEditorDocument(model, { vehicleIds: ['1'] }), new Map(definitions.map(type => [type, {}]))).topology.mechanicalConnections.length, 7);
 });
 test('topology commands create, split, merge and validate structure on the integer grid', () => {
   let nodes = [];
@@ -2273,7 +2348,7 @@ test('real published and local Meshes isolate interface triangles without colour
   const samples = [
     ['interface_electric_a', 132], ['interface_data_b', 18], ['interface_gas_a', 48],
     ['interface_mechanical_f_a', 38], ['wheel_hub_a_base', 48], ['manifold_pipe_c_straight', 6],
-    ['mechanical_bracket', 32], ['engine_block_a_0_0_0', 16], ['gear_box_a', 32],
+    ['mechanical_bracket', 32], ['pipe_junction_b', 16], ['engine_block_a_0_0_0', 16], ['gear_box_a', 32],
     ['air_manifold_a', 16], ['electric_motor_a', 0], ['electric_motor_b', 0],
     ['interface_liquid_a', 0], ['interface_torque_a', 0], ['circular_dial_c_a', 0],
   ];
@@ -2333,6 +2408,18 @@ test('interface classification never bleeds across a mixed body triangle or muta
   assert.deepEqual([...original], [0, 1, 2, 0, 2, 3]);
   assert.deepEqual(geometry.groups, [{ start: 0, count: 3, materialIndex: 0 }, { start: 3, count: 3, materialIndex: 1 }]);
   materials.forEach(material => material.dispose()); geometry.dispose();
+});
+
+test('interface isolation disables stale body vertex colours before splitting groups', () => {
+  const geometry = new THREE.BufferGeometry();
+  geometry.setIndex(new THREE.BufferAttribute(new Uint16Array([0, 1, 2]), 1));
+  const material = new THREE.MeshStandardMaterial({ color: '#b4c3ce', vertexColors: true });
+  const result = applyConnectionInterfaceColors(geometry, new Uint8Array([
+    51, 51, 51, 255, 51, 51, 51, 255, 51, 51, 51, 255,
+  ]), 'meshes/components/pipe_junction_b.mesh', material);
+  assert.equal(result.vertexColors, false);
+  assert.equal(result.color.getHexString(), 'b4c3ce');
+  result.dispose(); geometry.dispose();
 });
 
 test('published interface assembly leaves sockets uncovered and keeps ordinary dynamic parts', async () => {

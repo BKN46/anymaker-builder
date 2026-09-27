@@ -42,6 +42,7 @@ export function normalizeSettings(input = {}) {
     nodeSize: finite(s.nodeSize, .02, .25, .055),
     nodeOpacity: finite(s.nodeOpacity, 0, 1, 1),
     edgeAxisSnap: bool(s.edgeAxisSnap, false),
+    edgeMicroMode: bool(s.edgeMicroMode, false),
     edgeSize: s.edgeSize === 3 ? 3 : 1,
     hideMirrorPlane: bool(s.hideMirrorPlane, false),
     connectionVisibility: {

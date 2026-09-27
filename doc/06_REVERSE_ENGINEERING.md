@@ -27,6 +27,8 @@
 
 已验证的只读 GCL 代码区：run `20260924_202337` 导出的 `server_scene.vehicle_component.hinge_knuckle.connect_multibody.c` 位于 `D:\00Data00\Stormworks\analysis\artifacts\anymaker-gcl\20260924_202337`，该类型将多体连接委托给基类；run `20260924_202458` 导出的 `server_scene.vehicle_component.tow_bar.connect_multibody.c` 位于对应目录，调用记录包含双方 `get_transform`、格点转换和 `physics.scene.create_constraint_point`，但不包含 surface/logic 端口读取。这支持当前将端口与多体约束枢轴分开的导入实现；Ghidra 伪代码本身仍不足以证明所有连接器和运行时姿态的完整语义。
 
+当前实现：原生适配器按发布定义中的 `*_definition_id_other` 配对字段和 `constraint_position`（未声明时使用组件原点）寻找重合约束锚点，生成独立的 `topology.mechanicalConnections`。已覆盖 hinge、latch、mounting、rail、rail ballscrew、tow/truck hitch；这些记录不写入六类逻辑 `links`，也不冒充已验证的游戏物理运行时。
+
 ### 车门把手与组件子网格（2026-09-25）
 
 已验证的静态代码事实：本次只读检查 `bin/game.gcl`（SHA-256 `32c1389e6bbc49aeae5a7eff93f2f580fed78ec453a69e6a491c014253e4ae09`），按函数记录、重定位符号、机器码和常量交叉核对。Ghidra 本地 run 为本仓库忽略目录 `tmp/door-grid/DoorGridVerified`，伪 C 输出在 `tmp/door-grid/`；可提交摘要为 [native-grid-transform.json](evidence/native-grid-transform.json)。没有启动或修改游戏。

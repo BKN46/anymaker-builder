@@ -26,7 +26,7 @@ import { nativePaintColor, nearestNativePaintIndex, officialPaintColors, isGlass
 import { paintColorValue } from './editor/paint-color.js';
 import { DEFAULT_PROJECT_NAME, normalizeProjectName, projectFileBaseName } from './editor/project-name.js';
 import { accessoryOptionsForComponent, createNativeAccessoryItem, defaultAccessoryForPlacement, nativeAccessoryContainerForComponent, nativeAccessoryDefinition } from './editor/native-accessories.js';
-import { extensionAxes, extensionAxisIndex, extensionControlValue, extensionHandlePosition, extensionVector, updateExtension, updateExtensionFromControl } from './editor/component-extension.js';
+import { extensionAxes, extensionAxisIndex, extensionControlValue, extensionHandlePosition, extensionVector, updateExtensionFromControl, updateExtensionFromDrag } from './editor/component-extension.js';
 import { placementOrientation, PLACEMENT_ORIENTATION_KEYS, updatePlacementOrientation } from './editor/placement-orientation.js';
 import { editorMessages } from './editor/ui-messages.js';
 import { isSaveCancelled, saveFilePair, saveSingleFile } from './editor/file-save.js';
@@ -42,9 +42,11 @@ import { TANK_TYPES, tankCapacityCells, tankCapacityLiters } from './editor/tank
 import { stageImportedSubgrid, translateImportedSubgrid, translateSubgridTopology } from './editor/imported-subgrid.js';
 import { mountModelImportTool } from './editor/model-import-tool.js';
 import { createArchiveStore } from './editor/archive-store.js';
+import { createThumbnailStore } from './editor/thumbnail-store.js';
 import { encodeProjectCode, decodeProjectCode, MAX_PROJECT_CODE_LENGTH } from './editor/project-code.js';
 import { createFrameTask, planVisualUpdate, topologyVisualRecords, visualSignature } from './editor/visual-cache.js';
 import { createPlacementPicker, createProjectedNodePicker } from './editor/placement-picking.js';
+import { EDGE_MICRO_KEYS, edgeMicroKeyBinding, moveEdgeMicroEndpoint } from './editor/edge-micro.js';
 import { createRenderQualityController } from './editor/render-quality.js';
 import { mountRenderQualitySettings } from './editor/render-quality-ui.js';
 import './style.css';
@@ -52,6 +54,7 @@ import './style.css';
 addMessages(editorMessages);
 const localStore = createLocalStore(() => window.localStorage, location.pathname);
 const archiveStore = window.indexedDB ? createArchiveStore(window.indexedDB, location.pathname) : null;
+const thumbnailStore = window.indexedDB ? createThumbnailStore(window.indexedDB, location.pathname) : null;
 const AUTO_ARCHIVE_ID = 'autosave-current';
 let archiveRecords = [];
 let archiveLoadError = null;
@@ -258,7 +261,7 @@ applyTranslations(mirrorToolbar);
 
 const edgeToolbar = document.createElement('section');
 edgeToolbar.id = 'edge-toolbar'; edgeToolbar.className = 'context-toolbar edge-toolbar'; edgeToolbar.hidden = true;
-edgeToolbar.innerHTML = '<strong data-i18n="梁工具"></strong><div class="edge-size-buttons" role="group" data-i18n-aria-label="梁截面"><button type="button" data-edge-size="1">1×1</button><button type="button" data-edge-size="3">3×3</button></div><button id="edge-split-action" type="button" data-i18n="切分梁"></button><span class="context-help" data-i18n="梁截面尺寸与切分"></span>';
+edgeToolbar.innerHTML = '<strong data-i18n="梁工具"></strong><div class="edge-size-buttons" role="group" data-i18n-aria-label="梁截面"><button type="button" data-edge-size="1">1×1</button><button type="button" data-edge-size="3">3×3</button></div><label class="edge-micro-toggle"><input id="edge-micro-mode" type="checkbox"><span data-i18n="梁终点微操"></span></label><button id="edge-split-action" type="button" data-i18n="切分梁"></button><span class="context-help" data-i18n="梁截面尺寸与切分"></span>';
 applyTranslations(edgeToolbar);
 
 const subgridToolbar = document.createElement('section');
@@ -498,10 +501,13 @@ const structuralActions = [
   ['subgrid-action', '⌘', '子网格'],
 ];
 const actionHost = $('#tools');
+const structuralActionKeys = { 'copy-action': 'D', 'mirror-action': 'M' };
 for (const [id, icon, label] of structuralActions) {
   const button = document.createElement('button');
   button.id = id; button.className = 'tool structural-action'; button.dataset.i18nTitle = label; button.dataset.i18nAriaLabel = label;
-  button.innerHTML = '<span class="tool-icon">' + icon + '</span><span class="tool-label" data-i18n="' + label + '"></span>';
+  const key = structuralActionKeys[id] || '';
+  button.innerHTML = '<span class="tool-icon">' + icon + '</span><span class="tool-label" data-i18n="' + label + '"></span>' + (key ? '<kbd>' + key + '</kbd>' : '');
+  if (key) button.setAttribute('aria-keyshortcuts', key);
   applyTranslations(button); actionHost.append(button);
 }
 const restoreTransparencyButton = document.createElement('button');
@@ -580,6 +586,34 @@ controls.target.set(0, .2, 0);
 const transform = new TransformControls(camera, renderer.domElement);
 transform.setSize(.75);
 scene.add(transform.getHelper());
+// TransformControls scales rotation from the camera distance. A vehicle that
+// is fit into a wide viewport can therefore require an unnecessarily long
+// drag before the 90-degree snap is reached. Scale only the virtual pointer
+// used during rotation; translation, scale and the actual pointer position
+// used by picking remain unchanged.
+const ROTATION_DRAG_SENSITIVITY = 2.25;
+let rotationDragPointer = null;
+const transformPointerDown = transform.pointerDown.bind(transform);
+const transformPointerMove = transform.pointerMove.bind(transform);
+const transformPointerUp = transform.pointerUp.bind(transform);
+transform.pointerDown = pointer => {
+  rotationDragPointer = transform.mode === 'rotate' && pointer ? { x: pointer.x, y: pointer.y } : null;
+  transformPointerDown(pointer);
+};
+transform.pointerMove = pointer => {
+  if (transform.mode === 'rotate' && rotationDragPointer && pointer) {
+    pointer = {
+      ...pointer,
+      x: rotationDragPointer.x + (pointer.x - rotationDragPointer.x) * ROTATION_DRAG_SENSITIVITY,
+      y: rotationDragPointer.y + (pointer.y - rotationDragPointer.y) * ROTATION_DRAG_SENSITIVITY,
+    };
+  }
+  transformPointerMove(pointer);
+};
+transform.pointerUp = pointer => {
+  transformPointerUp(pointer);
+  rotationDragPointer = null;
+};
 const extensionHandle = new THREE.Object3D();
 extensionHandle.name = 'component-extension-handle';
 extensionHandle.userData.extensionHandle = true;
@@ -640,7 +674,10 @@ transform.addEventListener('dragging-changed', e => {
           object,
           definition,
           initialExtension: extensionVector(definition, object.userData.nativeExtension),
-          initialPosition: extensionHandle.position.clone(),
+          initialHandlePosition: extensionHandle.position.clone(),
+          initialObjectPosition: object.position.clone(),
+          initialQuaternion: object.quaternion.clone(),
+          nextPosition: object.position.clone(),
         };
         return;
       }
@@ -680,12 +717,27 @@ transform.addEventListener('dragging-changed', e => {
       }
     })();
   } else if (extensionTransform) {
-    const { object, initialExtension, nextExtension = initialExtension } = extensionTransform;
+    const { object, initialExtension, nextExtension = initialExtension, initialObjectPosition = object.position, nextPosition = object.position.clone() } = extensionTransform;
     extensionTransform = null;
-    if (nextExtension.some((value, index) => value !== initialExtension[index])) {
+    const extensionChanged = nextExtension.some((value, index) => value !== initialExtension[index]);
+    const positionChanged = nextPosition.distanceTo(initialObjectPosition) > 1e-9;
+    if (extensionChanged || positionChanged) {
       const objectId = object.userData.id;
+      const quantizedPosition = object.userData.nativeProjected
+        ? nextPosition
+        : (() => {
+          const point = quantizeWorldVector(nextPosition);
+          if (!point) throw new Error('Component position is off grid');
+          return new THREE.Vector3(point.x, point.y, point.z);
+        })();
+      object.position.copy(quantizedPosition);
+      const items = snapshot().map(item => item.id === objectId ? {
+        ...item,
+        position: { x: quantizedPosition.x, y: quantizedPosition.y, z: quantizedPosition.z },
+        nativeExtension: nextExtension,
+      } : item);
       void transact(async () => {
-        await restore(snapshot().map(item => item.id === objectId ? { ...item, nativeExtension: nextExtension } : item), topology, transparencyGroups);
+        await restore(items, topology, transparencyGroups);
         selected = objects.find(item => item.userData.id === objectId) || null;
         selectedIds = selected ? new Set([objectId]) : new Set();
         commit('更新组件线性尺寸'); inspect();
@@ -749,13 +801,33 @@ function updateTransformPreview() {
     if (index < 0) return;
     const descriptor = extensionAxes(extensionTransform.definition).find(item => item.index === index);
     if (!descriptor) return;
-    const delta = (extensionHandle.position.getComponent(index) - extensionTransform.initialPosition.getComponent(index)) / CELL_SIZE_WORLD * (descriptor.axis === 'x' ? -1 : 1);
-    extensionTransform.nextExtension = updateExtension(
+    const handleSign = descriptor.axis === 'x' ? -1 : 1;
+    const previousHandle = extensionTransform.nextHandlePosition?.getComponent(index);
+    const handleWasResetByPreview = Number.isFinite(previousHandle)
+      && Math.abs(extensionHandle.position.getComponent(index) - previousHandle) <= 1e-9
+      && Number.isFinite(extensionTransform.nextSignedValue);
+    const delta = handleWasResetByPreview
+      ? (extensionTransform.nextSignedValue - extensionTransform.initialExtension[index])
+      : (extensionHandle.position.getComponent(index) - extensionTransform.initialHandlePosition.getComponent(index)) / CELL_SIZE_WORLD * handleSign;
+    const drag = updateExtensionFromDrag(
       extensionTransform.definition,
       extensionTransform.initialExtension,
       descriptor.axis,
       extensionTransform.initialExtension[index] + delta,
     );
+    const nextHandle = extensionHandlePosition(extensionTransform.definition, drag.extension, CELL_SIZE_WORLD);
+    nextHandle[0] *= -1;
+    extensionTransform.nextExtension = drag.extension;
+    extensionTransform.nextSignedValue = drag.signedValue;
+    extensionTransform.nextHandlePosition = drag.signedValue < 0 ? new THREE.Vector3().fromArray(nextHandle) : null;
+    extensionTransform.nextPosition = extensionTransform.initialObjectPosition.clone();
+    if (drag.signedValue < 0) {
+      const localOffset = handleSign * (drag.signedValue - Math.abs(drag.signedValue)) * CELL_SIZE_WORLD * (extensionTransform.object.scale[descriptor.axis] || 1);
+      const worldOffset = new THREE.Vector3().setComponent(index, localOffset).applyQuaternion(extensionTransform.initialQuaternion);
+      extensionTransform.nextPosition.add(worldOffset);
+      extensionHandle.position.fromArray(nextHandle);
+    }
+    extensionTransform.object.position.copy(extensionTransform.nextPosition);
     return;
   }
   if (multiTransform) { updateMultiTransform(); return; }
@@ -943,6 +1015,7 @@ const edgeRuler = createEdgeRuler(viewport, () => camera);
 const edgeLengthLabels = createEdgeLengthLabels(viewport, () => camera);
 let edgeAxisSnap = settings.edgeAxisSnap;
 let edgeSize = settings.edgeSize;
+let edgeMicroMode = settings.edgeMicroMode;
 let edgeShiftSnap = false;
 let edgePointer = null;
 let pointerInCanvas = false;
@@ -1064,7 +1137,9 @@ function sanitizeConnectionTopology(nextTopology, items) {
   const components = componentEntries(items);
   const links = pruneInvalidConnections(nextTopology?.links || [], componentIds)
     .filter(link => connectionRouteWorldIsSafe(link, components));
-  return { ...nextTopology, links };
+  const mechanicalConnections = (nextTopology?.mechanicalConnections || [])
+    .filter(connection => componentIds.has(connection.from) && componentIds.has(connection.to));
+  return { ...nextTopology, links, ...(nextTopology?.mechanicalConnections !== undefined ? { mechanicalConnections } : {}) };
 }
 function componentEntries(items = snapshot()) {
   return new Map(items.map(item => [item.id, item]));
@@ -1327,6 +1402,7 @@ function selectTopologyNode(nodeId) {
 function cancelEdge() {
   edgeDraft = null; edgePointer = null; edgePreview.visible = false; edgeAnchor.visible = false; edgeRuler.hide();
   setText(buildStatus, '梁 1 格 · 点击起点');
+  updatePlacementIndicator();
 }
 function cancelTopologyDraft() {
   cancelEdge(); clearNodeSelection(); clearLinkPointSelection(); plateEdgeIds = []; connectionDraft = null; clearConnectionDraftPreview();
@@ -1390,9 +1466,13 @@ function showComponentModelPreview(button) {
   if (!request) {
     request = (async () => {
       try {
+        const stored = await thumbnailStore?.get(id, 256).catch(() => null);
+        if (stored) return stored;
         const detail = await catalog.definition(id);
         definitions.set(id, detail);
-        return await renderModelThumbnail(detail, 256);
+        const value = await renderModelThumbnail(detail, 256);
+        if (value) await thumbnailStore?.put(id, 256, value).catch(() => {});
+        return value;
       } catch { return null; }
     })();
     thumbnailLargeRequests.set(id, request);
@@ -1803,7 +1883,7 @@ function setTool(value) {
   hoveredObject = null;
   hideConnectionPortTooltip();
   scheduleSettings();
-  document.querySelectorAll('.tool').forEach(b => b.classList.toggle('active', b.dataset.tool === tool));
+  document.querySelectorAll('.tool[data-tool]').forEach(b => b.classList.toggle('active', b.dataset.tool === tool));
   selectionToolbar.hidden = value !== 'select' || referencePreview;
   paintToolbar.hidden = value !== 'paint' || referencePreview;
   connectionToolbar.hidden = value !== 'connect' || referencePreview;
@@ -2617,6 +2697,7 @@ async function deleteSubgrid(gridId) {
       edges: topology.edges.filter(edge => !belongsToGrid(edge)),
       plates: topology.plates.filter(plate => !belongsToGrid(plate)),
       links: (topology.links || []).filter(link => !removedComponentIds.has(link.from?.componentId) && !removedComponentIds.has(link.to?.componentId)),
+      mechanicalConnections: (topology.mechanicalConnections || []).filter(connection => !removedComponentIds.has(connection.from) && !removedComponentIds.has(connection.to)),
     };
     const nextSubgrids = subgrids.filter(grid => grid.id !== gridId);
     removeReferenceImage(gridId);
@@ -2754,25 +2835,42 @@ function applyPendingPlacementOrientation(object) {
   setObjectLocalMirrorAxes(object, pendingPlacementOrientation.localMirrorAxes);
 }
 function updatePlacementIndicator() {
-  const available = tool === 'place' && placementPreview?.visible && !referencePreview;
-  placementIndicator.hidden = !settings.placementOrientationIndicator || !available;
+  const edgeMicroAvailable = tool === 'edge' && edgeDraft?.micro && edgeDraft.end && !referencePreview;
+  const placementAvailable = tool === 'place' && placementPreview?.visible && !referencePreview;
+  const available = placementAvailable || edgeMicroAvailable;
+  placementIndicator.hidden = edgeMicroAvailable ? false : !settings.placementOrientationIndicator || !placementAvailable;
+  placementIndicator.dataset.mode = edgeMicroAvailable ? 'edge-micro' : 'place';
   if (!available) return;
   const rect = viewport.getBoundingClientRect();
-  const origin = placementPreview.getWorldPosition(new THREE.Vector3());
-  const orientation = placementPreview.getWorldQuaternion(new THREE.Quaternion());
+  const origin = edgeMicroAvailable
+    ? new THREE.Vector3(edgeDraft.end.x, edgeDraft.end.y, edgeDraft.end.z)
+    : placementPreview.getWorldPosition(new THREE.Vector3());
+  const orientation = edgeMicroAvailable
+    ? new THREE.Quaternion()
+    : placementPreview.getWorldQuaternion(new THREE.Quaternion());
   const originScreen = origin.clone().project(camera);
   if (originScreen.z < -1 || originScreen.z > 1) { placementIndicator.hidden = true; return; }
   const screenOrigin = new THREE.Vector2((originScreen.x * .5 + .5) * rect.width, (-originScreen.y * .5 + .5) * rect.height);
   for (const axis of axes) {
     const degrees = Math.round(THREE.MathUtils.radToDeg(pendingPlacementOrientation.rotation[axis])) % 360;
     const rotation = placementIndicator.querySelector(`[data-placement-rotation="${axis}"]`);
+    const rotationMarker = rotation.parentElement;
+    const rotationKey = rotationMarker.querySelector('kbd');
     rotation.textContent = '↻';
-    rotation.parentElement.setAttribute('aria-label', `${axis.toUpperCase()} rotation ${degrees} degrees`);
+    rotationKey.textContent = edgeMicroAvailable ? { x: 'U', y: 'I', z: 'O' }[axis] : { x: 'J', y: 'K', z: 'L' }[axis];
+    rotationMarker.setAttribute('aria-label', edgeMicroAvailable
+      ? t('梁终点沿 {axis} 轴正向移动：{key}', { axis: axis.toUpperCase(), key: rotationKey.textContent })
+      : `${axis.toUpperCase()} rotation ${degrees} degrees`);
     const mirrored = pendingPlacementOrientation.localMirrorAxes.includes(axis);
     const output = placementIndicator.querySelector(`[data-placement-mirror="${axis}"]`);
     output.textContent = '↔';
-    output.parentElement.setAttribute('aria-label', `${axis.toUpperCase()} mirror ${mirrored ? 'on' : 'off'}`);
-    output.parentElement.classList.toggle('active', mirrored);
+    const mirrorKeyMarker = output.parentElement;
+    const mirrorKey = mirrorKeyMarker.querySelector('kbd');
+    mirrorKey.textContent = edgeMicroAvailable ? { x: 'J', y: 'K', z: 'L' }[axis] : { x: 'U', y: 'I', z: 'O' }[axis];
+    mirrorKeyMarker.setAttribute('aria-label', edgeMicroAvailable
+      ? t('梁终点沿 {axis} 轴负向移动：{key}', { axis: axis.toUpperCase(), key: mirrorKey.textContent })
+      : `${axis.toUpperCase()} mirror ${mirrored ? 'on' : 'off'}`);
+    mirrorKeyMarker.classList.toggle('active', edgeMicroAvailable ? false : mirrored);
 
     const localAxis = new THREE.Vector3(axis === 'x' ? 1 : 0, axis === 'y' ? 1 : 0, axis === 'z' ? 1 : 0).applyQuaternion(orientation);
     const endpoint = origin.clone().addScaledVector(localAxis, .32).project(camera);
@@ -2924,6 +3022,10 @@ function centerImportedVehicleGeometry() {
       ...link,
       points: (link.points || []).map(shiftedPoint),
     })),
+    mechanicalConnections: (topology.mechanicalConnections || []).map(connection => ({
+      ...connection,
+      position: shiftedPoint(connection.position),
+    })),
   };
   replaceTopologyVisual(prepareTopologyVisual(topology, componentEntries()));
   refreshConnectionPorts();
@@ -2931,6 +3033,10 @@ function centerImportedVehicleGeometry() {
   return true;
 }
 async function place(point) {
+  const placementOrientationSnapshot = {
+    rotation: { ...pendingPlacementOrientation.rotation },
+    localMirrorAxes: [...pendingPlacementOrientation.localMirrorAxes],
+  };
   if (!catalog.has(selectedType)) throw new Error('请先选择组件');
   if (objects.length >= LIMIT) throw new Error('达到组件上限');
   if (mirrorMode.active && objects.length >= LIMIT - 1) throw new Error('镜像放置会超过组件上限');
@@ -2941,7 +3047,9 @@ async function place(point) {
   const color = currentPaintColor();
   const colorIndex = nearestNativePaintIndex(color);
   const defaultAccessoryType = defaultAccessoryForPlacement(selectedType);
-  const object = await createObject({ id: crypto.randomUUID(), type: selectedType, gridId: activeGridId, ...(defaultAccessoryType ? { nativeAccessory: createNativeAccessoryItem(defaultAccessoryType, nextNativeAccessoryItemId()), nativeAccessoryContainer: 'acc' } : {}), ...(selectedType === 'microcontroller' ? { nativeProperties: microcontrollerState() } : {}), ...(color ? { paintColor: color } : {}), ...(colorIndex !== null ? { colors: [colorIndex] } : {}), ...(pendingPlacementOrientation.localMirrorAxes.length ? { localMirrorAxes: [...pendingPlacementOrientation.localMirrorAxes] } : {}), position: { x: 0, y: 0, z: 0 }, rotation: { ...pendingPlacementOrientation.rotation }, scale: { x: 1, y: 1, z: 1 } });
+  const object = await createObject({ id: crypto.randomUUID(), type: selectedType, gridId: activeGridId, ...(defaultAccessoryType ? { nativeAccessory: createNativeAccessoryItem(defaultAccessoryType, nextNativeAccessoryItemId()), nativeAccessoryContainer: 'acc' } : {}), ...(selectedType === 'microcontroller' ? { nativeProperties: microcontrollerState() } : {}), ...(color ? { paintColor: color } : {}), ...(colorIndex !== null ? { colors: [colorIndex] } : {}), ...(placementOrientationSnapshot.localMirrorAxes.length ? { localMirrorAxes: [...placementOrientationSnapshot.localMirrorAxes] } : {}), position: { x: 0, y: 0, z: 0 }, rotation: { ...placementOrientationSnapshot.rotation }, scale: { x: 1, y: 1, z: 1 } });
+  object.rotation.set(...axes.map(axis => placementOrientationSnapshot.rotation[axis]));
+  setObjectLocalMirrorAxes(object, placementOrientationSnapshot.localMirrorAxes);
   const resolvedPoint = resolvePlacementPoint(placementRaycaster, constructionHitTargets(), plane, {
     picker: placementPicker,
     adjacentTargets: objects.filter(candidate => candidate.visible),
@@ -2992,6 +3100,7 @@ async function placeImportedSubgrid(point) {
     edges: [...topology.edges, ...placed.topology.edges],
     plates: [...topology.plates, ...placed.topology.plates],
     links: [...(topology.links || []), ...placed.topology.links],
+    mechanicalConnections: [...(topology.mechanicalConnections || []), ...(placed.topology.mechanicalConnections || [])],
   };
   const nextGrids = [...subgrids, { id: placed.gridId }];
   clearImportedSubgridPreview();
@@ -3015,7 +3124,11 @@ async function remove(object, { selectedGroup = true } = {}) {
   }
   const removedIds = [...ids];
   const result = removeObjects(items, removedIds);
-  await restore(result.objects, { ...topology, links: (topology.links || []).filter(link => !ids.has(link.from.componentId) && !ids.has(link.to.componentId)) });
+  await restore(result.objects, {
+    ...topology,
+    links: (topology.links || []).filter(link => !ids.has(link.from.componentId) && !ids.has(link.to.componentId)),
+    mechanicalConnections: (topology.mechanicalConnections || []).filter(connection => !ids.has(connection.from) && !ids.has(connection.to)),
+  });
   select(null);
   commit('删除组件');
   status('已删除 {count} 个组件', { count: result.removed.length });
@@ -3058,6 +3171,8 @@ async function removeSelection() {
   const removedComponentLinks = new Set(componentIds);
   nextTopology.links = (nextTopology.links || []).filter(link => !linkIds.has(link.id)
     && !removedComponentLinks.has(link.from?.componentId) && !removedComponentLinks.has(link.to?.componentId));
+  nextTopology.mechanicalConnections = (nextTopology.mechanicalConnections || []).filter(connection =>
+    !removedComponentLinks.has(connection.from) && !removedComponentLinks.has(connection.to));
   const result = removeObjects(items, componentIds);
   const cleanedTopology = pruneUnusedTopology(nextTopology);
   const structuralBefore = topology.nodes.length + topology.edges.length + topology.plates.length + (topology.links || []).length;
@@ -3881,9 +3996,13 @@ function requestModelThumbnail(definition, card) {
   if (!request) {
     request = (async () => {
       try {
+        const stored = await thumbnailStore?.get(id, 96).catch(() => null);
+        if (stored) return stored;
         const detail = await catalog.definition(id);
         definitions.set(id, detail);
-        return await renderModelThumbnail(detail);
+        const value = await renderModelThumbnail(detail);
+        if (value) await thumbnailStore?.put(id, 96, value).catch(() => {});
+        return value;
       } catch { return null; }
     })();
     thumbnailRequests.set(id, request);
@@ -3915,12 +4034,16 @@ async function loadCatalog() {
   renderCategories(); renderCatalog(); status('已加载 {count} 条组件索引，详情按需读取', { count: catalog.index.size });
 }
 
-function pointerRay(event) {
-  const rect = renderer.domElement.getBoundingClientRect();
-  pointer.set((event.clientX - rect.left) / rect.width * 2 - 1, -(event.clientY - rect.top) / rect.height * 2 + 1);
+function syncPickingView() {
   // OrbitControls updates the pose before rendering updates camera matrices.
   // Picking in that interval must use the same view as the upcoming frame.
   camera.updateWorldMatrix(true, false);
+  if (transform.object && transform.enabled) transform.getHelper().updateMatrixWorld(true);
+}
+function pointerRay(event) {
+  const rect = renderer.domElement.getBoundingClientRect();
+  pointer.set((event.clientX - rect.left) / rect.width * 2 - 1, -(event.clientY - rect.top) / rect.height * 2 + 1);
+  syncPickingView();
   raycaster.setFromCamera(pointer, camera);
 }
 function relativePlacementBounds(object) {
@@ -4415,6 +4538,7 @@ function saveTransparencyGroup() {
   status('已保存隐藏组 {name}', { name });
 }
 function edgePoint() {
+  if (edgeDraft?.micro && edgeDraft.end) return new THREE.Vector3(edgeDraft.end.x, edgeDraft.end.y, edgeDraft.end.z);
   const nodeId = pickConstructionNode(true);
   const node = topology.nodes.find(value => value.id === nodeId);
   // The endpoint node occupies a full grid cell, so keep its visible cube
@@ -4448,7 +4572,9 @@ function updateEdgePreview(point) {
   edgePreview.visible = !!point && updateEdgeMesh(edgePreview, edgeDraft.start, point, { size: edgeSize });
   edgeAnchor.visible = true;
   if (point) edgeRuler.show(edgeDraft.start, point, edgeDraft.axis); else edgeRuler.hide();
-  setText(buildStatus, point ? '梁 1 格 · 整格端点 · 点击完成 / Esc 取消' : '梁 1 格 · 无有效终点 · Esc 取消');
+  setText(buildStatus, edgeDraft.micro
+    ? (point && point.distanceToSquared(edgeDraft.start) > 1e-12 ? '梁终点微操 · U/J I/K O/L 移动 · 点击或 Enter 完成 / Esc 取消' : '梁终点微操 · U/J I/K O/L 移动终点 · 点击或 Enter 完成 / Esc 取消')
+    : (point ? '梁 1 格 · 整格端点 · 点击完成 / Esc 取消' : '梁 1 格 · 无有效终点 · Esc 取消'));
 }
 function refreshEdgePreview() {
   if (!edgePointer || tool !== 'edge') return;
@@ -4545,8 +4671,8 @@ function selectedPlateEdgesFormLoop() {
   return visited.size === neighbours.size;
 }
 function splitPickedEdge() {
-  const hit = raycaster.intersectObjects(topologyLayer.children.filter(object => object.visible && object.userData.topology === 'edge'), false)[0];
-  if (!hit) { status('切分工具需要点击梁的内部'); return false; }
+  const hit = placementPicker.firstHit(raycaster, constructionHitTargets());
+  if (hit?.object.userData.topology !== 'edge') { status('切分工具需要点击梁的内部'); return false; }
   const edge = topology.edges.find(value => value.id === hit.object.userData.edgeId);
   if (!edge) return false;
   const ends = [edge.a, edge.b].map(id => topology.nodes.find(node => node.id === id).position);
@@ -4601,7 +4727,14 @@ function handleEdgeClick(event) {
   cancelEdge();
 }
 function constructionEdgeSplitTarget() {
-  const hit = pickEdgeByScreenTolerance(24, false);
+  // A visible existing node wins over splitting a different beam behind it.
+  // Screen-space centre lines have no depth: only use that tolerance after
+  // the pointer ray has missed every solid placement surface.
+  if (pickConstructionNode(true)) return null;
+  const targets = constructionHitTargets();
+  const surfaceHit = placementPicker.firstHit(raycaster, targets);
+  if (surfaceHit && surfaceHit.object.userData.topology !== 'edge') return null;
+  const hit = surfaceHit ? { id: surfaceHit.object.userData.edgeId } : pickEdgeByScreenTolerance(24, false);
   if (!hit) return null;
   const edge = topology.edges.find(value => value.id === hit.id);
   if (!edge) return null;
@@ -4625,6 +4758,7 @@ function constructionEdgeSplitTarget() {
   raycaster.ray.distanceSqToSegment(a, b, new THREE.Vector3(), center);
   const point = candidates.map(value => new THREE.Vector3(value.x, value.y, value.z))
     .reduce((closest, candidate) => candidate.distanceToSquared(center) < closest.distanceToSquared(center) ? candidate : closest);
+  if (!surfaceHit && !placementPicker.pointVisible(point, camera, targets, 0, target => target.userData.edgeId === edge.id)) return null;
   return { edge, point };
 }
 
@@ -4635,18 +4769,34 @@ function splitConstructionEdgeState(target, state = topology) {
 }
 
 function beginConstructionEdgeDraft(point, event) {
-  edgeDraft = { start: point.clone(), frame: cameraBuildFrame(camera, point), axis: null };
+  edgeDraft = { start: point.clone(), end: point.clone(), frame: cameraBuildFrame(camera, point), axis: null, micro: edgeMicroMode };
   edgePointer = { clientX: event.clientX, clientY: event.clientY };
   edgeAnchor.position.copy(point); edgeAnchor.visible = true;
   edgeRuler.show(point, point);
-  setText(buildStatus, '梁 1 格 · 点击终点 · Esc 取消');
-  status('起点已定位；移动鼠标预览实体梁，再次点击完成');
+  updatePlacementIndicator();
+  setText(buildStatus, edgeMicroMode ? '梁终点微操 · U/J I/K O/L 移动终点 · 点击或 Enter 完成 / Esc 取消' : '梁 1 格 · 点击终点 · Esc 取消');
+  status(edgeMicroMode ? '起点已定位；使用 U/J、I/K、O/L 移动终点，点击或按 Enter 完成' : '起点已定位；移动鼠标预览实体梁，再次点击完成');
+}
+
+function commitConstructionEdgeDraft(point, working = topology) {
+  if (!edgeDraft || !point || edgeDraft.start.distanceToSquared(point) <= 1e-12) {
+    status('终点必须与起点不同；请使用 U/J、I/K、O/L 移动终点');
+    return false;
+  }
+  const color = currentPaintColor();
+  const existingNodeIds = new Set(working.nodes.map(node => node.id));
+  const created = createEdgeFromPoints(working, edgeDraft.start, point, { ...(color ? { color } : {}), size: edgeSize, gridId: activeGridId });
+  const withGridNodes = { ...created, nodes: created.nodes.map(node => existingNodeIds.has(node.id) ? node : { ...node, gridId: activeGridId }) };
+  const mirrored = addMirroredEdge(withGridNodes, edgeDraft.start, point);
+  commitTopology({ ...mirrored, nodes: mirrored.nodes.map(node => node.gridId ? node : { ...node, gridId: activeGridId }) }, mirrorMode.active ? '已创建实体梁及其镜像' : '已创建 1 格实体梁');
+  cancelEdge();
+  return true;
 }
 
 function handleEdgeClickWithBeamAnchors(event) {
-  if (event.altKey) return splitPickedEdge();
+  if (event.altKey && !edgeDraft) return splitPickedEdge();
   let working = topology;
-  const splitTarget = constructionEdgeSplitTarget();
+  const splitTarget = edgeDraft ? null : constructionEdgeSplitTarget();
   if (splitTarget && !splitTarget.point) {
     status('该梁没有可用的整数格内部分割点');
     return;
@@ -4660,13 +4810,7 @@ function handleEdgeClickWithBeamAnchors(event) {
     beginConstructionEdgeDraft(point, event);
     return;
   }
-  const color = currentPaintColor();
-  const existingNodeIds = new Set(working.nodes.map(node => node.id));
-  const created = createEdgeFromPoints(working, edgeDraft.start, point, { ...(color ? { color } : {}), size: edgeSize, gridId: activeGridId });
-  const withGridNodes = { ...created, nodes: created.nodes.map(node => existingNodeIds.has(node.id) ? node : { ...node, gridId: activeGridId }) };
-  const mirrored = addMirroredEdge(withGridNodes, edgeDraft.start, point);
-  commitTopology({ ...mirrored, nodes: mirrored.nodes.map(node => node.gridId ? node : { ...node, gridId: activeGridId }) }, mirrorMode.active ? '已创建实体梁及其镜像' : '已创建 1 格实体梁');
-  cancelEdge();
+  commitConstructionEdgeDraft(point, working);
 }
 
 function handleConnectionClick() {
@@ -4758,7 +4902,27 @@ function handleTopologyClick(point) {
   }
   return false;
 }
+function moveEdgeMicroDraft(key) {
+  if (tool !== 'edge' || !edgeDraft?.micro) return false;
+  const binding = edgeMicroKeyBinding(key);
+  if (!binding) return false;
+  const next = moveEdgeMicroEndpoint(edgeDraft.end, key);
+  if (!next) return true;
+  edgeDraft.end = next;
+  edgeDraft.axis = null;
+  const point = new THREE.Vector3(next.x, next.y, next.z);
+  updateEdgePreview(point);
+  updatePlacementIndicator();
+  return true;
+}
+function finishEdgeMicroDraft() {
+  if (tool !== 'edge' || !edgeDraft?.micro) return false;
+  return commitConstructionEdgeDraft(new THREE.Vector3(edgeDraft.end.x, edgeDraft.end.y, edgeDraft.end.z));
+}
 renderer.domElement.addEventListener('contextmenu', e => e.preventDefault());
+// TransformControls handles pointerdown before our bubbling listener. Refresh
+// its camera-facing handles first, even if the camera moved between frames.
+renderer.domElement.addEventListener('pointerdown', syncPickingView, true);
 renderer.domElement.addEventListener('pointerdown', event => {
   if (event.button !== 0 || busy) return;
   pointerRay(event);
@@ -4783,7 +4947,7 @@ renderer.domElement.addEventListener('pointerdown', event => {
 });
 const pointerMoveTask = createFrameTask(processPointerMove);
 function processPointerMove(event) {
-  if (busy || transform.dragging || orbitInteracting) return;
+  if (busy || transform.dragging) return;
   if (selectionBoxDraft) {
     const left = Math.min(selectionBoxDraft.startX, event.clientX) - selectionBoxDraft.viewportRect.left;
     const top = Math.min(selectionBoxDraft.startY, event.clientY) - selectionBoxDraft.viewportRect.top;
@@ -4796,9 +4960,17 @@ function processPointerMove(event) {
     moveMirrorGuideFromRay();
     return;
   }
+  const rect = renderer.domElement.getBoundingClientRect();
+  if (event.clientX < rect.left || event.clientX >= rect.right || event.clientY < rect.top || event.clientY >= rect.bottom) {
+    clearPointerHover();
+    return;
+  }
   pointerInCanvas = true;
   edgePointer = { clientX: event.clientX, clientY: event.clientY };
   pointerRay(event);
+  // Native handle hovering only runs on pointer events. Camera damping also
+  // moves the handles beneath a stationary pointer, so refresh before render.
+  if (transform.object && transform.enabled) transform.pointerHover(pointer);
   if (tool === 'connect') {
     const port = pickConnectionPort();
     hoveredConnectionPort = port;
@@ -4824,13 +4996,31 @@ function processPointerMove(event) {
 }
 renderer.domElement.addEventListener('pointermove', event => {
   // Orbit damping emits camera changes before the queued pointer is flushed.
-  // Retain the raw position even while preview work is suspended for rotation.
+  // Keep the newest position for the same frame's camera and picking update.
   edgePointer = { clientX: event.clientX, clientY: event.clientY };
   pointerMoveTask.schedule(event);
 });
 renderer.domElement.addEventListener('pointercancel', () => pointerMoveTask.cancel());
-renderer.domElement.addEventListener('pointerleave', () => { pointerMoveTask.cancel(); pointerInCanvas = false; hoveredObject = null; hideConnectionPortTooltip(); updateInteractionHighlights(); edgePreview.visible = false; edgeAnchor.visible = false; edgeRuler.hide(); if (placementPreview) placementPreview.visible = false; placementIndicator.hidden = true; if (importedSubgridDraft?.preview) importedSubgridDraft.preview.visible = false; });
+function clearPointerHover() {
+  pointerMoveTask.cancel(); pointerInCanvas = false; hoveredObject = null;
+  if (!transform.dragging) transform.axis = null;
+  hideConnectionPortTooltip(); updateInteractionHighlights();
+  edgePreview.visible = false; edgeAnchor.visible = false; edgeRuler.hide();
+  if (placementPreview) placementPreview.visible = false;
+  placementIndicator.hidden = true;
+  if (importedSubgridDraft?.preview) importedSubgridDraft.preview.visible = false;
+}
+renderer.domElement.addEventListener('pointerleave', clearPointerHover);
 renderer.domElement.addEventListener('pointerup', event => {
+  if (event.button !== 0) {
+    // OrbitControls has already queued its final camera refresh. Do not cancel
+    // it when releasing rotation/pan, including when damping has just settled.
+    if (pointerInCanvas) {
+      edgePointer = { clientX: event.clientX, clientY: event.clientY };
+      pointerMoveTask.schedule(edgePointer);
+    }
+    return;
+  }
   pointerMoveTask.cancel();
   if (selectionBoxDraft) {
     const start = selectionBoxDraft; selectionBoxDraft = null;
@@ -4888,7 +5078,8 @@ renderer.domElement.addEventListener('pointerup', event => {
   if (tool === 'place') {
     const point = placementPoint();
     if (!point || point.length() > 1000) return;
-    transact(async () => { await place(point); if (!event.shiftKey) tool = 'select'; });
+    const continuePlacement = event.shiftKey;
+    void transact(async () => { await place(point); if (!continuePlacement) tool = 'select'; });
   } else if (tool === 'subgrid-place') {
     const point = placementPoint();
     if (!point || point.length() > 1000) return;
@@ -5236,6 +5427,12 @@ function updateEdgeToolbar() {
 }
 updateEdgeAxisSnapButton();
 updateEdgeToolbar();
+const edgeMicroModeInput = $('#edge-micro-mode');
+edgeMicroModeInput.checked = edgeMicroMode;
+edgeMicroModeInput.addEventListener('change', () => {
+  edgeMicroMode = edgeMicroModeInput.checked;
+  scheduleSettings();
+});
 function toggleEdgeAxisSnap() {
   if (busy) return;
   edgeAxisSnap = !edgeAxisSnap;
@@ -5379,6 +5576,7 @@ function importedSubgridExistingIds() {
     edges: topology.edges.map(edge => edge.id),
     plates: topology.plates.map(plate => plate.id),
     links: (topology.links || []).map(link => link.id),
+    mechanicalConnections: (topology.mechanicalConnections || []).map(connection => connection.id),
   };
 }
 $('#native-subgrid-input').onchange = async e => {
@@ -5516,6 +5714,8 @@ window.addEventListener('keydown', e => {
   if (busy) return;
   const key = e.key.toLowerCase();
   if (e.ctrlKey || e.metaKey) { if (key === 'z') { e.preventDefault(); e.shiftKey ? redo() : undo(); } else if (key === 'y') { e.preventDefault(); redo(); } return; }
+  const structuralShortcut = !e.ctrlKey && !e.metaKey && !e.altKey && (key === 'd' ? structuralCopy : key === 'm' ? structuralMirror : null);
+  if (structuralShortcut) { e.preventDefault(); structuralShortcut(); return; }
   if (tool === 'place' && PLACEMENT_ORIENTATION_KEYS[key]) {
     e.preventDefault();
     pendingPlacementOrientation = updatePlacementOrientation(pendingPlacementOrientation, key);
@@ -5529,6 +5729,18 @@ window.addEventListener('keydown', e => {
     }
     else updatePlacementIndicator();
     return;
+  }
+  if (tool === 'edge' && edgeDraft?.micro) {
+    if (key === 'enter') {
+      e.preventDefault();
+      try { finishEdgeMicroDraft(); } catch (error) { reportError('梁操作失败：{error}', error); }
+      return;
+    }
+    if (EDGE_MICRO_KEYS[key]) {
+      e.preventDefault();
+      moveEdgeMicroDraft(key);
+      return;
+    }
   }
   if (key === 'a' && !e.altKey && !e.repeat) { e.preventDefault(); toggleEdgeAxisSnap(); return; }
   const binding = tools.find(t => t[2].toLowerCase() === key);
@@ -5595,7 +5807,7 @@ function collectSettings() {
   return {
     version: 1, renderQuality: settings.renderQuality, language: getLocale(), leftWidth: leftSidebarWidth, rightWidth: rightSidebarWidth, leftCollapsed: leftSidebar.hidden, rightOpen: !rightSidebar.hidden,
     gridColor: $('#grid-color').value, gridOpacity: Number($('#grid-opacity').value), gridStyle: $('#grid-style').value, gridVisible: gridPreferenceVisible,
-    nodesVisible: showNodes, nodeColor: $('#node-color').value, nodeSize: Number($('#node-size').value), nodeOpacity: Number($('#node-opacity').value), edgeAxisSnap, edgeSize, hideMirrorPlane: mirrorMode.hidePlane, connectionVisibility: { ...connectionVisibility }, edgeLengthsVisible: settings.edgeLengthsVisible, edgeOutlinesVisible: settings.edgeOutlinesVisible, tool, selectedType,
+    nodesVisible: showNodes, nodeColor: $('#node-color').value, nodeSize: Number($('#node-size').value), nodeOpacity: Number($('#node-opacity').value), edgeAxisSnap, edgeMicroMode, edgeSize, hideMirrorPlane: mirrorMode.hidePlane, connectionVisibility: { ...connectionVisibility }, edgeLengthsVisible: settings.edgeLengthsVisible, edgeOutlinesVisible: settings.edgeOutlinesVisible, tool, selectedType,
     backgroundColor: settings.backgroundColor, lightAzimuth: settings.lightAzimuth, lightElevation: settings.lightElevation, lightIntensity: settings.lightIntensity, shadowStrength: settings.shadowStrength, lightSoftness: settings.lightSoftness, cameraLightEnabled: settings.cameraLightEnabled, cameraLightIntensity: settings.cameraLightIntensity, paintColor: settings.paintColor, paintQuickColors: settings.paintQuickColors, orthographic: settings.orthographic, placementOrientationIndicator: settings.placementOrientationIndicator,
     showBuildingFurniture: $('#show-building-furniture').checked, modelThumbnails: $('#use-model-thumbnails').checked, catalogCardSize: settings.catalogCardSize, favoriteComponents: [...settings.favoriteComponents], query: $('#component-search').value, category: $('#category-filter').value,
     sidebarTabs: { left: settings.sidebarTabs.left, right: settings.sidebarTabs.right },
@@ -5613,7 +5825,7 @@ function scheduleSettings() {
   clearTimeout(settingsTimer); settingsTimer = setTimeout(saveSettings, 180);
 }
 controls.addEventListener('change', () => { scheduleSettings(); if (!busy && pointerInCanvas && edgePointer) pointerMoveTask.scheduleIfIdle(edgePointer); });
-controls.addEventListener('start', () => { orbitInteracting = true; pointerMoveTask.cancel(); renderQuality.setInteraction(true); });
+controls.addEventListener('start', () => { orbitInteracting = true; renderQuality.setInteraction(true); });
 controls.addEventListener('end', () => { orbitInteracting = false; renderQuality.setInteraction(dragRenderMode); if (pointerInCanvas && edgePointer) pointerMoveTask.scheduleIfIdle(edgePointer); });
 window.addEventListener('pagehide', saveSettings);
 document.addEventListener('visibilitychange', () => { if (document.visibilityState === 'hidden') saveSettings(); });

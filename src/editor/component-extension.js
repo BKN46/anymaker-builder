@@ -45,6 +45,19 @@ export function updateExtension(definition, extension, axis, value) {
   return result;
 }
 
+// Extension handles can cross the base length. Native data still stores a
+// non-negative extension; the sign is consumed by the editor to move the
+// component to the opposite side of its stretch centre.
+export function updateExtensionFromDrag(definition, extension, axis, value) {
+  const descriptor = extensionAxes(definition).find(item => item.axis === axis);
+  if (!descriptor || !Number.isFinite(value)) throw new Error('Component axis is not linearly extendable');
+  const result = extensionVector(definition, extension);
+  const snapped = Math.round(value / descriptor.interval) * descriptor.interval;
+  const signedValue = Math.min(descriptor.max, Math.max(-descriptor.max, snapped)) || 0;
+  result[descriptor.index] = Math.abs(signedValue);
+  return { extension: result, signedValue };
+}
+
 // The build control shows the initial selectable span as well as `ext`.
 // Native data stores only the added cells; tile engines begin at one tile,
 // while stretch controls begin at one cell.

@@ -2,6 +2,7 @@
 // return new values, allowing the UI to preview and commit one transaction.
 import { AXES, assertGridVector, cellToWorld, cellsBetween, greatestCommonDivisor, worldToCell } from './grid.js';
 import { validateLinks } from './connections.js';
+import { validateMechanicalConnections } from './mechanical-connections.js';
 
 const EPSILON = 1e-6;
 const clone = value => structuredClone(value);
@@ -39,6 +40,7 @@ export function validateTopologyState(state = {}, componentIds = null) {
   const edges = Array.isArray(state.edges) ? state.edges : [];
   const plates = Array.isArray(state.plates) ? state.plates : [];
   const links = validateLinks(state.links || [], componentIds);
+  const mechanicalConnections = validateMechanicalConnections(state.mechanicalConnections || [], componentIds);
   const nodeIds = new Set();
   const points = new Map();
   const normalizedNodes = [];
@@ -79,7 +81,10 @@ export function validateTopologyState(state = {}, componentIds = null) {
     const surfaceDirection = normalizedSurfaceDirection(plate.surfaceDirection);
     normalizedPlates.push({ ...clone(plate), ...(surfaceDirection ? { surfaceDirection } : {}) });
   }
-  return { nodes: normalizedNodes, edges: clone(edges), plates: normalizedPlates, ...(state.links !== undefined ? { links } : {}) };
+  return { nodes: normalizedNodes, edges: clone(edges), plates: normalizedPlates,
+    ...(state.links !== undefined ? { links } : {}),
+    ...(state.mechanicalConnections !== undefined ? { mechanicalConnections } : {}),
+  };
 }
 
 // Edge and panel construction creates endpoint nodes as an implementation

@@ -1,7 +1,91 @@
 import { test, expect } from '@playwright/test';
 import { meshFixture, modelGlbFixture } from '../fixtures.js';
 import { readFileSync } from 'node:fs';
-import { observeRendering, renderedIdentities, renderedInterfaceSamples, projectWorldPoint, renderedPlacementState } from './render-observer.js';
+import { observeRendering, observePointerRay, renderedIdentities, renderedInterfaceSamples, projectWorldPoint, renderedPlacementState } from './render-observer.js';
+
+for (const projection of ['perspective', 'orthographic']) test('overlapping beams select visible nodes and split the front beam in ' + projection, async ({ page }) => {
+  await observeRendering(page);
+  const errors = []; page.on('pageerror', error => errors.push(error.message));
+  await page.goto('./'); await expect(page.locator('#viewport')).toHaveAttribute('data-ready', 'true');
+  const topology = {
+    nodes: [
+      { id: 'back-left', position: { x: -.64, y: 0, z: -.24 } },
+      { id: 'back-right', position: { x: .64, y: 0, z: -.24 } },
+      { id: 'front-start', position: { x: 0, y: 0, z: .24 } },
+      { id: 'front-end', position: { x: .64, y: 0, z: .24 } },
+    ],
+    // The rear beam is deliberately first: insertion order must not decide
+    // which beam is selected when their screen-space centre lines overlap.
+    edges: [{ id: 'back', a: 'back-left', b: 'back-right' }, { id: 'front', a: 'front-start', b: 'front-end' }], plates: [], links: [],
+  };
+  await page.locator('#file-input').setInputFiles({ name: 'overlapping-beams.json', mimeType: 'application/json', buffer: Buffer.from(JSON.stringify({ format: 'anymaker-web-project', version: 1, objects: [], topology })) });
+  await expect(page.locator('#topology-count')).toHaveText('4 节点 · 2 梁 · 0 面板');
+  await page.locator('#fit-btn').click(); await page.locator('[data-view="front"]').click();
+  if (projection === 'orthographic') await page.locator('[data-view="iso"]').click();
+  await page.locator('[data-tool="edge"]').click();
+  const start = await projectWorldPoint(page, topology.nodes[2].position);
+  await page.mouse.move(start.x, start.y);
+  const anchor = () => page.evaluate(() => window.__renderTestState.scene.getObjectByName('edge-placement-anchor').position.toArray());
+  await expect.poll(anchor).toEqual([0, 0, .24]);
+  await page.mouse.click(start.x, start.y);
+  await expect(page.locator('#build-status')).toContainText(/点击(?:终点|完成)/);
+  await expect(page.locator('#topology-count')).toHaveText('4 节点 · 2 梁 · 0 面板');
+  await expect.poll(anchor).toEqual([0, 0, .24]);
+  await page.keyboard.press('Escape');
+  await page.locator('[data-tool="edge"]').click();
+  await page.locator('#nodes-btn').click();
+  const middle = await projectWorldPoint(page, { x: .32, y: 0, z: .24 });
+  await page.mouse.move(middle.x, middle.y);
+  await page.mouse.click(middle.x, middle.y);
+  await expect(page.locator('#topology-count')).toHaveText('5 节点 · 3 梁 · 0 面板');
+  const saved = await saveProject(page);
+  expect(saved.topology.edges.find(edge => edge.id === 'back')).toMatchObject(topology.edges[0]);
+  expect(saved.topology.edges.some(edge => edge.id === 'front')).toBe(false);
+  const added = saved.topology.nodes.find(node => !topology.nodes.some(original => original.id === node.id));
+  expect(added.position).toEqual({ x: .32, y: 0, z: .24 });
+  await expect.poll(anchor).toEqual([.32, 0, .24]);
+  await page.keyboard.press('Escape'); await page.locator('#undo-btn').click();
+  await expect(page.locator('#topology-count')).toHaveText('4 节点 · 2 梁 · 0 面板');
+  await page.locator('[data-view="back"]').click();
+  await page.locator('[data-tool="edge"]').click();
+  const reverse = await projectWorldPoint(page, { x: 0, y: 0, z: -.24 });
+  await page.mouse.click(reverse.x, reverse.y);
+  await expect(page.locator('#topology-count')).toHaveText('5 节点 · 3 梁 · 0 面板');
+  const reversed = await saveProject(page);
+  expect(reversed.topology.edges.find(edge => edge.id === 'front')).toMatchObject(topology.edges[1]);
+  const reverseNode = reversed.topology.nodes.find(node => !topology.nodes.some(original => original.id === node.id));
+  expect(reverseNode.position).toEqual({ x: 0, y: 0, z: -.24 });
+  expect(errors).toEqual([]);
+});
+
+test('ordinary and Alt beam splitting respect a foreground panel', async ({ page }) => {
+  await observeRendering(page);
+  const errors = []; page.on('pageerror', error => errors.push(error.message));
+  await page.goto('./'); await expect(page.locator('#viewport')).toHaveAttribute('data-ready', 'true');
+  const topology = {
+    nodes: [
+      { id: 'a', position: { x: -.64, y: 0, z: 0 } }, { id: 'b', position: { x: .64, y: 0, z: 0 } },
+      ...[[-.48, -.32], [.48, -.32], [.48, .32], [-.48, .32]].map(([x, y], index) => ({ id: 'p' + index, position: { x, y, z: .24 } })),
+    ],
+    edges: [{ id: 'beam', a: 'a', b: 'b' }], plates: [{ id: 'cover', nodeIds: ['p0', 'p1', 'p2', 'p3'], normalOffset: 0 }], links: [],
+  };
+  await page.locator('#file-input').setInputFiles({ name: 'covered-beam.json', mimeType: 'application/json', buffer: Buffer.from(JSON.stringify({ format: 'anymaker-web-project', version: 1, objects: [], topology })) });
+  await expect(page.locator('#topology-count')).toHaveText('6 节点 · 1 梁 · 1 面板');
+  await page.locator('#fit-btn').click(); await page.locator('[data-view="front"]').click();
+  await page.locator('[data-tool="edge"]').click();
+  let point = await projectWorldPoint(page, { x: 0, y: 0, z: 0 });
+  await page.mouse.click(point.x, point.y);
+  await expect(page.locator('#topology-count')).toHaveText('6 节点 · 1 梁 · 1 面板');
+  await page.keyboard.press('Escape'); await page.locator('[data-tool="edge"]').click();
+  await page.keyboard.down('Alt'); await page.mouse.click(point.x, point.y); await page.keyboard.up('Alt');
+  await expect(page.locator('#topology-count')).toHaveText('6 节点 · 1 梁 · 1 面板');
+  await page.locator('[data-view="back"]').click(); point = await projectWorldPoint(page, { x: 0, y: 0, z: 0 });
+  await page.keyboard.down('Alt'); await page.mouse.click(point.x, point.y); await page.keyboard.up('Alt');
+  await expect(page.locator('#topology-count')).toHaveText('7 节点 · 2 梁 · 1 面板');
+  const saved = await saveProject(page);
+  expect(saved.topology.nodes.find(node => !topology.nodes.some(original => original.id === node.id)).position).toEqual({ x: 0, y: 0, z: 0 });
+  expect(errors).toEqual([]);
+});
 
 test('beam placement rejects a node behind a solid and reacquires it from the unobstructed view', async ({ page }) => {
   await observeRendering(page);
@@ -334,7 +418,91 @@ test('beam cursor is half size and hovering reuses scene bounds without raycasti
   expect(errors).toEqual([]);
 });
 
-test('beam cursor follows fresh pointer input while the camera is still damping after orbit', async ({ page }) => {
+for (const projection of ['perspective', 'orthographic']) test('all tool rays follow active camera rotation and pan in ' + projection, async ({ page }) => {
+  await observeRendering(page);
+  const errors = []; page.on('pageerror', error => errors.push(error.message));
+  await page.goto('./'); await expect(page.locator('#viewport')).toHaveAttribute('data-ready', 'true');
+  const topology = {
+    nodes: [{ id: 'a', position: { x: -.64, y: 0, z: 0 } }, { id: 'b', position: { x: .64, y: 0, z: 0 } }],
+    edges: [{ id: 'beam', a: 'a', b: 'b' }], plates: [], links: [],
+  };
+  await page.locator('#file-input').setInputFiles({ name: 'camera-picking.json', mimeType: 'application/json', buffer: Buffer.from(JSON.stringify({ format: 'anymaker-web-project', version: 1, objects: [], topology })) });
+  await expect(page.locator('#topology-count')).toHaveText('2 节点 · 1 梁 · 0 面板');
+  if (projection === 'orthographic') await page.locator('[data-view="iso"]').click();
+  await page.locator('[data-tool="select"]').click();
+  await observePointerRay(page);
+  await page.locator('#viewport canvas').hover();
+  await expect.poll(() => page.evaluate(() => window.__pointerRayTestState.ready)).toBe(true);
+  const historyCount = await page.locator('#history-list button').count();
+  const nextFrames = () => page.evaluate(() => new Promise(resolve => requestAnimationFrame(() => requestAnimationFrame(resolve))));
+  for (const tool of ['select', 'place', 'erase', 'translate', 'rotate', 'scale', 'node', 'edge', 'plate', 'glass', 'connect', 'paint', 'hide']) {
+    await page.locator('[data-tool="' + tool + '"]').click();
+    const box = await page.locator('#viewport canvas').boundingBox();
+    await page.mouse.move(box.x + box.width * .48, box.y + box.height * .65);
+    await nextFrames();
+    await page.evaluate(() => { const state = window.__pointerRayTestState; state.samples = []; state.recording = true; });
+    for (const button of ['right', 'middle']) {
+      await page.mouse.down({ button });
+      for (let step = 0; step < 4; step++) {
+        await page.mouse.move(box.x + box.width * (.48 + (step + 1) * .012), box.y + box.height * (.65 - (step + 1) * .008));
+        await nextFrames();
+      }
+      await page.mouse.up({ button });
+      // No new mouse input: the release position must keep following damping.
+      await nextFrames();
+    }
+    const samples = await page.evaluate(() => { const state = window.__pointerRayTestState; state.recording = false; return state.samples; });
+    expect(samples.length, tool).toBeGreaterThanOrEqual(8);
+    expect(samples.some(sample => sample.buttons === 2), tool).toBe(true);
+    expect(samples.some(sample => sample.buttons === 4), tool).toBe(true);
+    expect(samples.at(-1).camera, tool).not.toEqual(samples[0].camera);
+    expect(Math.max(...samples.map(sample => sample.originError)), tool).toBeLessThan(1e-8);
+    expect(Math.max(...samples.map(sample => sample.directionError)), tool).toBeLessThan(1e-8);
+  }
+  await expect(page.locator('#topology-count')).toHaveText('2 节点 · 1 梁 · 0 面板');
+  expect(await page.locator('#history-list button').count()).toBe(historyCount);
+  expect(errors).toEqual([]);
+});
+
+test('transform and extension handle picking follows camera motion without waiting for another mouse event', async ({ page }) => {
+  await observeRendering(page);
+  const errors = []; page.on('pageerror', error => errors.push(error.message));
+  await page.goto('./'); await expect(page.locator('#viewport')).toHaveAttribute('data-ready', 'true');
+  const component = { id: 'shaft', type: 'drive_shaft', position: { x: 0, y: 0, z: 0 }, rotation: { x: 0, y: 0, z: 0 }, scale: { x: 1, y: 1, z: 1 } };
+  await page.locator('#file-input').setInputFiles({ name: 'camera-handles.json', mimeType: 'application/json', buffer: Buffer.from(JSON.stringify({ format: 'anymaker-web-project', version: 1, objects: [component] })) });
+  await expect(page.locator('#object-count')).toHaveText('1 个组件');
+  await page.locator('[data-tool="select"]').click();
+  const point = await projectWorldPoint(page, component.position);
+  await page.mouse.click(point.x, point.y);
+  await observePointerRay(page, { gizmo: true });
+  const nextFrames = () => page.evaluate(() => new Promise(resolve => requestAnimationFrame(() => requestAnimationFrame(resolve))));
+  const historyCount = await page.locator('#history-list button').count();
+  for (const tool of ['select', 'translate', 'rotate', 'scale']) {
+    await page.locator('[data-tool="' + tool + '"]').click();
+    await expect.poll(() => page.evaluate(() => !!window.__renderTestState.scene.children.find(object => object.isTransformControlsRoot).controls.object)).toBe(true);
+    const box = await page.locator('#viewport canvas').boundingBox();
+    await page.mouse.move(box.x + box.width * .54, box.y + box.height * .52);
+    await nextFrames();
+    await page.evaluate(() => { const state = window.__pointerRayTestState; state.samples = []; state.recording = true; });
+    await page.mouse.down({ button: 'right' });
+    for (let step = 0; step < 6; step++) {
+      await page.mouse.move(box.x + box.width * (.54 + step * .012), box.y + box.height * (.52 - step * .008));
+      await nextFrames();
+    }
+    await page.mouse.up({ button: 'right' });
+    for (let step = 0; step < 5; step++) await nextFrames();
+    const samples = await page.evaluate(() => { const state = window.__pointerRayTestState; state.recording = false; return state.samples; });
+    expect(samples.length, tool).toBeGreaterThanOrEqual(10);
+    expect(samples.at(-1).camera, tool).not.toEqual(samples[0].camera);
+    expect(Math.max(...samples.map(sample => sample.originError)), tool).toBeLessThan(1e-8);
+    expect(Math.max(...samples.map(sample => sample.directionError)), tool).toBeLessThan(1e-8);
+    expect(samples.every(sample => sample.axis === sample.expectedAxis), tool).toBe(true);
+  }
+  expect(await page.locator('#history-list button').count()).toBe(historyCount);
+  expect(errors).toEqual([]);
+});
+
+test('beam cursor follows fresh pointer input during orbit and subsequent camera damping', async ({ page }) => {
   await observeRendering(page);
   const errors = []; page.on('pageerror', error => errors.push(error.message));
   await page.goto('./'); await expect(page.locator('#viewport')).toHaveAttribute('data-ready', 'true');
@@ -342,9 +510,6 @@ test('beam cursor follows fresh pointer input while the camera is still damping 
   const canvas = page.locator('#viewport canvas'); const box = await canvas.boundingBox();
   await page.mouse.move(box.x + box.width * .5, box.y + box.height * .65);
   await expect.poll(() => page.evaluate(() => window.__renderTestState.scene.getObjectByName('edge-placement-anchor').visible)).toBe(true);
-  await page.mouse.down({ button: 'right' });
-  await page.mouse.move(box.x + box.width * .62, box.y + box.height * .59, { steps: 6 });
-  await page.mouse.up({ button: 'right' });
   await page.evaluate(releasePointer => {
     const { renderer } = window.__renderTestState;
     const samples = []; window.__orbitPointerSamples = samples;
@@ -363,7 +528,10 @@ test('beam cursor follows fresh pointer input while the camera is still damping 
       }
       return result;
     };
-  }, { x: box.x + box.width * .62, y: box.y + box.height * .59 });
+  }, { x: box.x + box.width * .5, y: box.y + box.height * .65 });
+  await page.mouse.down({ button: 'right' });
+  await page.mouse.move(box.x + box.width * .62, box.y + box.height * .59, { steps: 6 });
+  await page.mouse.up({ button: 'right' });
   // With no new mouse movement, the release position must also follow the
   // moving camera instead of reverting to the position before the orbit.
   await page.evaluate(() => new Promise(resolve => requestAnimationFrame(() => requestAnimationFrame(resolve))));
@@ -376,6 +544,14 @@ test('beam cursor follows fresh pointer input while the camera is still damping 
   expect(samples.at(-1).camera).not.toEqual(samples[0].camera);
   expect(samples.every(sample => sample.visible)).toBe(true);
   expect(Math.max(...samples.map(sample => sample.error))).toBeLessThan(1e-6);
+  // Pointer capture keeps delivering orbit events outside the canvas. Those
+  // events must hide the old preview and allow it to resume on re-entry.
+  await page.mouse.down({ button: 'right' });
+  await page.mouse.move(box.x - 12, box.y + box.height * .65, { steps: 3 });
+  await expect.poll(() => page.evaluate(() => window.__renderTestState.scene.getObjectByName('edge-placement-anchor').visible)).toBe(false);
+  await page.mouse.move(box.x + box.width * .5, box.y + box.height * .65, { steps: 3 });
+  await expect.poll(() => page.evaluate(() => window.__renderTestState.scene.getObjectByName('edge-placement-anchor').visible)).toBe(true);
+  await page.mouse.up({ button: 'right' });
   expect(errors).toEqual([]);
 });
 
@@ -685,6 +861,34 @@ test('component placement preview exposes JKL rotation and UIO mirror controls',
   await expect(page.getByRole('spinbutton', { name: 'rotation-x', exact: true })).toHaveValue(/^180(?:\.0+)?$/);
 });
 
+test('Shift-click component placement keeps orientation for repeated placements', async ({ page }) => {
+  await page.goto('./');
+  await expect(page.locator('#viewport')).toHaveAttribute('data-ready', 'true');
+  await page.locator('#mesh-input').setInputFiles({ name: 'engine_block_a_0_0_0.mesh', mimeType: 'application/octet-stream', buffer: meshFixture() });
+  await page.locator('#component-search').fill('engine');
+  await page.locator('[data-id="engine"]').click();
+  const canvas = page.locator('canvas');
+  await canvas.hover({ position: { x: 360, y: 400 } });
+  await page.keyboard.press('j');
+  await page.keyboard.press('u');
+  await page.keyboard.down('Shift');
+  await canvas.click({ position: { x: 320, y: 400 } });
+  await expect(page.locator('#object-count')).toHaveText(/1/);
+  await canvas.click({ position: { x: 520, y: 400 } });
+  await page.keyboard.up('Shift');
+  await expect(page.locator('#object-count')).toHaveText(/2/);
+  const saved = await saveProject(page);
+  expect(saved.objects).toHaveLength(2);
+  for (const object of saved.objects) {
+    expect(object.rotation.x).toBeCloseTo(Math.PI / 2);
+    expect(object.localMirrorAxes).toEqual(['x']);
+  }
+  await expect(page.locator('[data-tool="place"]')).toHaveClass(/active/);
+  await canvas.click({ position: { x: 620, y: 400 } });
+  await expect(page.locator('#object-count')).toHaveText(/3/);
+  await expect(page.locator('[data-tool="select"]')).toHaveClass(/active/);
+});
+
 test('Alt-clicking a component from any tool makes its type the active placement component', async ({ page }) => {
   await page.goto('./');
   await expect(page.locator('#viewport')).toHaveAttribute('data-ready', 'true');
@@ -737,9 +941,12 @@ test('structural commands create independent components and remain undoable', as
   await page.locator('[data-id="engine"]').click();
   await page.locator('canvas').click({ position: { x: 380, y: 400 } });
   await expect(page.locator('#object-count')).toHaveText('1 个组件');
-  await page.locator('#copy-action').click();
+  await expect(page.locator('#copy-action kbd')).toHaveText('D');
+  await expect(page.locator('#mirror-action kbd')).toHaveText('M');
+  await page.locator('#viewport').focus();
+  await page.keyboard.press('d');
   await expect(page.locator('#object-count')).toHaveText('2 个组件');
-  await page.locator('#mirror-action').click();
+  await page.keyboard.press('m');
   await expect(page.locator('#mirror-toolbar')).toBeVisible();
   await expect(page.locator('#selection-filter-toolbar #mirror-toolbar')).toBeVisible();
   await expect(page.locator('#viewport')).toHaveAttribute('data-mirror-guide-visible', 'true');
@@ -747,6 +954,8 @@ test('structural commands create independent components and remain undoable', as
   await expect(page.locator('#viewport')).toHaveAttribute('data-mirror-guide-visible', 'false');
   await expect(page.locator('#mirror-action')).toHaveAttribute('aria-pressed', 'true');
   await page.locator('[data-id="engine"]').click();
+  await expect(page.locator('#mirror-action')).toHaveClass(/active/);
+  await expect(page.locator('#mirror-action')).toHaveCSS('background-color', 'rgb(15, 118, 110)');
   await page.locator('canvas').click({ position: { x: 540, y: 400 } });
   await expect(page.locator('#object-count')).toHaveText('4 个组件');
   await page.locator('#mirror-hide-plane').uncheck();
@@ -1071,6 +1280,47 @@ test('extendable components expose native linear dimensions instead of transform
     return JSON.parse(localStorage.getItem('anymaker:' + location.pathname + ':autosave:v1')).document;
   });
   expect(document.objects[0].nativeExtension).toEqual([0, 0, 2]);
+});
+
+test('extension handles cross the base length and commit the compensating position', async ({ page }) => {
+  await observeRendering(page);
+  await page.goto('./');
+  await expect(page.locator('#viewport')).toHaveAttribute('data-ready', 'true');
+  await page.locator('#language-select').selectOption('en');
+  const component = { id: 'shaft', type: 'drive_shaft', gridId: 'grid-1', position: { x: 0, y: 0, z: 0 }, rotation: { x: 0, y: 0, z: 0 }, scale: { x: 1, y: 1, z: 1 } };
+  await page.locator('#file-input').setInputFiles({ name: 'shaft-reverse.json', mimeType: 'application/json', buffer: Buffer.from(JSON.stringify({ format: 'anymaker-web-project', version: 1, objects: [component] })) });
+  await page.locator('[data-tool="select"]').click();
+  const point = await projectWorldPoint(page, component.position);
+  await page.mouse.click(point.x, point.y);
+  await expect.poll(() => page.evaluate(() => !!window.__renderTestState.scene.getObjectByName('component-extension-handle'))).toBe(true);
+  const preview = await page.evaluate(async () => {
+    const { scene } = window.__renderTestState;
+    const controls = scene.children.find(object => object.isTransformControlsRoot).controls;
+    const handle = scene.getObjectByName('component-extension-handle');
+    controls.axis = 'Z';
+    controls.dispatchEvent({ type: 'dragging-changed', value: true });
+    handle.position.z = -.12;
+    controls.dispatchEvent({ type: 'objectChange' });
+    await new Promise(resolve => requestAnimationFrame(() => requestAnimationFrame(resolve)));
+    const object = scene.children.find(value => value.userData.id === 'shaft');
+    const result = { handle: handle.position.toArray(), position: object.position.toArray() };
+    controls.dispatchEvent({ type: 'dragging-changed', value: false });
+    return result;
+  });
+  expect(preview.handle[0]).toBeCloseTo(0);
+  expect(preview.handle[1]).toBeCloseTo(0);
+  expect(preview.handle[2]).toBeCloseTo(.2);
+  expect(preview.position[0]).toBeCloseTo(0);
+  expect(preview.position[1]).toBeCloseTo(0);
+  expect(preview.position[2]).toBeCloseTo(-.32);
+  await page.waitForTimeout(300);
+  const saved = await saveProject(page);
+  expect(saved.objects[0].nativeExtension).toEqual([0, 0, 2]);
+  expect(saved.objects[0].position).toEqual({ x: 0, y: 0, z: -.32 });
+  await page.locator('#undo-btn').click();
+  const undone = await saveProject(page);
+  expect(undone.objects[0].nativeExtension).toBeUndefined();
+  expect(undone.objects[0].position).toEqual({ x: 0, y: 0, z: 0 });
 });
 
 test('tank capacity includes base cells as well as native extensions', async ({ page }) => {
@@ -1483,6 +1733,22 @@ test('catalog uses compact square cards and category icons with accessible label
   await expect(page.locator('.catalog-empty')).toContainText('没有匹配组件');
 });
 
+test('component thumbnails persist in IndexedDB across reloads', async ({ page }) => {
+  let meshRequests = 0;
+  await page.route('**/assets/meshes/**', async route => { meshRequests++; await route.continue(); });
+  await page.goto('./');
+  await expect(page.locator('#viewport')).toHaveAttribute('data-ready', 'true');
+  await page.locator('#use-model-thumbnails').check();
+  await expect(page.locator('#component-list img.component-thumbnail').first()).toBeVisible({ timeout: 30000 });
+  const firstLoadRequests = meshRequests;
+  expect(firstLoadRequests).toBeGreaterThan(0);
+  await page.reload();
+  await expect(page.locator('#viewport')).toHaveAttribute('data-ready', 'true');
+  await expect(page.locator('#use-model-thumbnails')).toBeChecked();
+  await expect(page.locator('#component-list img.component-thumbnail').first()).toBeVisible({ timeout: 30000 });
+  expect(meshRequests).toBe(firstLoadRequests);
+});
+
 test('favorite stars pin components in a persisted catalog section', async ({ page }) => {
   await page.goto('./');
   await expect(page.locator('#viewport')).toHaveAttribute('data-ready', 'true');
@@ -1543,6 +1809,28 @@ test('ray-placed edge creation previews, cancels and commits both endpoints atom
   await page.screenshot({ path: 'test-results/edge-builder.png' });
   await page.locator('#file-input').setInputFiles({ name: 'old.json', mimeType: 'application/json', buffer: Buffer.from(JSON.stringify({ format: 'anymaker-web-project', version: 1, objects: [] })) });
   await expect(page.locator('#topology-count')).toHaveText('0 节点 · 0 梁 · 0 面板');
+  expect(errors).toEqual([]);
+});
+
+test('edge micro mode moves the endpoint with UIOJKL and commits with Enter', async ({ page }) => {
+  const errors = []; page.on('pageerror', error => errors.push(error.message));
+  await page.goto('./');
+  await expect(page.locator('#viewport')).toHaveAttribute('data-ready', 'true');
+  const canvas = page.locator('canvas');
+  await page.locator('[data-tool="edge"]').click();
+  await page.locator('#edge-micro-mode').check();
+  await canvas.click({ position: { x: 450, y: 400 } });
+  await expect(page.locator('#build-status')).toContainText('微操');
+  await expect(page.locator('#placement-indicator')).toBeVisible();
+  await page.keyboard.press('u');
+  await page.keyboard.press('i');
+  await page.keyboard.press('Enter');
+  await expect(page.locator('#topology-count')).toHaveText('2 节点 · 1 梁 · 0 面板');
+  const saved = await saveProject(page);
+  const edge = saved.topology.edges[0];
+  const byId = new Map(saved.topology.nodes.map(node => [node.id, node]));
+  const start = byId.get(edge.a).position; const end = byId.get(edge.b).position;
+  expect(Math.abs(end.x - start.x) + Math.abs(end.y - start.y) + Math.abs(end.z - start.z)).toBeCloseTo(.16, 6);
   expect(errors).toEqual([]);
 });
 

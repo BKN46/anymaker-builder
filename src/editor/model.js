@@ -2,6 +2,7 @@
 // this model to .data without importing Three.js or relying on scene objects.
 import { nativePropertiesFromState } from './component-properties.js';
 import { nativeAccessoryContainerFromState, nativeAccessoryFromState } from './native-accessories.js';
+import { createNativeMechanicalConnection, mechanicalMateRule, nativeMechanicalConnectionId, validateMechanicalConnections } from './mechanical-connections.js';
 import { reflectNativePoint, reflectNativeRotation } from '../native/coordinates.js';
 
 export const MODEL_FORMAT = 'anymaker-builder-domain';
@@ -97,6 +98,7 @@ export class Grid {
     this.edges = (data.edges || []).map(value => new Edge(value));
     this.plates = (data.plates || []).map(value => new Plate(value));
     this.links = (data.links || []).map(value => new Link(value));
+    this.mechanicalConnections = (data.mechanicalConnections || []).map(value => structuredClone(value));
     this.extras = clone(data.extras || {});
   }
 }
@@ -144,6 +146,7 @@ export function validateProject(project) {
       const edgeIds = collectIds(grid.edges, 'edge');
       collectIds(grid.plates, 'plate');
       collectIds(grid.links, 'link');
+      validateMechanicalConnections(grid.mechanicalConnections || []);
       for (const edge of grid.edges) {
         if (!nodeIds.has(edge.a) || !nodeIds.has(edge.b)) throw new Error(`Edge ${edge.id} references an unknown node`);
       }
@@ -177,6 +180,7 @@ export function fromEditorDocument(document) {
     target.edges = clone(document.topology.edges || []);
     target.plates = clone(document.topology.plates || []);
     target.links = clone(document.topology.links || []);
+    target.mechanicalConnections = clone(document.topology.mechanicalConnections || []);
   }
   const model = new Project({ vehicles: [{ id: 'vehicle-1', grids }] });
   return validateProject(model);
@@ -240,14 +244,28 @@ function nativeFrames(vehicles) {
 }
 
 // These are construction-constraint pivots, not interaction or logic ports.
-// The published hinge-knuckle definition explicitly declares
-// `constraint_position: [0, 0, -1]`; other currently observed connected
-// components have their multibody pivot at their component origin. In
-// particular, tow_hitch's surface/logic position is an exposed port and does
-// not agree with the stored connected_vehicle construction anchor.
+// The published definitions expose offsets for hinge, latch and hitch parts;
+// other observed connected components use their component origin. A logic
+// interface's surface position is an exposed port and is not a rigid anchor.
 const NATIVE_CONSTRAINT_POSITIONS = new Map([
   ['hinge_knuckle', { x: 0, y: 0, z: -1 }],
+  ['latch_pin', { x: 0, y: 0, z: 1 }],
+  ['latch_handle', { x: 0, y: 0, z: 1 }],
+  ['truck_hitch_kingpin', { x: 0, y: 1, z: 0 }],
+  ['truck_hitch', { x: 0, y: 1, z: 0 }],
 ]);
+
+function isNativeRigidAttachment(parent, target) {
+  if (NATIVE_CONSTRAINT_POSITIONS.has(parent.type) || NATIVE_CONSTRAINT_POSITIONS.has(target.type)) return true;
+  // Interface ports are logic endpoints, not rigid construction anchors.
+  return !/(?:^|_)(?:interface|port)(?:_|$)/i.test(parent.type) && !/(?:^|_)(?:interface|port)(?:_|$)/i.test(target.type);
+}
+
+function nativeAttachmentPriority(parent, target) {
+  if ([parent.type, target.type].some(type => type === 'hinge_pin' || type === 'hinge_knuckle')) return 2;
+  if ([parent.type, target.type].some(type => type === 'latch_pin' || type === 'latch_knuckle' || type === 'latch_handle')) return 1;
+  return 0;
+}
 
 function nativeConstraintPosition(component, frame) {
   const local = NATIVE_CONSTRAINT_POSITIONS.get(component.type) || vector();
@@ -256,6 +274,75 @@ function nativeConstraintPosition(component, frame) {
     nativeCellPosition(component.transform.position, frame),
     multiplyMatrixVector(frame.rotation, multiplyMatrixVector(componentRotation, local)),
   );
+}
+
+function nativeMechanicalAnchor(component, frame, rule) {
+  const local = rule.anchors[component.type];
+  if (!Array.isArray(local)) return null;
+  return add(
+    nativeCellPosition(component.transform.position, frame),
+    multiplyMatrixVector(frame.rotation, multiplyMatrixVector(nativeComponentRotation(component), { x: local[0], y: local[1], z: local[2] })),
+  );
+}
+
+// Native physical mates are not written to *_links. The game discovers them
+// from the paired component definitions and coincident constraint frames. Do
+// the same during import so a project retains the hinge/latch/etc. relation.
+function nativeMechanicalConnections(vehicles, frames, offsets, componentIds) {
+  const entries = [];
+  for (const vehicle of vehicles) for (const grid of vehicle.grids) {
+    const frame = frames.get(`${vehicle.id}:${grid.id}`);
+    const offset = offsets.get(vehicle.id) || vector();
+    for (const component of grid.components) {
+      const id = componentIds.get(component);
+      if (!id) continue;
+      entries.push({
+        component,
+        id,
+        type: component.type,
+        frame,
+        anchorOffset: offset,
+        vehicleId: vehicle.id,
+        gridId: grid.id,
+      });
+    }
+  }
+  const explicitlyConnected = (left, right) => {
+    if (left.vehicleId === right.vehicleId) return true;
+    const linked = (entry, other) => {
+      const state = entry.component.extras?.native?.state;
+      return String(state?.connected_vehicle ?? '') === String(other.vehicleId)
+        && String(state?.connected_component ?? '') === String(other.component.id);
+    };
+    return linked(left, right) || linked(right, left);
+  };
+  const connections = [];
+  for (let index = 0; index < entries.length; index++) {
+    const left = entries[index];
+    for (let other = index + 1; other < entries.length; other++) {
+      const right = entries[other];
+      const rule = mechanicalMateRule(left.type, right.type);
+      if (!rule) continue;
+      if (!explicitlyConnected(left, right)) continue;
+      const leftAnchor = nativeMechanicalAnchor(left.component, left.frame, rule);
+      const rightAnchor = nativeMechanicalAnchor(right.component, right.frame, rule);
+      if (!leftAnchor || !rightAnchor) continue;
+      const leftWorld = add(leftAnchor, left.anchorOffset);
+      const rightWorld = add(rightAnchor, right.anchorOffset);
+      if (AXES.some(axis => Math.abs(leftWorld[axis] - rightWorld[axis]) > 1e-6)) continue;
+      const ordered = rule.a === left.type && rule.b === right.type ? [left, right] : rule.a === right.type && rule.b === left.type ? [right, left] : [left, right];
+      const anchor = reflectNativePoint(Object.fromEntries(AXES.map(axis => [axis, leftWorld[axis] * NATIVE_CELL_WORLD])));
+      connections.push(createNativeMechanicalConnection({
+        id: nativeMechanicalConnectionId(ordered[0].id, ordered[1].id, rule.type),
+        type: rule.type,
+        from: ordered[0].id,
+        to: ordered[1].id,
+        position: anchor,
+        ...(rule.limits ? { limits: rule.limits } : {}),
+      }));
+    }
+  }
+  return connections;
 }
 
 function nativeVehicleOffsets(vehicles, roots, frames) {
@@ -283,19 +370,24 @@ function nativeVehicleOffsets(vehicles, roots, frames) {
       const childId = String(parent.extras?.native?.state?.connected_vehicle ?? '');
       const child = byId.get(childId);
       const target = child && component(child, parent.extras?.native?.state?.connected_component);
-      if (!target || offsets.has(childId)) continue;
+      if (!target || offsets.has(childId) || !isNativeRigidAttachment(parent, target.component)) continue;
       const parentPosition = nativeConstraintPosition(parent, frames.get(`${vehicle.id}:${grid.id}`));
       const targetPosition = nativeConstraintPosition(target.component, frames.get(`${child.id}:${target.grid.id}`));
       const positions = candidates.get(childId) || [];
-      positions.push(add(parentOffset, subtract(parentPosition, targetPosition)));
+      positions.push({
+        position: add(parentOffset, subtract(parentPosition, targetPosition)),
+        priority: nativeAttachmentPriority(parent, target.component),
+      });
       candidates.set(childId, positions);
     }
     // Construction anchors of a rigid child must resolve to the same offset.
     // Averaging component origins hides an incorrect pivot and shifts every
     // child object; fail the import instead of inventing a position.
     for (const [childId, positions] of candidates) {
-      const offset = positions[0];
-      if (positions.some(position => AXES.some(axis => Math.abs(position[axis] - offset[axis]) > 1e-6))) {
+      const priority = Math.max(...positions.map(candidate => candidate.priority));
+      const rigidPositions = positions.filter(candidate => candidate.priority === priority).map(candidate => candidate.position);
+      const offset = rigidPositions[0];
+      if (rigidPositions.some(position => AXES.some(axis => Math.abs(position[axis] - offset[axis]) > 1e-6))) {
         throw new Error(`Native vehicle ${childId} has incompatible construction attachment anchors`);
       }
       offsets.set(childId, offset);
@@ -387,11 +479,13 @@ export function toEditorDocument(model, { vehicleIds = null } = {}) {
     // already filtered source without vehicleIds loses the assembly root and
     // consequently resets every connected child vehicle's topology offset.
     const importedTopology = toEditorTopology(model, { vehicleIds });
-    if (importedTopology.nodes.length || importedTopology.edges.length || importedTopology.plates.length || importedTopology.links.length) result.topology = importedTopology;
+    if (importedTopology.nodes.length || importedTopology.edges.length || importedTopology.plates.length || importedTopology.links.length || importedTopology.mechanicalConnections?.length) result.topology = importedTopology;
     return result;
   }
   if (links.length) topology.links = links;
-  if (topology.nodes.length || topology.edges.length || topology.plates.length || links.length) result.topology = topology;
+  const mechanicalConnections = source.vehicles.flatMap(vehicle => vehicle.grids.flatMap(grid => grid.mechanicalConnections || []).map(clone));
+  if (mechanicalConnections.length) topology.mechanicalConnections = mechanicalConnections;
+  if (topology.nodes.length || topology.edges.length || topology.plates.length || links.length || mechanicalConnections.length) result.topology = topology;
   return result;
 }
 
@@ -404,9 +498,11 @@ export function toEditorTopology(model, { vehicleIds = null } = {}) {
   const edges = [];
   const plates = [];
   const links = [];
+  const mechanicalConnections = [];
   const nativeImport = !!source.extras?.native;
   const frames = nativeImport ? nativeFrames(vehicles) : new Map();
   const offsets = nativeImport ? nativeVehicleOffsets(vehicles, vehicleIds || [], frames) : new Map();
+  const nativeComponentIds = new Map(vehicles.flatMap(vehicle => vehicle.grids.flatMap(grid => grid.components.map(component => [component, `${vehicle.id}:${grid.id}:${component.id}`]))));
   for (const vehicle of source.vehicles) {
     const componentIds = new Map(vehicle.grids.flatMap(grid => grid.components.map(component => [String(component.id), nativeImport ? `${vehicle.id}:${grid.id}:${component.id}` : component.id])));
     const offset = offsets.get(vehicle.id) || vector();
@@ -439,7 +535,9 @@ export function toEditorTopology(model, { vehicleIds = null } = {}) {
         ...(Number.isInteger(link.extras?.native?.color) && link.extras.native.color >= 0 && link.extras.native.color <= 255 ? { color: link.extras.native.color } : {}),
       };
     }));
+    if (!nativeImport) mechanicalConnections.push(...(grid.mechanicalConnections || []).map(clone));
   }
   }
-  return { nodes, edges, plates, links };
+  if (nativeImport) mechanicalConnections.push(...nativeMechanicalConnections(vehicles, frames, offsets, nativeComponentIds));
+  return { nodes, edges, plates, links, ...(mechanicalConnections.length ? { mechanicalConnections } : {}) };
 }

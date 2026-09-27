@@ -41,6 +41,8 @@
 
 工程 JSON 的 `topology.links` 为编辑器连接模型：每项包含 `id`、六类之一的 `kind`、`from/to` 组件端点（可选 0–255 `port`）及最多 256 个整数格路径点。该模型用于可撤销编辑与诊断渲染，不等同于游戏端口兼容校验；原生 `p0/p1` 的完整语义仍待实际游戏验证。
 
+工程 JSON 的 `topology.mechanicalConnections` 单独保存物理配合件：每项包含 `id`、`type`（`hinge`、`latch`、`mounting`、`rail`、`rail_ballscrew` 或 `tow`）、`from/to` 组件实例 ID、共同约束锚点 `position`，以及可选的铰链 `limits`。原生导入依据已发布定义中的配对关系和约束锚点自动生成；它不属于六类网络 `links`，保存原生 `.data` 时仍由游戏按组件定义重新发现。
+
 可选的 `visibilityGroups` 是编辑器内的透明化组。每组有稳定 `id`、用户名称以及 `components`、`edges`、`plates` 三类实例 ID；它只保存可见性批量操作，不写入中间 XML 或原生 `.data/.meta`。组内引用必须存在，删除对象后编辑器会在下一次提交时剔除失效引用。
 
 工程文件只引用稳定的组件定义 ID。Mesh、材质和 lazy-loaded 发布 URL 不写进工程 JSON，而由随站点发布的 component index、binding 和 asset manifest 解析；这保证工程可以在没有游戏本体的 GitHub Pages 环境中重建。

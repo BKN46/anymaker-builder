@@ -42,6 +42,53 @@ export async function projectWorldPoint(page, position) {
   }, position);
 }
 
+// Capture the application's actual shared picker through a scene mesh. This
+// observes the ray used by tools without importing or exposing app internals.
+export async function observePointerRay(page, { gizmo = false } = {}) {
+  await page.evaluate(gizmo => {
+    const { scene, renderer } = window.__renderTestState;
+    const state = { ready: false, recording: false, samples: [], pointer: null };
+    window.__pointerRayTestState = state;
+    let picker = null;
+    let expected = null;
+    const transform = scene.children.find(object => object.isTransformControlsRoot).controls;
+    if (gizmo) {
+      picker = transform.getRaycaster(); expected = new picker.constructor(); state.ready = true;
+    } else {
+      const mesh = scene.getObjectByName('topology-overlay').children.find(object => object.userData.topology === 'edge');
+      const raycast = mesh.raycast;
+      mesh.raycast = function (raycaster, hits) {
+        if (!picker) {
+          picker = raycaster;
+          expected = new raycaster.constructor();
+          state.ready = true;
+          mesh.raycast = raycast;
+        }
+        return raycast.call(this, raycaster, hits);
+      };
+    }
+    for (const type of ['pointermove', 'pointerdown', 'pointerup']) renderer.domElement.addEventListener(type, event => {
+      state.pointer = { x: event.clientX, y: event.clientY, buttons: event.buttons };
+    }, true);
+    const render = renderer.render;
+    renderer.render = function (scene, camera) {
+      const result = render.call(this, scene, camera);
+      if (picker && state.recording && state.pointer) {
+        const rect = this.domElement.getBoundingClientRect();
+        const pointer = { x: (state.pointer.x - rect.x) / rect.width * 2 - 1, y: 1 - (state.pointer.y - rect.y) / rect.height * 2 };
+        expected.setFromCamera(pointer, camera);
+        state.samples.push({
+          originError: picker.ray.origin.distanceTo(expected.ray.origin),
+          directionError: picker.ray.direction.distanceTo(expected.ray.direction),
+          camera: camera.matrixWorld.toArray(), buttons: state.pointer.buttons,
+          ...(gizmo ? { axis: transform.axis, expectedAxis: expected.intersectObject(transform._gizmo.picker[transform.mode], true).find(hit => hit.object.visible)?.object.name || null } : {}),
+        });
+      }
+      return result;
+    };
+  }, gizmo);
+}
+
 export async function renderedPlacementState(page) {
   return page.evaluate(() => {
     const preview = window.__renderTestState.scene.getObjectByName('component-placement-preview');

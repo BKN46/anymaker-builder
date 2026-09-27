@@ -36,6 +36,7 @@ export function stageImportedSubgrid(document, existing = {}) {
   const usedEdges = new Set(existing.edges || []);
   const usedPlates = new Set(existing.plates || []);
   const usedLinks = new Set(existing.links || []);
+  const usedMechanicalConnections = new Set(existing.mechanicalConnections || []);
   const componentIds = new Map();
   const nodeIds = new Map();
   const objects = document.objects.map(object => {
@@ -61,8 +62,14 @@ export function stageImportedSubgrid(document, existing = {}) {
     from: { ...link.from, componentId: componentIds.get(link.from?.componentId) },
     to: { ...link.to, componentId: componentIds.get(link.to?.componentId) },
   }));
-  if (edges.some(edge => !edge.a || !edge.b) || plates.some(plate => plate.nodeIds.some(id => !id)) || links.some(link => !link.from.componentId || !link.to.componentId)) throw new Error('Imported subgrid has an unresolved reference');
-  return { gridId, objects, topology: { nodes, edges, plates, links } };
+  const mechanicalConnections = (topology.mechanicalConnections || []).map(connection => ({
+    ...copy(connection),
+    id: nextId(`${gridId}-mechanical`, usedMechanicalConnections),
+    from: componentIds.get(connection.from),
+    to: componentIds.get(connection.to),
+  }));
+  if (edges.some(edge => !edge.a || !edge.b) || plates.some(plate => plate.nodeIds.some(id => !id)) || links.some(link => !link.from.componentId || !link.to.componentId) || mechanicalConnections.some(connection => !connection.from || !connection.to)) throw new Error('Imported subgrid has an unresolved reference');
+  return { gridId, objects, topology: { nodes, edges, plates, links, ...(mechanicalConnections.length ? { mechanicalConnections } : {}) } };
 }
 
 export function translateImportedSubgrid(staged, offset) {
@@ -75,6 +82,10 @@ export function translateImportedSubgrid(staged, offset) {
       edges: staged.topology.edges.map(copy),
       plates: staged.topology.plates.map(copy),
       links: staged.topology.links.map(link => ({ ...copy(link), points: link.points.map(point => translatePosition(point, shift)) })),
+      mechanicalConnections: (staged.topology.mechanicalConnections || []).map(connection => ({
+        ...copy(connection),
+        position: translatePosition(connection.position, shift),
+      })),
     },
   };
 }
@@ -91,5 +102,6 @@ export function translateSubgridTopology(topology, componentIds, gridId, offset)
     edges: topology.edges.map(copy),
     plates: topology.plates.map(copy),
     links: (topology.links || []).map(link => movedLink(link) ? { ...copy(link), points: link.points.map(point => translatePosition(point, shift)) } : copy(link)),
+    mechanicalConnections: (topology.mechanicalConnections || []).map(connection => movedLink({ from: { componentId: connection.from }, to: { componentId: connection.to } }) ? { ...copy(connection), position: translatePosition(connection.position, shift) } : copy(connection)),
   };
 }
