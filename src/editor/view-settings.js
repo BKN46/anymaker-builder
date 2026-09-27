@@ -52,9 +52,12 @@ export function createOrientationIndicator(host, camera, onView, label, onProjec
   footer.append(iso);
   root.append(sphere, footer); host.append(root);
   const inverse = new THREE.Quaternion(); const point = new THREE.Vector3();
+  const previous = new THREE.Quaternion(0, 0, 0, 0);
   return {
     root, footer, projectionButton: iso,
     update() {
+      if (previous.equals(getCamera().quaternion)) return;
+      previous.copy(getCamera().quaternion);
       inverse.copy(getCamera().quaternion).invert();
       for (const { line, button, direction } of endpoints) {
         point.copy(direction).applyQuaternion(inverse);

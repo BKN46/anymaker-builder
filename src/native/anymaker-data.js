@@ -3,7 +3,8 @@ import { CELL_SIZE_WORLD } from '../editor/grid.js';
 import { validateNativeProperties } from '../editor/component-properties.js';
 import { reflectNativePoint, reflectNativeRotation } from './coordinates.js';
 import { nearestNativePaintIndex } from '../editor/native-paint.js';
-import { orientMechanicalLink } from '../editor/connection-ports.js';
+import { logicNodePort, orientMechanicalLink } from '../editor/connection-ports.js';
+import { nativeMechanicalPortRole } from '../editor/connection-port-colors.js';
 
 const vector = value => ({ x: Number(value?.[0] ?? 0), y: Number(value?.[1] ?? 0), z: Number(value?.[2] ?? 0) });
 const matrix = value => Array.isArray(value) && value.length === 9 && value.every(number => Number.isFinite(number)) ? [...value] : null;
@@ -237,6 +238,82 @@ function nativeBounds(points) {
   };
 }
 
+function mechanicalPortRole(component, port, componentDefinitions) {
+  const definition = componentDefinitions.get(component?.type);
+  if (!definition || !Number.isInteger(port) || port < 0) return null;
+  return nativeMechanicalPortRole(logicNodePort(definition, port), definition);
+}
+
+// Native mechanical data is directional: p0 is the control/output side and
+// p1 is the mechanical input side. Older editor snapshots could connect two
+// inputs or point at a component's default input port. Repair a unique output
+// port when the definition makes it unambiguous; otherwise omit the link so
+// the game never dereferences a null mechanical endpoint during load.
+function normalizeMechanicalExportLink(link, objectsById, componentDefinitions) {
+  let from = { ...link.from };
+  let to = { ...link.to };
+  const port = endpoint => Number.isInteger(endpoint?.port) ? endpoint.port : 0;
+  const component = endpoint => objectsById.get(endpoint?.componentId);
+  let fromRole = mechanicalPortRole(component(from), port(from), componentDefinitions);
+  let toRole = mechanicalPortRole(component(to), port(to), componentDefinitions);
+  const findPort = (endpoint, expected) => {
+    const definition = componentDefinitions.get(component(endpoint)?.type);
+    const candidates = (definition?.logic_nodes || []).map((node, index) => ({ node, index }))
+      .filter(candidate => nativeMechanicalPortRole(candidate.node, definition) === expected)
+      .map(candidate => candidate.index);
+    return candidates.length === 1 ? candidates[0] : null;
+  };
+  if (fromRole === 'input' && toRole === 'output') {
+    [from, to] = [to, from];
+    [fromRole, toRole] = [toRole, fromRole];
+  }
+  if (fromRole === 'input') {
+    const replacement = findPort(from, 'output');
+    if (replacement === null) return null;
+    from = { ...from, port: replacement };
+    fromRole = 'output';
+  }
+  if (toRole === 'output') {
+    const replacement = findPort(to, 'input');
+    if (replacement === null) return null;
+    to = { ...to, port: replacement };
+  }
+  return { ...link, from, to };
+}
+
+// The game derives a plate normal from the first non-collinear edge cross
+// product in the saved node order (vehicle_plate_util.calculate_plate_dir /
+// calculate_plate_normal). Keep the same sign when choosing an export order.
+function nativePlateNormal(points) {
+  if (!Array.isArray(points) || points.length < 3) return null;
+  // Match the game's calculate_plate_dir scan: try every pair anchored at
+  // the first node until a non-collinear pair produces a usable direction.
+  for (let firstIndex = 1; firstIndex < points.length - 1; firstIndex++) {
+    const first = points[firstIndex].map((value, axis) => value - points[0][axis]);
+    for (let secondIndex = firstIndex + 1; secondIndex < points.length; secondIndex++) {
+      const next = points[secondIndex].map((value, axis) => value - points[0][axis]);
+      const normal = [
+        first[1] * next[2] - first[2] * next[1],
+        first[2] * next[0] - first[0] * next[2],
+        first[0] * next[1] - first[1] * next[0],
+      ];
+      const magnitude = Math.hypot(...normal);
+      if (magnitude > 1e-9) return normal.map(value => value / magnitude);
+    }
+  }
+  return null;
+}
+
+function nativePlateNodeOrder(plate, nodeIds, nativePoints) {
+  let order = [...plate.nodeIds].reverse();
+  const direction = plate.surfaceDirection;
+  if (!direction || nativeAxes.some(axis => !Number.isFinite(direction[axis]))) return order.map(id => nodeIds.get(id));
+  const desired = [-direction.x, direction.y, direction.z];
+  const normal = nativePlateNormal(order.map(id => nativePoints.get(id)));
+  if (normal && normal[0] * desired[0] + normal[1] * desired[1] + normal[2] * desired[2] < 0) order.reverse();
+  return order.map(id => nodeIds.get(id));
+}
+
 // Build a complete observed-native-schema pair from an editor snapshot. This
 // deliberately has no dependency on a previously imported .data/.meta pair:
 // saving a new vehicle must not require users to supply a template first.
@@ -254,6 +331,7 @@ export function toNativePairFromEditor(document, { vehicleId = 1, componentDefin
   const exportNodes = (topology.nodes || []).filter(node => referencedNodeIds.has(node.id));
   if (exportNodes.length !== referencedNodeIds.size) throw new Error('Native export has a structural reference to a missing node');
   const nodeIds = new Map(exportNodes.map((node, index) => [node.id, index + 1]));
+  const nativePoints = new Map(exportNodes.map(node => [node.id, nativeCells(node.position)]));
   const components = hostObjects.map(object => {
     const result = {
       def: definitionIndex.get(object.type),
@@ -269,9 +347,9 @@ export function toNativePairFromEditor(document, { vehicleId = 1, componentDefin
     if (nativeProperties) Object.assign(result, nativeProperties);
     const accessory = object.nativeAccessory;
     if (accessory) {
-      // Batteries and current wheel records store the item at top-level
-      // `acc.item`; preserve the legacy nested form only when that exact
-      // container was imported. Attachments never become grid components.
+      // Batteries and filter media use top-level `acc.item`; wheel tyres use
+      // the game's nested `element.acc.item` record. Attachments never become
+      // grid components.
       if (object.nativeAccessoryContainer === 'element.acc') {
         const element = result.element && typeof result.element === 'object' && !Array.isArray(result.element) ? result.element : {};
         const acc = element.acc && typeof element.acc === 'object' && !Array.isArray(element.acc) ? element.acc : {};
@@ -291,7 +369,7 @@ export function toNativePairFromEditor(document, { vehicleId = 1, componentDefin
     return result;
   });
   const plates = (topology.plates || []).map((plate, index) => {
-    const result = { id: index + 1, nodes: [...plate.nodeIds].reverse().map(id => nodeIds.get(id)), glass_impacts: [] };
+    const result = { id: index + 1, nodes: nativePlateNodeOrder(plate, nodeIds, nativePoints), glass_impacts: [] };
     const front = nativePaintIndex(plate.color_front, plate.col_front, 'plate front paint');
     const back = nativePaintIndex(plate.color_back, plate.col_back, 'plate back paint');
     if (front !== undefined) result.col_front = front;
@@ -300,7 +378,9 @@ export function toNativePairFromEditor(document, { vehicleId = 1, componentDefin
     return result;
   });
   const links = Object.fromEntries(['electric', 'mechanical', 'liquid', 'gas', 'belt', 'data'].map(kind => [`${kind}_links`, (topology.links || []).filter(link => link.kind === kind).flatMap(original => {
-    const link = orientMechanicalLink(original, objectsById, componentDefinitions);
+    let link = orientMechanicalLink(original, objectsById, componentDefinitions);
+    if (kind === 'mechanical') link = normalizeMechanicalExportLink(link, objectsById, componentDefinitions);
+    if (!link) return [];
     const first = componentIds.get(link.from?.componentId); const second = componentIds.get(link.to?.componentId);
     if (!first || !second) return [];
     const endpoint = (value, id) => ({ comp: id, ...(Number.isInteger(value?.port) && value.port !== 0 ? { pos: value.port } : {}) });

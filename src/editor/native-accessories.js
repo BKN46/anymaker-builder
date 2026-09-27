@@ -96,9 +96,9 @@ export function createNativeAccessoryItem(itemType, id) {
 }
 
 export function nativeAccessoryContainerForComponent(type) {
-  // Current native samples use the direct component `acc.item` field for
-  // wheel tyres and battery cells. Keep the older nested path only when it
-  // was explicitly imported from a legacy record.
+  // Wheel tyres are stored in the wheel's `element.acc.item` record by the
+  // game. Batteries and filter media use the direct component `acc.item` path.
+  if (['wheel', 'wheel_b'].includes(type)) return 'element.acc';
   return accessoryOptionsForComponent(type).length ? 'acc' : null;
 }
 

@@ -61,6 +61,12 @@ node scripts/check-native-grid-evidence.mjs 'I:\SteamLibrary\steamapps\common\An
 
 本次实际验证：`npm run check` 的 71 项单元测试和生产构建通过；证据复核命令通过。编辑器浏览器套件首次为 14 通过、6 失败：把手新增断言未考虑整车居中，改为相对位置后专项通过；历史面板页面加载超时单独重跑通过。其余四项（单组件原生导入、选择筛选工具栏遮挡、旧目录 DOM 断言、玻璃流程涂色）在保留原有用户改动、仅撤去本次变换修复的副本中也复现，未作为本次回归修复。日志保留在忽略目录 `tmp/door-grid/{check,browser,browser-reference,browser-history,browser-baseline}.log`，实际渲染截图为 `tmp/door-grid/reference-vehicle-door-handles.png`；不能把完整浏览器套件称为通过。
 
+### 面板节点绕序与导出（2026-09-26）
+
+已对同一份 `game.gcl` 做只读 Ghidra 提取，定位到 `client_scene.vehicle_plate.add_static_geometry`（`0x13346BA`）和 `vehicle_plate_util.add_static_geometry`（`0x3C05CEC`）。后者按 `vehicle_plate_util.calculate_plate_normal` 的结果选择面板几何分支；该法向由 `calculate_plate_dir` 以第一个节点为锚点扫描节点对，取首个非共线向量叉积并归一化。因而 `plates[].nodes` 的顺序决定游戏的 front/back 法向，不能只把它当作无序边界。
+
+编辑器坐标相对原生坐标反射 X 轴。导出先反转编辑器节点列表以抵消反射造成的绕序翻转；对于带 `surfaceDirection` 的编辑器面板，再将其反射到原生坐标并与游戏法向比较，必要时第二次反转，使保存的 front 面与编辑器创建时朝向镜头的一侧一致。该规则已由 `tests/unit.test.js` 的原生面板导出测试覆盖。静态几何的完整材质、窗口内框和运行时加载仍需游戏内截图验收。
+
 ### 梁几何（2026-09-23）
 
 已验证事实：游戏目录的 `bin/game.gcl` 包含带函数签名及 x86-64 机器码的 GCL 产物，而不是仅有资源。仓库新增 `scripts/Invoke-AnymakerGclAnalysis.ps1` 与 `scripts/ExportAnymakerGclFunction.java`，可将它作为 Raw Binary 载入 Ghidra 后，仅对已登记的代码区间反汇编和导出伪 C；游戏文件和大型输出仍只放在本机分析工作区。

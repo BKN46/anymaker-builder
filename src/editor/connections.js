@@ -16,6 +16,11 @@ export const LINK_COLORS = Object.freeze({
   data: '#9b51e0',
 });
 
+// A native route may use fractional coordinates, but a single segment this
+// long is never a useful editor route and can dominate raycasts/collision
+// placement when malformed data is imported.
+export const MAX_CONNECTION_ROUTE_SEGMENT = 64;
+
 // Routed connections use faceted octagonal tubes; belts are a direct dashed
 // node-to-node indicator. Keep committed routes and previews in agreement.
 export const LINK_RENDER_STYLES = Object.freeze({
@@ -35,6 +40,43 @@ const routePoint = (point, nativeProjected) => {
   if (!nativeProjectedPoint(point)) throw new Error('Native connection route point is invalid');
   return clone(point);
 };
+
+function routeSegmentIsSafe(previous, current) {
+  if (!previous) return true;
+  const distance = Math.hypot(current.x - previous.x, current.y - previous.y, current.z - previous.z);
+  return Number.isFinite(distance) && distance <= MAX_CONNECTION_ROUTE_SEGMENT;
+}
+
+export function connectionRouteIsSafe(link) {
+  if (!link || !Array.isArray(link.points)) return false;
+  const nativeProjected = link.nativeProjected === true;
+  let previous = null;
+  try {
+    for (const point of link.points) {
+      const normalized = routePoint(point, nativeProjected);
+      if (!routeSegmentIsSafe(previous, normalized)) return false;
+      previous = normalized;
+    }
+    return true;
+  } catch { return false; }
+}
+
+// Recover old autosaves and native imports without making an otherwise valid
+// project unloadable. Full validation still runs after this filter; this only
+// removes individually malformed links that cannot be rendered or selected.
+export function pruneInvalidConnections(links = [], componentIds = null) {
+  if (!Array.isArray(links)) return [];
+  const ids = new Set();
+  return links.filter(link => {
+    if (!link || ids.has(link.id)) return false;
+    try {
+      const normalized = validateLinks([link], componentIds)[0];
+      if (!connectionRouteIsSafe(normalized)) return false;
+      ids.add(link.id);
+      return true;
+    } catch { return false; }
+  });
+}
 
 function endpoint(value, label, componentIds) {
   if (!value || typeof value.componentId !== 'string' || !value.componentId) throw new Error(`${label} endpoint must reference a component`);

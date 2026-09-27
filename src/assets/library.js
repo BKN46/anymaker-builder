@@ -1,6 +1,7 @@
 import * as THREE from 'three';
 import { parseMesh } from './mesh.js';
 import { correctGeometryNormals } from './geometry-ops.js';
+import { connectionInterfaceVertexColors, isConnectionInterfacePart } from './mesh-interface-colors.js';
 
 // File objects stay local. No fetch/upload, executable access, or filesystem writes.
 export class AssetLibrary {
@@ -53,11 +54,14 @@ export class AssetLibrary {
       else geometry.computeVertexNormals();
       correctGeometryNormals(geometry);
       if (part.uv) geometry.setAttribute('uv', new THREE.BufferAttribute(part.uv, 2));
-      // Do not mistake packed paint/material channels for verified sRGB colors.
-      geometry.setAttribute('gameColorBytes', new THREE.BufferAttribute(part.colors, 4, true));
-      const material = new THREE.MeshStandardMaterial({ color: '#b4c3ce', roughness: .7, metalness: .1, side: THREE.DoubleSide });
+      const interfacePart = isConnectionInterfacePart(part.name, path);
+      const packedColors = new THREE.BufferAttribute(part.colors, 4, true);
+      geometry.setAttribute('gameColorBytes', packedColors);
+      if (interfacePart) geometry.setAttribute('color', new THREE.BufferAttribute(connectionInterfaceVertexColors(part.colors, part.name, path), 4, true));
+      const material = new THREE.MeshStandardMaterial({ color: interfacePart ? '#ffffff' : '#b4c3ce', vertexColors: interfacePart, roughness: .7, metalness: .1, side: THREE.DoubleSide });
       const mesh = new THREE.Mesh(geometry, material);
       mesh.name = part.name;
+      mesh.userData.connectionInterface = interfacePart;
       mesh.castShadow = mesh.receiveShadow = true;
       group.add(mesh);
     }

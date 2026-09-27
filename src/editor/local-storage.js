@@ -1,4 +1,5 @@
 import { nativePaintColor } from './native-paint.js';
+import { normalizeRenderQuality } from './render-quality.js';
 
 const finite = (value, min, max, fallback) => Number.isFinite(value) && value >= min && value <= max ? value : fallback;
 const bool = (value, fallback) => typeof value === 'boolean' ? value : fallback;
@@ -26,6 +27,7 @@ export function normalizeSettings(input = {}) {
   }
   return {
     version: 1,
+    renderQuality: normalizeRenderQuality(s.renderQuality),
     language: s.language === 'zh' ? 'zh' : 'en',
     leftWidth: finite(s.leftWidth, 240, 720, 304),
     rightWidth: finite(s.rightWidth, 240, 720, 304),
@@ -41,6 +43,7 @@ export function normalizeSettings(input = {}) {
     nodeOpacity: finite(s.nodeOpacity, 0, 1, 1),
     edgeAxisSnap: bool(s.edgeAxisSnap, false),
     edgeSize: s.edgeSize === 3 ? 3 : 1,
+    hideMirrorPlane: bool(s.hideMirrorPlane, false),
     connectionVisibility: {
       electric: bool(s.connectionVisibility?.electric, true),
       mechanical: bool(s.connectionVisibility?.mechanical, true),
@@ -72,7 +75,7 @@ export function normalizeSettings(input = {}) {
     query: text(s.query, 200), category: text(s.category, 80), selectedType: text(s.selectedType, 100, 'engine'),
     tool: ['select', 'place', 'erase', 'translate', 'rotate', 'scale', 'node', 'edge', 'plate', 'glass', 'connect', 'paint'].includes(s.tool) ? s.tool : 'select',
     sidebarTabs: {
-      left: s.sidebarTabs?.left === 'subgrids' ? 'subgrids' : 'catalog',
+      left: ['catalog', 'subgrids', 'archives'].includes(s.sidebarTabs?.left) ? s.sidebarTabs.left : 'catalog',
       right: ['editor', 'inspector', 'resources', 'history'].includes(s.sidebarTabs?.right) ? s.sidebarTabs.right : 'editor',
     },
     camera,

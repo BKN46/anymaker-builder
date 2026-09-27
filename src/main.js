@@ -8,7 +8,7 @@ import { reflectObject, reflectVisualBasis } from './assets/geometry-ops.js';
 import { History, LIMIT, project, validateDocument, migrateDocument, toIntermediateXml } from './editor/document.js';
 import { copyObjects, moveObjects, removeObjects, splitGrid, mergeGrids, gridIds } from './editor/operations.js';
 import { createNode, moveNodeAndMerge, mergeNodes, removeNode, removeEdge, removePlate, createEdgeFromPoints, edgeSplitPoints, splitEdge, createPlate, createPlateFromEdges, createGlassPlateFromEdges, pruneUnusedTopology } from './editor/topology.js';
-import { LINK_COLORS, LINK_RENDER_STYLES, createLink, moveLinkPoint, removeLink } from './editor/connections.js';
+import { LINK_COLORS, LINK_RENDER_STYLES, MAX_CONNECTION_ROUTE_SEGMENT, connectionRouteIsSafe, createLink, moveLinkPoint, pruneInvalidConnections, removeLink } from './editor/connections.js';
 import { CELL_SIZE_WORLD, assertGridVector, cellToWorld, quantizeWorldVector, worldToCell } from './editor/grid.js';
 import { GRID_SIZE, GRID_DIVISIONS, STRUCTURE_COLOR, NODE_PLACEMENT_BOUNDS, cameraBuildFrame, projectBuildPoint, resolveEdgePoint, resolvePlacementPoint, createEdgeMesh, createEdgeJointMesh, createConnectionRoute, createDashedConnection, updateEdgeMesh, setEdgeOutline, plateSurfaceBoundary, plateSurfaceVertices, cameraFacingPlateOffset, cameraFacingPlateDirection, rayFacingPlateSide } from './editor/construction-view.js';
 import { createEdgeRuler, createEdgeLengthLabels } from './editor/edge-ruler.js';
@@ -31,7 +31,8 @@ import { placementOrientation, PLACEMENT_ORIENTATION_KEYS, updatePlacementOrient
 import { editorMessages } from './editor/ui-messages.js';
 import { isSaveCancelled, saveFilePair, saveSingleFile } from './editor/file-save.js';
 import { connectionNetworkLabel, connectionPortRoleLabel } from './editor/connection-port-labels.js';
-import { connectionRouteCellPosition, logicNodePort, logicNodePortsForNetwork, logicNodeCellPosition, orientMechanicalLink } from './editor/connection-ports.js';
+import { connectionDirectionVector, connectionRouteCellPosition, logicNodePort, logicNodePortsForNetwork, logicNodeCellPosition, orientMechanicalLink } from './editor/connection-ports.js';
+import { nativeConnectionPortColor, nativeMechanicalPortRole } from './editor/connection-port-colors.js';
 import { mirrorPoint, mirrorPositionPreview, mirrorRotation, mirrorSurfaceDirection, moveMirroredNode, sameGridPoint } from './editor/mirror-mode.js';
 import { gridSelectionClosure } from './editor/selection-closure.js';
 import { analyzeSubgridIntegrity } from './editor/subgrid-connectivity.js';
@@ -40,10 +41,20 @@ import { createMicrocontrollerVariable, microcontrollerState, updateMicrocontrol
 import { TANK_TYPES, tankCapacityCells, tankCapacityLiters } from './editor/tank-capacity.js';
 import { stageImportedSubgrid, translateImportedSubgrid, translateSubgridTopology } from './editor/imported-subgrid.js';
 import { mountModelImportTool } from './editor/model-import-tool.js';
+import { createArchiveStore } from './editor/archive-store.js';
+import { encodeProjectCode, decodeProjectCode, MAX_PROJECT_CODE_LENGTH } from './editor/project-code.js';
+import { createFrameTask, planVisualUpdate, topologyVisualRecords, visualSignature } from './editor/visual-cache.js';
+import { createPlacementPicker, createProjectedNodePicker } from './editor/placement-picking.js';
+import { createRenderQualityController } from './editor/render-quality.js';
+import { mountRenderQualitySettings } from './editor/render-quality-ui.js';
 import './style.css';
 
 addMessages(editorMessages);
 const localStore = createLocalStore(() => window.localStorage, location.pathname);
+const archiveStore = window.indexedDB ? createArchiveStore(window.indexedDB, location.pathname) : null;
+const AUTO_ARCHIVE_ID = 'autosave-current';
+let archiveRecords = [];
+let archiveLoadError = null;
 const storedSettings = localStore.loadSettings();
 const settings = storedSettings.settings;
 setLocale(settings.language);
@@ -63,6 +74,10 @@ let busy = true;
 let tool = 'select';
 let down = null;
 let dragOccurred = false;
+let dragRenderMode = false;
+let dragOverlayState = null;
+let lastRenderTime = -Infinity;
+let orbitInteracting = false;
 let nativeModel = null;
 let importedNativeRootVehicleIds = [];
 // Imported vehicles are centered for editing; retain the reversible scene
@@ -118,11 +133,14 @@ const thumbnailLargeRequests = new Map();
 let modelPreviewCard = null;
 let modelPreviewRequestId = 0;
 let hoveredConnectionPort = null;
-let mirrorMode = { active: false, axis: 'x', offset: 0, hidePlane: false };
+let mirrorMode = { active: false, axis: 'x', offset: 0, hidePlane: settings.hideMirrorPlane };
 let mirrorGuideDrag = false;
 let subgridToolbarOpen = false;
 let selectionAction = null;
 let selectionBoxDraft = null;
+// Reference images are editor-only view state. They intentionally never enter
+// project snapshots or native/intermediate exports.
+const referenceImages = new Map();
 let latestPagesBuildTime = null;
 let pagesBuildTimeUnavailable = false;
 // Pages is deployed by GitHub's generated `pages-build-deployment` workflow,
@@ -132,10 +150,10 @@ const GITHUB_PAGES_WORKFLOW_RUNS = 'https://api.github.com/repos/BKN46/anymaker-
 const isGitHubPagesDeployment = run => run?.path === 'dynamic/pages/pages-build-deployment';
 
 $('#app').innerHTML = '<header class="topbar"><div class="brand" aria-label="ANYMAKER builder by BKN"><strong>ANYMAKER</strong><small>builder by BKN</small></div><a id="github-link" class="github-link" href="https://github.com/BKN46/anymaker-builder" target="_blank" rel="noopener noreferrer" data-i18n-aria-label="GitHub 仓库" data-i18n-title="GitHub 仓库"><svg viewBox="0 0 24 24" aria-hidden="true"><path d="M12 .7a11.3 11.3 0 0 0-3.57 22c.56.1.77-.24.77-.54v-2.1c-3.14.68-3.8-1.33-3.8-1.33-.51-1.3-1.25-1.65-1.25-1.65-1.02-.7.08-.69.08-.69 1.13.08 1.73 1.16 1.73 1.16 1 .1.75 2.02 2.92 1.41.1-.73.39-1.22.71-1.5-2.51-.29-5.15-1.25-5.15-5.58 0-1.23.44-2.24 1.16-3.03-.12-.29-.5-1.44.11-2.99 0 0 .95-.3 3.11 1.16a10.8 10.8 0 0 1 5.66 0c2.16-1.46 3.1-1.16 3.1-1.16.62 1.55.23 2.7.12 2.99.72.79 1.16 1.8 1.16 3.03 0 4.34-2.65 5.29-5.17 5.57.4.35.76 1.04.76 2.1v3.11c0 .3.2.65.78.54A11.3 11.3 0 0 0 12 .7Z"></path></svg></a><span id="github-build-time" class="github-build-time" hidden aria-live="polite"></span><select id="language-select" data-i18n-aria-label="界面语言"><option value="en">English</option><option value="zh">中文</option></select><span class="status" id="save-status" role="status" data-i18n="正在加载定义…"></span><section class="section top-tool-section"><h2 data-i18n="编辑工具"></h2><div class="tool-grid" id="tools"></div></section><label class="project-name-field" for="project-name"><span data-i18n="项目名称"></span><input id="project-name" type="text" maxlength="120" value="anymaker-vehicle" data-i18n-placeholder="项目名称" data-i18n-aria-label="项目名称"></label><nav class="top-actions"><button id="library-btn" data-i18n="导入本地载具"></button><button id="subgrid-import-btn" data-i18n="导入载具作为子网格"></button><button id="new-btn" data-i18n="新建"></button><button id="undo-btn" data-i18n="撤销"></button><button id="redo-btn" data-i18n="重做"></button><button id="save-btn" data-i18n="保存载具"></button><button id="export-btn" class="primary" data-i18n="中间格式 XML"></button></nav></header>' +
-  '<main class="workspace" id="workspace"><button id="left-sidebar-toggle" class="sidebar-toggle left-toggle" aria-controls="left-sidebar" aria-expanded="true" aria-keyshortcuts="Tab" data-i18n-title="收起方块库（在视口按 Tab 也可切换）" data-i18n="收起方块库"></button><aside id="left-sidebar" class="sidebar left-sidebar" data-i18n-aria-label="方块库"><div class="sidebar-tabs" role="tablist" data-i18n-aria-label="方块库"><button id="left-tab-catalog" type="button" role="tab" aria-controls="catalog-panel" aria-selected="true" data-sidebar-tab="catalog" data-i18n="方块库"></button><button id="left-tab-subgrids" type="button" role="tab" aria-controls="subgrid-panel" aria-selected="false" tabindex="-1" data-sidebar-tab="subgrids" data-i18n="子网格"></button></div><section id="catalog-panel" class="sidebar-tab-panel catalog-panel" role="tabpanel" aria-labelledby="left-tab-catalog"><section class="section"><h2><span data-i18n="组件定义"></span> <span id="catalog-count"></span></h2><input class="search" id="component-search" data-i18n-aria-label="搜索组件" data-i18n-placeholder="搜索中文、原始 ID、类别…"><select id="category-filter" data-i18n-aria-label="组件分类"><option value="" data-i18n="全部分类"></option></select><div class="catalog-visibility-options"><label class="catalog-visibility"><input id="show-building-furniture" type="checkbox"><span data-i18n="显示建材与家具"></span></label><label class="catalog-visibility"><input id="use-model-thumbnails" type="checkbox"><span data-i18n="使用模型缩略图"></span></label><input id="catalog-card-size" class="catalog-card-size" type="range" min="64" max="156" step="4" data-i18n-aria-label="组件卡片大小" data-i18n-title="组件卡片大小"></div><div id="component-list"></div><section id="favorite-components" hidden><h3><span data-i18n="收藏组件"></span> <span id="favorite-component-count"></span></h3><div id="favorite-component-list"></div></section></section></section><section id="subgrid-panel" class="sidebar-tab-panel" role="tabpanel" aria-labelledby="left-tab-subgrids" hidden><section class="section"><h2 data-i18n="当前载具子网格"></h2><p id="subgrid-summary" class="status"></p><div id="subgrid-list" class="subgrid-list"></div></section></section></aside><div id="left-sidebar-resizer" role="separator" aria-orientation="vertical" aria-controls="left-sidebar" data-i18n-aria-label="调整方块库宽度" aria-valuemin="240" aria-valuemax="720" tabindex="0"></div>' +
+  '<main class="workspace" id="workspace"><button id="left-sidebar-toggle" class="sidebar-toggle left-toggle" aria-controls="left-sidebar" aria-expanded="true" aria-keyshortcuts="Tab" data-i18n-title="收起方块库（在视口按 Tab 也可切换）" data-i18n="收起方块库"></button><aside id="left-sidebar" class="sidebar left-sidebar" data-i18n-aria-label="方块库"><div class="sidebar-tabs" role="tablist" data-i18n-aria-label="方块库"><button id="left-tab-catalog" type="button" role="tab" aria-controls="catalog-panel" aria-selected="true" data-sidebar-tab="catalog" data-i18n="方块库"></button><button id="left-tab-subgrids" type="button" role="tab" aria-controls="subgrid-panel" aria-selected="false" tabindex="-1" data-sidebar-tab="subgrids" data-i18n="子网格"></button><button id="left-tab-archives" type="button" role="tab" aria-controls="archive-panel" aria-selected="false" tabindex="-1" data-sidebar-tab="archives" data-i18n="存档"></button></div><section id="catalog-panel" class="sidebar-tab-panel catalog-panel" role="tabpanel" aria-labelledby="left-tab-catalog"><section class="section"><h2><span data-i18n="组件定义"></span> <span id="catalog-count"></span></h2><input class="search" id="component-search" data-i18n-aria-label="搜索组件" data-i18n-placeholder="搜索中文、原始 ID、类别…"><select id="category-filter" data-i18n-aria-label="组件分类"><option value="" data-i18n="全部分类"></option></select><div class="catalog-visibility-options"><label class="catalog-visibility"><input id="show-building-furniture" type="checkbox"><span data-i18n="显示建材与家具"></span></label><label class="catalog-visibility"><input id="use-model-thumbnails" type="checkbox"><span data-i18n="使用模型缩略图"></span></label><input id="catalog-card-size" class="catalog-card-size" type="range" min="64" max="156" step="4" data-i18n-aria-label="组件卡片大小" data-i18n-title="组件卡片大小"></div><div id="component-list"></div><section id="favorite-components" hidden><h3><span data-i18n="收藏组件"></span> <span id="favorite-component-count"></span></h3><div id="favorite-component-list"></div></section></section></section><section id="subgrid-panel" class="sidebar-tab-panel" role="tabpanel" aria-labelledby="left-tab-subgrids" hidden><section class="section"><h2 data-i18n="当前载具子网格"></h2><p id="subgrid-summary" class="status"></p><div id="subgrid-list" class="subgrid-list"></div></section></section><section id="archive-panel" class="sidebar-tab-panel" role="tabpanel" aria-labelledby="left-tab-archives" hidden><section class="section"><h2 data-i18n="存档"></h2><p class="status" data-i18n="存档会保存在此浏览器的 IndexedDB 中"></p><div class="archive-create"><input id="archive-name" maxlength="120" data-i18n-placeholder="存档名称" data-i18n-aria-label="存档名称"><button id="archive-save" type="button" data-i18n="保存当前载具"></button></div><p id="archive-status" class="status"></p><div id="archive-list" class="archive-list"></div></section></section></aside><div id="left-sidebar-resizer" role="separator" aria-orientation="vertical" aria-controls="left-sidebar" data-i18n-aria-label="调整方块库宽度" aria-valuemin="240" aria-valuemax="720" tabindex="0"></div>' +
   '<section id="viewport" tabindex="0" data-i18n-aria-label="三维建造视口"><button id="right-sidebar-toggle" class="sidebar-toggle right-toggle" aria-controls="right-sidebar" aria-expanded="false" data-i18n="打开右侧面板"></button><div class="view-controls"><button data-view="iso" data-i18n="正交"></button><button data-view="top" data-i18n="顶视"></button><button data-view="front" data-i18n="前视"></button><button id="fit-btn" data-i18n="回到中心"></button></div><span id="fps-display" class="fps-display" aria-label="Frame rate">FPS 0</span><div class="hud"><span class="badge" id="object-count"></span><span class="badge" id="vehicle-size"></span><span id="topology-count" hidden></span><span class="badge" id="cursor-pos" data-i18n="工作平面 Y = 0"></span></div></section><div id="right-sidebar-resizer" role="separator" aria-orientation="vertical" aria-controls="right-sidebar" data-i18n-aria-label="调整右侧面板宽度" aria-valuemin="240" aria-valuemax="720" aria-valuenow="304" tabindex="0" hidden></div>' +
   '<aside id="right-sidebar" class="sidebar right-sidebar" data-i18n-aria-label="编辑器面板" hidden><div class="sidebar-tabs" role="tablist" data-i18n-aria-label="编辑器面板"><button id="right-tab-editor" type="button" role="tab" aria-controls="editor-tab-panel" aria-selected="true" data-sidebar-tab="editor" data-i18n="编辑器参数"></button><button id="right-tab-inspector" type="button" role="tab" aria-controls="inspector-tab-panel" aria-selected="false" tabindex="-1" data-sidebar-tab="inspector" data-i18n="选中方块属性"></button><button id="right-tab-resources" type="button" role="tab" aria-controls="resources-tab-panel" aria-selected="false" tabindex="-1" data-sidebar-tab="resources" data-i18n="资源与校验"></button><button id="right-tab-history" type="button" role="tab" aria-controls="history-tab-panel" aria-selected="false" tabindex="-1" data-sidebar-tab="history" data-i18n="历史记录"></button></div><section id="editor-tab-panel" class="sidebar-tab-panel" role="tabpanel" aria-labelledby="right-tab-editor"><section id="grid-settings" class="section"><h2 data-i18n="工作网格 · 编辑器参数"></h2><p class="status" data-i18n="固定单位网格：1 格 = 8 cm；手动编辑位置为整数格，原生子网格投影可保留小数。"></p><button id="grid-btn" aria-pressed="true" data-i18n="隐藏网格"></button><p class="status"><span data-i18n="左键：当前工具 · 右键拖动：旋转视角"></span><br><span data-i18n="中键：平移 · 滚轮：缩放 · F：聚焦"></span><br><span data-i18n="Shift + 点击连续放置 · Ctrl / ⌘ + Z：撤销"></span></p></section></section><section id="inspector-tab-panel" class="sidebar-tab-panel" role="tabpanel" aria-labelledby="right-tab-inspector" hidden><section class="section"><div id="inspector-content" class="empty"></div></section></section><section id="resources-tab-panel" class="sidebar-tab-panel" role="tabpanel" aria-labelledby="right-tab-resources" hidden><section class="section"><h2 data-i18n="资源状态"></h2><p class="status" id="asset-status" data-i18n="尚未导入 Mesh。橙色线框仅是缺失资源标记，不代表游戏尺寸。"></p><button id="mesh-files-btn" class="full" data-i18n="选择 .mesh 文件"></button><p class="status" data-i18n="推荐选择游戏的 rom/meshes 文件夹。只在浏览器读取，不上传、不执行 EXE。仅渲染静态 Mesh，动态部件数量会单独提示。"></p></section><section class="section"><h2 data-i18n="本地原生载具"></h2><button id="native-btn" class="full" data-i18n="选择配套 .data / .meta"></button><p class="status" id="native-summary" data-i18n="选择同名的 .data 与 .meta JSON 文件。浏览器只读取，不上传；校验后立即替换当前场景。"></p></section><section class="section"><h2 data-i18n="校验"></h2><div id="validation" class="status"></div></section></section><section id="history-tab-panel" class="sidebar-tab-panel" role="tabpanel" aria-labelledby="right-tab-history" hidden><section class="section"><p class="status" data-i18n="最近 50 次已提交操作。选择任一项即可恢复到该状态。"></p><div id="history-list" class="history-list"></div></section></section></aside></main>' +
-  '<input id="mesh-input" type="file" accept=".mesh" multiple hidden><input id="file-input" type="file" accept=".json" hidden><input id="native-input" type="file" accept=".data,.meta" multiple hidden><input id="native-subgrid-input" type="file" accept=".data,.meta" multiple hidden><button id="project-save-btn" type="button" hidden></button>';
+  '<input id="mesh-input" type="file" accept=".mesh" multiple hidden><input id="file-input" type="file" accept=".json" hidden><input id="native-input" type="file" accept=".data,.meta" multiple hidden><input id="native-subgrid-input" type="file" accept=".data,.meta" multiple hidden><input id="reference-image-input" type="file" accept="image/*" hidden><button id="project-save-btn" type="button" hidden></button>';
 applyTranslations(document);
 const subgridCreate = document.createElement('div');
 subgridCreate.className = 'subgrid-create';
@@ -152,12 +170,27 @@ subgridDiagnostics.id = 'subgrid-diagnostics';
 subgridDiagnostics.className = 'subgrid-diagnostics';
 subgridDiagnostics.hidden = true;
 $('#subgrid-summary').after(subgridDiagnostics);
+const archiveCodePanel = document.createElement('section');
+archiveCodePanel.className = 'archive-code-panel';
+archiveCodePanel.innerHTML = '<h3 data-i18n="工程代码"></h3><p class="status" data-i18n="将工程压缩为代码，可复制或通过分享链接发送"></p><textarea id="archive-code" maxlength="8388608" data-i18n-placeholder="粘贴工程代码"></textarea><div class="archive-code-actions"><button id="archive-code-export" type="button" data-i18n="导出代码"></button><button id="archive-code-copy" type="button" data-i18n="复制代码"></button><button id="archive-code-import" type="button" data-i18n="导入代码"></button><button id="archive-code-share" type="button" data-i18n="生成分享链接"></button></div><p id="archive-code-status" class="status" role="status"></p>';
+applyTranslations(archiveCodePanel);
+$('#archive-panel > .section').append(archiveCodePanel);
+const referenceImagePanel = document.createElement('section');
+referenceImagePanel.className = 'reference-image-panel';
+referenceImagePanel.innerHTML = '<h3 data-i18n="2D 参考图片"></h3><button id="reference-image-import" type="button" class="full" data-i18n="导入参考图片"></button><p id="reference-image-name" class="status" data-i18n="当前子网格尚未导入参考图片"></p><div class="property"><label for="reference-image-plane" data-i18n="参考平面"></label><select id="reference-image-plane"><option value="xy" data-i18n="XY 平面（Z 深度）"></option><option value="xz" data-i18n="XZ 平面（Y 深度）"></option><option value="yz" data-i18n="YZ 平面（X 深度）"></option></select></div><div class="property"><label for="reference-image-size" data-i18n="图片宽度（格）"></label><input id="reference-image-size" type="number" min="1" max="2000" step="0.5" value="16"></div><div class="transform-grid reference-image-position"><label><span data-i18n="X 位置（格）"></span><input id="reference-image-x" type="number" min="-10000" max="10000" step="0.5" value="0"></label><label><span data-i18n="Y 位置（格）"></span><input id="reference-image-y" type="number" min="-10000" max="10000" step="0.5" value="0"></label><label><span data-i18n="Z 位置（格）"></span><input id="reference-image-z" type="number" min="-10000" max="10000" step="0.5" value="0"></label></div><div class="property"><label for="reference-image-opacity" data-i18n="图片透明度"></label><input id="reference-image-opacity" type="range" min="0.05" max="1" step="0.05" value="0.45"><output id="reference-image-opacity-value">45%</output></div><button id="reference-image-remove" type="button" class="full" data-i18n="移除参考图片"></button>';
+applyTranslations(referenceImagePanel);
+$('#subgrid-panel > .section').append(referenceImagePanel);
 $('#catalog-card-size').value = String(settings.catalogCardSize);
 $('#left-sidebar-resizer').setAttribute('aria-valuenow', String(settings.leftWidth));
 const componentIdTooltip = document.createElement('span'); componentIdTooltip.id = 'component-id-tooltip'; componentIdTooltip.hidden = true; document.body.append(componentIdTooltip);
 const connectionPortTooltip = document.createElement('span'); connectionPortTooltip.id = 'connection-port-tooltip'; connectionPortTooltip.hidden = true; document.body.append(connectionPortTooltip);
 const componentModelPreview = document.createElement('span'); componentModelPreview.id = 'component-model-preview'; componentModelPreview.hidden = true; componentModelPreview.setAttribute('aria-hidden', 'true');
 const componentModelPreviewImage = document.createElement('img'); componentModelPreviewImage.alt = ''; componentModelPreview.append(componentModelPreviewImage); document.body.append(componentModelPreview);
+const shareImportDialog = document.createElement('dialog');
+shareImportDialog.id = 'share-import-dialog';
+shareImportDialog.innerHTML = '<form method="dialog"><h2 data-i18n="发现分享工程"></h2><p data-i18n="此链接包含一个工程，请选择如何处理"></p><label class="share-archive-name"><span data-i18n="存档名称"></span><input id="share-archive-name" maxlength="120"></label><div class="share-dialog-actions"><button id="share-import-project" value="project" type="button" data-i18n="导入工程"></button><button id="share-import-archive" value="archive" type="button" data-i18n="导入到存档"></button><button id="share-import-cancel" value="cancel" type="button" data-i18n="不导入"></button></div></form>';
+applyTranslations(shareImportDialog);
+document.body.append(shareImportDialog);
 
 function setProjectName(value) {
   projectName = normalizeProjectName(value);
@@ -306,7 +339,7 @@ const rightSidebar = $('#right-sidebar');
 const rightSidebarToggle = $('#right-sidebar-toggle');
 const rightSidebarResizer = $('#right-sidebar-resizer');
 const sidebarTabPanels = {
-  left: { catalog: '#catalog-panel', subgrids: '#subgrid-panel' },
+  left: { catalog: '#catalog-panel', subgrids: '#subgrid-panel', archives: '#archive-panel' },
   right: { editor: '#editor-tab-panel', inspector: '#inspector-tab-panel', resources: '#resources-tab-panel', history: '#history-tab-panel' },
 };
 function activateSidebarTab(side, tab, { focus = false } = {}) {
@@ -495,6 +528,11 @@ function updateFps(now = performance.now()) {
   if (elapsed < 500) return;
   const fps = Math.round(fpsFrameCount * 1000 / elapsed);
   fpsDisplay.textContent = `FPS ${fps}`;
+  renderStats.hidden = !settings.renderQuality.showStats;
+  if (settings.renderQuality.showStats) {
+    const info = renderer.info;
+    setText(renderStats, '{ms} ms \u00b7 {calls} \u6b21\u7ed8\u5236 \u00b7 {triangles} \u4e09\u89d2\u9762 \u00b7 {ratio}\u00d7', { ms: (elapsed / fpsFrameCount).toFixed(1), calls: info.render.calls, triangles: info.render.triangles.toLocaleString(), ratio: renderer.getPixelRatio().toFixed(2) });
+  }
   fpsFrameCount = 0;
   fpsSampleStart = now;
 }
@@ -506,6 +544,10 @@ placementIndicator.innerHTML = '<svg class="placement-axis-guides" aria-hidden="
 viewport.append(placementIndicator); applyTranslations(placementIndicator);
 const scene = new THREE.Scene();
 scene.background = new THREE.Color(settings.backgroundColor);
+const referenceImageLayer = new THREE.Group();
+referenceImageLayer.name = 'reference-images';
+referenceImageLayer.renderOrder = 10;
+scene.add(referenceImageLayer);
 const interactionHighlights = new THREE.Group();
 interactionHighlights.name = 'interaction-highlights'; scene.add(interactionHighlights);
 const perspectiveCamera = new THREE.PerspectiveCamera(45, 1, .005, 2000);
@@ -525,7 +567,7 @@ cameraLight.position.set(0, 0, 0); cameraLightTarget.position.set(0, 0, -1);
 cameraLight.target = cameraLightTarget;
 camera.add(cameraLight, cameraLightTarget);
 let renderer;
-try { renderer = new THREE.WebGLRenderer({ antialias: true, alpha: true, logarithmicDepthBuffer: true }); }
+try { renderer = new THREE.WebGLRenderer({ antialias: settings.renderQuality.antialias, alpha: true, logarithmicDepthBuffer: true }); }
 catch { setText(viewport, '无法初始化 WebGL2。请启用硬件加速或更换浏览器。'); throw new Error('WebGL2 unavailable'); }
 renderer.setPixelRatio(Math.min(devicePixelRatio, 2));
 renderer.shadowMap.enabled = true;
@@ -577,13 +619,16 @@ transform.addEventListener('dragging-changed', e => {
   controls.enabled = !e.value;
   if (e.value) {
     dragOccurred = true;
+    pointerMoveTask.cancel();
+    const hideTopologyDuringDrag = Boolean(transform.object?.userData?.subgridMoveHandle || (multiTransform && transform.object === multiTransform.pivot));
+    setDragRenderMode(true, hideTopologyDuringDrag);
     if (transform.object?.userData?.subgridMoveHandle && selectedSubgridId) {
       subgridTransform = {
         gridId: selectedSubgridId,
         componentIds: selectedObjects().map(object => object.userData.id),
         initialPosition: subgridMoveHandle.position.clone(),
         initialTopology: structuredClone(topology),
-        initialComponentPositions: new Map(selectedObjects().map(object => [object.userData.id, object.position.clone()])),
+        initialComponentPositions: new Map(selectedObjects().map(object => [object, object.position.clone()])),
       };
       return;
     }
@@ -612,27 +657,35 @@ transform.addEventListener('dragging-changed', e => {
     topologyTransform = tool === 'translate' ? (nodeId ? { nodeId, counterpartId: mirroredNodeId(nodeId), plane: { ...mirrorMode } } : linkPoint) : null;
     return;
   }
+  transformTask.flush();
+  const keepSubgridOverlayHidden = Boolean(subgridTransform);
+  setDragRenderMode(false, false, !keepSubgridOverlayHidden);
   if (subgridTransform) {
     const active = subgridTransform; subgridTransform = null;
     const offset = subgridMoveHandle.position.clone().sub(active.initialPosition);
-    if (offset.lengthSq() <= 1e-12) { setTool(tool); return; }
+    if (offset.lengthSq() <= 1e-12) { restoreDragOverlays(); setTool(tool); return; }
     const nextTopology = translateSubgridTopology(active.initialTopology, active.componentIds, active.gridId, offset);
-    void transact(async () => {
-      await restore(snapshot(), nextTopology, transparencyGroups, subgrids);
-      selectedSubgridId = active.gridId;
-      selectedIds = new Set(objects.filter(object => object.userData.gridId === active.gridId).map(object => object.userData.id));
-      selected = null;
-      commit('已移动子网格 {id}', { id: active.gridId });
-      inspect();
-    });
+    void (async () => {
+      try {
+        await transact(async () => {
+          await restore(snapshot(), nextTopology, transparencyGroups, subgrids);
+          selectedSubgridId = active.gridId;
+          selectedIds = new Set(objects.filter(object => object.userData.gridId === active.gridId).map(object => object.userData.id));
+          selected = null;
+          commit('已移动子网格 {id}', { id: active.gridId });
+          inspect();
+        });
+      } finally {
+        restoreDragOverlays();
+      }
+    })();
   } else if (extensionTransform) {
-    const { object, definition, initialExtension } = extensionTransform;
+    const { object, initialExtension, nextExtension = initialExtension } = extensionTransform;
     extensionTransform = null;
-    const nextExtension = extensionVector(definition, object.userData.nativeExtension);
     if (nextExtension.some((value, index) => value !== initialExtension[index])) {
       const objectId = object.userData.id;
       void transact(async () => {
-        await restore(snapshot(), topology, transparencyGroups);
+        await restore(snapshot().map(item => item.id === objectId ? { ...item, nativeExtension: nextExtension } : item), topology, transparencyGroups);
         selected = objects.find(item => item.userData.id === objectId) || null;
         selectedIds = selected ? new Set([objectId]) : new Set();
         commit('更新组件线性尺寸'); inspect();
@@ -658,7 +711,7 @@ transform.addEventListener('dragging-changed', e => {
       }
     } catch (error) {
       if (nodeId) {
-        replaceTopologyVisual(buildTopologyVisual(topology, componentEntries()));
+        replaceTopologyVisual(prepareTopologyVisual(topology, componentEntries()));
         selectTopologyNode(nodeId);
       }
       reportError(nodeId ? '移动节点失败：{error}' : '移动连接折点失败：{error}', error);
@@ -677,15 +730,17 @@ transform.addEventListener('dragging-changed', e => {
     inspect();
   }
 });
-transform.addEventListener('objectChange', () => {
+const transformTask = createFrameTask(updateTransformPreview);
+transform.addEventListener('objectChange', () => transformTask.schedule());
+function updateTransformPreview() {
+  placementPicker.invalidate(); nodePicker.invalidate();
+  renderQuality.invalidateShadows();
   if (subgridTransform) {
     const offset = subgridMoveHandle.position.clone().sub(subgridTransform.initialPosition);
-    for (const [id, initial] of subgridTransform.initialComponentPositions) {
-      const object = objects.find(item => item.userData.id === id);
-      if (object) object.position.copy(initial).add(offset);
-    }
-    const previewTopology = translateSubgridTopology(subgridTransform.initialTopology, subgridTransform.componentIds, subgridTransform.gridId, offset);
-    replaceTopologyVisual(buildTopologyVisual(previewTopology, componentEntries()));
+    for (const [object, initial] of subgridTransform.initialComponentPositions) object.position.copy(initial).add(offset);
+    // The topology overlay is hidden for subgrid drags. Rebuilding every
+    // topology mesh on each pointer event makes large structures stutter;
+    // the final restore below rebuilds it once after the drop.
     return;
   }
   if (extensionTransform) {
@@ -695,7 +750,7 @@ transform.addEventListener('objectChange', () => {
     const descriptor = extensionAxes(extensionTransform.definition).find(item => item.index === index);
     if (!descriptor) return;
     const delta = (extensionHandle.position.getComponent(index) - extensionTransform.initialPosition.getComponent(index)) / CELL_SIZE_WORLD * (descriptor.axis === 'x' ? -1 : 1);
-    extensionTransform.object.userData.nativeExtension = updateExtension(
+    extensionTransform.nextExtension = updateExtension(
       extensionTransform.definition,
       extensionTransform.initialExtension,
       descriptor.axis,
@@ -711,11 +766,14 @@ transform.addEventListener('objectChange', () => {
     updateTopologyPreview(nodeId, transform.object.position, counterpartId, counterpartId && counterpartId !== nodeId ? mirrorPositionPreview(transform.object.position, plane) : null);
   }
   if (topologyTransform.linkId && transform.object?.userData?.linkId === topologyTransform.linkId) updateLinkPointPreview(topologyTransform.linkId, topologyTransform.pointIndex, transform.object.position);
-});
+}
 const hemisphereLight = new THREE.HemisphereLight(0xc5e4ff, 0x26384e, 1.1);
 scene.add(hemisphereLight);
 const light = new THREE.DirectionalLight(0xffffff, settings.lightIntensity);
 light.castShadow = true; light.shadow.mapSize.set(2048, 2048); scene.add(light);
+const renderQuality = createRenderQualityController(renderer, light, settings.renderQuality);
+const renderStats = document.createElement('span'); renderStats.id = 'render-stats'; renderStats.className = 'badge'; renderStats.hidden = true;
+$('.hud').append(renderStats);
 function attachCameraLight(nextCamera) {
   cameraLight.removeFromParent(); cameraLightTarget.removeFromParent();
   nextCamera.add(cameraLight, cameraLightTarget);
@@ -731,6 +789,7 @@ function updateLighting() {
   // remains the actual shadow caster.
   hemisphereLight.intensity = Math.max(.05, 1.35 - settings.shadowStrength * 1.05);
   cameraLight.intensity = settings.cameraLightEnabled ? settings.cameraLightIntensity : 0;
+  renderQuality.invalidateShadows();
 }
 updateLighting();
 const grid = new THREE.GridHelper(GRID_SIZE, GRID_DIVISIONS, 0x426780, 0x203345);
@@ -764,8 +823,12 @@ const gridWorldOrigin = new THREE.Vector3();
 const gridNdcPoint = new THREE.Vector3();
 const gridRayDirection = new THREE.Vector3();
 const gridPlanePoint = new THREE.Vector3();
+let gridViewSignature = '';
 function updateReferenceGrid() {
   if (!viewport.clientWidth || !viewport.clientHeight) return;
+  const signature = [...camera.position.toArray(), ...camera.quaternion.toArray(), ...camera.projectionMatrix.elements, ...controls.target.toArray(), viewport.clientWidth, viewport.clientHeight, grid.userData.baseOpacity].join(',');
+  if (signature === gridViewSignature) return;
+  gridViewSignature = signature;
   camera.getWorldPosition(gridWorldOrigin);
   camera.getWorldDirection(gridRayDirection);
   const target = controls.target;
@@ -828,6 +891,29 @@ function updateReferenceGrid() {
 const topologyLayer = new THREE.Group();
 topologyLayer.name = 'topology-overlay';
 scene.add(topologyLayer);
+function restoreDragOverlays() {
+  if (!dragOverlayState) return;
+  topologyLayer.visible = dragOverlayState.topologyVisible;
+  interactionHighlights.visible = dragOverlayState.interactionVisible;
+  dragOverlayState = null;
+}
+function setDragRenderMode(active, hideTopology = false, restoreOverlay = true) {
+  dragRenderMode = active;
+  renderQuality.setInteraction(active || orbitInteracting);
+  if (active) {
+    if (hideTopology) {
+      dragOverlayState = {
+        topologyVisible: topologyLayer.visible,
+        interactionVisible: interactionHighlights.visible,
+      };
+      topologyLayer.visible = false;
+      interactionHighlights.visible = false;
+    }
+    return;
+  }
+  renderQuality.invalidateShadows();
+  if (restoreOverlay) restoreDragOverlays();
+}
 // Component meshes receive deterministic render orders for depth stability.
 // Nodes are game-style overlay markers and must remain visible above those
 // meshes, including when a component is painted or shown in subgrid view.
@@ -847,6 +933,8 @@ const topologyMaterials = {
   plate: new THREE.MeshStandardMaterial({ color: STRUCTURE_COLOR, metalness: .05, roughness: .85, side: THREE.DoubleSide, depthTest: true, depthWrite: true }),
 };
 const raycaster = new THREE.Raycaster();
+const placementPicker = createPlacementPicker();
+const nodePicker = createProjectedNodePicker();
 raycaster.params.Line.threshold = .06;
 const pointer = new THREE.Vector2();
 const plane = new THREE.Plane(new THREE.Vector3(0, 1, 0), 0);
@@ -858,7 +946,8 @@ let edgeSize = settings.edgeSize;
 let edgeShiftSnap = false;
 let edgePointer = null;
 let pointerInCanvas = false;
-const edgeAnchor = new THREE.Mesh(new THREE.SphereGeometry(.07, 12, 8), new THREE.MeshBasicMaterial({ color: 0xd78624, transparent: true, opacity: .62, depthTest: false, depthWrite: false }));
+const edgeAnchor = new THREE.Mesh(new THREE.SphereGeometry(.035, 12, 8), new THREE.MeshBasicMaterial({ color: 0xd78624, transparent: true, opacity: .62, depthTest: false, depthWrite: false }));
+edgeAnchor.name = 'edge-placement-anchor';
 edgeAnchor.visible = false; edgeAnchor.renderOrder = 3;
 scene.add(edgePreview, edgeAnchor);
 const buildStatus = document.createElement('span'); buildStatus.id = 'build-status'; buildStatus.className = 'badge'; buildStatus.hidden = true; $('.hud').append(buildStatus);
@@ -917,18 +1006,22 @@ function clearTopologyVisual(layer = topologyLayer) {
   });
   layer.clear();
 }
-function connectionPortOffset(component, endpoint, linkKind = null, routeEndpoint = true) {
-  const definition = definitions.get(component?.type);
+function connectionPortDefinition(component, endpoint, linkKind = null) {
+  const definition = component?.definitionOverride || definitions.get(component?.type);
   const port = endpoint?.port ?? 0;
   const kind = linkKind || $('#connection-kind')?.value;
   // `endpoint.port` comes directly from native p0.pos/p1.pos.  The game uses
   // it as the original logic_nodes index, not a filtered network-local index.
   // Filtering first put wheel.mechanical_in #2 (brake) at the wrong location
   // as soon as a definition mixed connection types.
-  const candidate = logicNodePort(definition, port) || (kind === 'mechanical'
+  return logicNodePort(definition, port) || (kind === 'mechanical'
     ? (definition?.surfaces || []).filter(surface => typeof surface.type === 'string' && surface.type.startsWith('torque'))[port]
     : null);
+}
+function connectionPortOffset(component, endpoint, linkKind = null, routeEndpoint = true) {
+  const candidate = connectionPortDefinition(component, endpoint, linkKind);
   if (!candidate) return new THREE.Vector3();
+  const definition = component.definitionOverride || definitions.get(component.type);
   const pos = routeEndpoint
     ? connectionRouteCellPosition(candidate, component.nativeExtension, definition?.center_stretch)
     : logicNodeCellPosition(candidate, component.nativeExtension, definition?.center_stretch);
@@ -943,6 +1036,7 @@ function connectionWorldPosition(endpoint, components, linkKind = null, routeEnd
   if (!component) return null;
   const position = component.position || component;
   if (!position || !axes.every(axis => Number.isFinite(position[axis]))) return null;
+  if (!connectionPortDefinition(component, endpoint, linkKind)) return null;
   return new THREE.Vector3(position.x, position.y, position.z).add(connectionPortOffset(component, endpoint, linkKind, routeEndpoint));
 }
 function connectionEndpointWorldPosition(endpoint, components, linkKind = null) {
@@ -950,6 +1044,27 @@ function connectionEndpointWorldPosition(endpoint, components, linkKind = null) 
 }
 function connectionNodeWorldPosition(endpoint, components, linkKind = null) {
   return connectionWorldPosition(endpoint, components, linkKind, false);
+}
+function connectionRouteWorldIsSafe(link, components) {
+  if (!connectionRouteIsSafe(link)) return false;
+  const fromNode = connectionNodeWorldPosition(link.from, components, link.kind);
+  const toNode = connectionNodeWorldPosition(link.to, components, link.kind);
+  if (!fromNode || !toNode) return false;
+  const from = connectionEndpointWorldPosition(link.from, components, link.kind);
+  const to = connectionEndpointWorldPosition(link.to, components, link.kind);
+  const route = [fromNode, ...(link.kind === 'belt' ? [] : [from]), ...(link.points || []), ...(link.kind === 'belt' ? [] : [to]), toNode];
+  if (route.some(point => !point || !axes.every(axis => Number.isFinite(point[axis]) && Math.abs(point[axis]) <= 10000))) return false;
+  return route.slice(1).every((point, index) => {
+    const previous = route[index];
+    return Math.hypot(point.x - previous.x, point.y - previous.y, point.z - previous.z) <= MAX_CONNECTION_ROUTE_SEGMENT;
+  });
+}
+function sanitizeConnectionTopology(nextTopology, items) {
+  const componentIds = new Set(items.map(item => item.id));
+  const components = componentEntries(items);
+  const links = pruneInvalidConnections(nextTopology?.links || [], componentIds)
+    .filter(link => connectionRouteWorldIsSafe(link, components));
+  return { ...nextTopology, links };
 }
 function componentEntries(items = snapshot()) {
   return new Map(items.map(item => [item.id, item]));
@@ -972,19 +1087,21 @@ function createConnectionRouteWithPortStubs(fromNode, from, bodyPoints, to, toNo
   }));
   return route;
 }
-function buildTopologyVisual(state, components = new Map()) {
+function buildTopologyVisual(state, components = new Map(), changedKeys = null) {
   const layer = new THREE.Group();
   try {
     const byId = new Map(state.nodes.map(node => [node.id, node]));
+    const positions = new Map(state.nodes.map(node => [node.id, new THREE.Vector3(node.position.x, node.position.y, node.position.z)]));
     for (const node of state.nodes) {
-      const nodeMaterial = topologyMaterials.node.clone();
-      const marker = new THREE.Mesh(new THREE.SphereGeometry(.055, 10, 8), nodeMaterial);
+      if (changedKeys && !changedKeys.has(`node:${node.id}`)) continue;
+      const marker = new THREE.Mesh(new THREE.SphereGeometry(.055, 10, 8), topologyMaterials.node);
       marker.position.set(node.position.x, node.position.y, node.position.z);
       marker.userData.topology = 'node'; marker.userData.nodeId = node.id;
       marker.visible = showNodes && topologyHelpersVisible && !referencePreview && !node.hidden; marker.renderOrder = NODE_OVERLAY_RENDER_ORDER;
       layer.add(marker);
     }
     for (const edge of state.edges) {
+      if (changedKeys && !changedKeys.has(`edge:${edge.id}`)) continue;
       // Native edges are opaque narrow supports. They need to write depth so
       // their filled faces remain visible in dense imported assemblies; the
       // physically outward panel offset still wins where a plate covers one.
@@ -997,14 +1114,15 @@ function buildTopologyVisual(state, components = new Map()) {
       layer.add(mesh);
     }
     for (const plate of state.plates) {
+      if (changedKeys && !changedKeys.has(`plate:${plate.id}`)) continue;
       const depthKey = `plate:${plate.id}`;
-      const positions = new Map(state.nodes.map(node => [node.id, new THREE.Vector3(node.position.x, node.position.y, node.position.z)]));
       const offset = plate.normalOffset ?? CELL_SIZE_WORLD / 2;
       const surface = { normalOffset: offset, surfaceDirection: plate.surfaceDirection };
       const vertices = plateSurfaceVertices(plate.nodeIds, positions, surface);
       const geometry = new THREE.BufferGeometry();
       geometry.setAttribute('position', new THREE.Float32BufferAttribute(vertices, 3));
       geometry.computeVertexNormals();
+      geometry.computeBoundingBox(); geometry.computeBoundingSphere();
       const painted = typeof plate.color_front === 'string' || typeof plate.color_back === 'string' || Number.isInteger(plate.col_front) || Number.isInteger(plate.col_back);
       const glass = isGlassPlate(plate);
       if (painted) {
@@ -1038,6 +1156,7 @@ function buildTopologyVisual(state, components = new Map()) {
       layer.add(mesh);
     }
     for (const link of state.links || []) {
+      if (changedKeys && !changedKeys.has(`link:${link.id}`)) continue;
       const fromNode = connectionNodeWorldPosition(link.from, components, link.kind);
       const toNode = connectionNodeWorldPosition(link.to, components, link.kind);
       if (!fromNode || !toNode) continue;
@@ -1077,16 +1196,25 @@ function updateTopologyPreview(nodeId, value, counterpartId = null, counterpartV
   const point = new THREE.Vector3(value.x, value.y, value.z);
   const positions = new Map(topology.nodes.map(node => [node.id, new THREE.Vector3(node.position.x, node.position.y, node.position.z)]));
   positions.set(nodeId, point);
+  const changedNodes = new Set([nodeId]);
+  if (counterpartId && counterpartValue) changedNodes.add(counterpartId);
+  const edges = new Map(topology.edges.map(edge => [edge.id, edge]));
   if (counterpartId && counterpartId !== nodeId && counterpartValue) positions.set(counterpartId, new THREE.Vector3(counterpartValue.x, counterpartValue.y, counterpartValue.z));
   for (const object of topologyLayer.children) {
-    if (object.userData.topology === 'node' && positions.has(object.userData.nodeId)) object.position.copy(positions.get(object.userData.nodeId));
+    if (object.userData.topology === 'node' && changedNodes.has(object.userData.nodeId)) {
+      object.position.copy(positions.get(object.userData.nodeId)); topologyVisualSignatures.delete(object);
+    }
     if (object.userData.topology === 'edge') {
-      const edge = topology.edges.find(value => value.id === object.userData.edgeId);
+      const edge = edges.get(object.userData.edgeId);
+      if (!edge || !changedNodes.has(edge.a) && !changedNodes.has(edge.b)) continue;
+      topologyVisualSignatures.delete(object);
       if (edge && !object.userData.topologyJunction) updateEdgeMesh(object, positions.get(edge.a), positions.get(edge.b), { size: edge.size });
       if (object.userData.topologyJunction && positions.has(object.userData.nodeId)) object.position.copy(positions.get(object.userData.nodeId));
     }
     if (object.userData.topology === 'plate') {
       const nodeIds = object.userData.nodeIds;
+      if (!nodeIds.some(id => changedNodes.has(id))) continue;
+      topologyVisualSignatures.delete(object);
       const vertices = plateSurfaceVertices(nodeIds, positions, {
         normalOffset: object.userData.normalOffset,
         surfaceDirection: object.userData.surfaceDirection,
@@ -1096,9 +1224,12 @@ function updateTopologyPreview(nodeId, value, counterpartId = null, counterpartV
       else object.geometry.setAttribute('position', new THREE.Float32BufferAttribute(vertices, 3));
       object.geometry.getAttribute('position').needsUpdate = true;
       object.geometry.computeVertexNormals();
+      object.geometry.computeBoundingSphere();
+      object.geometry.computeBoundingBox();
     }
   }
   topologyLayer.updateMatrixWorld(true);
+  renderQuality.invalidateShadows();
 }
 function updateLinkPointPreview(linkId, pointIndex, position) {
   const link = topology.links.find(value => value.id === linkId);
@@ -1107,7 +1238,7 @@ function updateLinkPointPreview(linkId, pointIndex, position) {
     ...value,
     points: value.points.map((point, index) => index === pointIndex ? { x: position.x, y: position.y, z: position.z } : point),
   } : value);
-  replaceTopologyVisual(buildTopologyVisual({ ...topology, links: previewLinks }, componentEntries()));
+  replaceTopologyVisual(prepareTopologyVisual({ ...topology, links: previewLinks }, componentEntries()));
 }
 function updateNodeVisualState() {
   for (const marker of topologyLayer.children) {
@@ -1118,9 +1249,25 @@ function updateNodeVisualState() {
     marker.visible = showNodes && topologyHelpersVisible && !referencePreview;
   }
 }
-function replaceTopologyVisual(layer) {
+const topologyVisualSignatures = new WeakMap();
+function topologyVisualKey(object) {
+  const kind = object.userData.topology;
+  return `${kind}:${object.userData[`${kind}Id`]}`;
+}
+function prepareTopologyVisual(state, components = componentEntries()) {
+  const records = topologyVisualRecords(state, components, { subgridView, outlines: settings.edgeOutlinesVisible });
+  const existing = new Map(topologyLayer.children.map(object => [topologyVisualKey(object), { object, signature: topologyVisualSignatures.get(object) }]));
+  const plan = planVisualUpdate(records, existing, record => record.key, record => record.signature);
+  const layer = buildTopologyVisual(state, components, new Set(plan.changed.map(record => record.key)));
+  for (const object of layer.children) topologyVisualSignatures.set(object, plan.signatures.get(topologyVisualKey(object)));
+  return { layer, retained: [...plan.retained.values()] };
+}
+function replaceTopologyVisual(prepared) {
+  const { layer, retained = [] } = prepared.isGroup ? { layer: prepared } : prepared;
+  for (const object of retained) topologyLayer.remove(object);
   clearTopologyVisual();
-  topologyLayer.add(...[...layer.children]);
+  topologyLayer.add(...retained, ...[...layer.children]);
+  renderQuality.invalidateShadows();
   topologyLayer.updateMatrixWorld(true);
   reconcileOpaqueDepthOrder();
   updateConnectionVisibility();
@@ -1344,10 +1491,11 @@ function refreshConnectionPorts() {
   clearConnectionPorts();
   if (tool !== 'connect' || referencePreview || !selectableKinds.link) {
     $('#viewport').dataset.connectionPortCount = '0';
+    $('#viewport').dataset.connectionPortColors = '';
     return;
   }
   const kind = $('#connection-kind').value;
-  const color = LINK_COLORS[kind];
+  const portColors = new Set();
   const portsForKind = definition => {
     const logicPorts = logicNodePortsForNetwork(definition, kind);
     if (logicPorts.length || kind !== 'mechanical') return logicPorts;
@@ -1364,31 +1512,72 @@ function refreshConnectionPorts() {
     ports.forEach(portDefinition => {
       const nativePosition = logicNodeCellPosition(portDefinition, object.userData.nativeExtension, definition?.center_stretch);
       const port = portDefinition.port;
-      const marker = new THREE.Mesh(new THREE.SphereGeometry(.055, 10, 8), new THREE.MeshBasicMaterial({ color, transparent: settings.nodeOpacity < 1, opacity: settings.nodeOpacity, depthTest: false, depthWrite: false }));
+      const color = nativeConnectionPortColor(kind, portDefinition, definition);
+      portColors.add(color);
+      const marker = new THREE.Group();
       marker.position.set(-nativePosition[0] * CELL_SIZE_WORLD, nativePosition[1] * CELL_SIZE_WORLD, nativePosition[2] * CELL_SIZE_WORLD);
       object.localToWorld(marker.position);
-      marker.scale.setScalar(settings.nodeSize / .055);
       marker.renderOrder = PORT_OVERLAY_RENDER_ORDER;
-      marker.userData.connectionPort = {
+      const sphere = new THREE.Mesh(new THREE.SphereGeometry(.055, 10, 8), new THREE.MeshBasicMaterial({ color, transparent: settings.nodeOpacity < 1, opacity: settings.nodeOpacity, depthTest: false, depthWrite: false }));
+      sphere.scale.setScalar(settings.nodeSize / .055);
+      sphere.renderOrder = PORT_OVERLAY_RENDER_ORDER;
+      marker.add(sphere);
+      const connectionPort = {
         componentId: object.userData.id,
         componentType: object.userData.type,
         componentName: componentName(definition),
         port,
         networkKind: kind,
+        color,
+        mechanicalRole: nativeMechanicalPortRole(portDefinition, definition),
         type: portDefinition.type || 'surface',
         source: portDefinition.source || 'surface',
         descriptor: definition?.data_descriptors?.[port]?.name || '',
         direction: portDefinition.direction ?? portDefinition.dir,
         position: marker.getWorldPosition(new THREE.Vector3()),
       };
+      marker.userData.connectionPort = connectionPort;
+      sphere.userData.connectionPort = connectionPort;
+      const direction = connectionDirectionVector(connectionPort.direction);
+      if (direction) {
+        // Native directions use the component basis; native X is mirrored in
+        // the editor's Three.js coordinate basis just like port positions.
+        const origin = object.localToWorld(new THREE.Vector3());
+        const endpoint = object.localToWorld(new THREE.Vector3(-direction[0], direction[1], direction[2]));
+        const worldDirection = endpoint.sub(origin).normalize();
+        if (worldDirection.lengthSq() > 1e-12) {
+          const arrow = new THREE.ArrowHelper(worldDirection, new THREE.Vector3(), .14, color, .045, .035);
+          arrow.name = 'connection-port-direction-arrow';
+          arrow.renderOrder = PORT_OVERLAY_RENDER_ORDER + 1;
+          arrow.traverse(child => {
+            child.userData.connectionPort = connectionPort;
+            if (!child.material) return;
+            child.material.depthTest = false;
+            child.material.depthWrite = false;
+            child.material.transparent = settings.nodeOpacity < 1;
+            child.material.opacity = settings.nodeOpacity;
+            child.material.needsUpdate = true;
+            child.renderOrder = PORT_OVERLAY_RENDER_ORDER + 1;
+          });
+          marker.add(arrow);
+        }
+      }
       connectionPortLayer.add(marker);
     });
   }
   $('#viewport').dataset.connectionPortCount = String(connectionPortLayer.children.length);
+  $('#viewport').dataset.connectionPortColors = [...portColors].join(',');
 }
 function pickConnectionPort() {
   const hit = raycaster.intersectObjects(connectionPortLayer.children, true)[0];
-  return hit?.object.userData.connectionPort || null;
+  let object = hit?.object;
+  while (object && !object.userData.connectionPort) object = object.parent;
+  return object?.userData.connectionPort || null;
+}
+function mechanicalEndpointRole(endpoint, components) {
+  const component = components.get(endpoint?.componentId);
+  const definition = component && definitions.get(component.type);
+  return definition ? nativeMechanicalPortRole(logicNodePort(definition, endpoint?.port ?? 0), definition) : null;
 }
 function clearInteractionHighlights() {
   interactionHighlights.traverse(object => { object.geometry?.dispose(); object.material?.dispose(); });
@@ -1599,7 +1788,10 @@ function selectSubgridForMove(gridId) {
   setTool('translate'); updateInteractionHighlights(); inspect();
 }
 function setTool(value) {
+  placementPicker.invalidate(); nodePicker.invalidate();
+  pointerMoveTask.cancel();
   if (busy) return;
+  const enteringPaint = value === 'paint' && tool !== 'paint';
   tool = value;
   if (value !== 'select' && selectionAction) setSelectionAction(null);
   if (!['edge', 'connect'].includes(value) && edgeShiftSnap) {
@@ -1649,6 +1841,7 @@ function setTool(value) {
   }
   refreshConnectionPorts();
   updateInteractionHighlights();
+  if (enteringPaint) batchPaintSelection();
 }
 function setGridConstraints() {
   transform.setTranslationSnap(CELL_SIZE_WORLD);
@@ -1772,8 +1965,10 @@ function commit(label = '编辑', params = {}) {
     });
   }
   lastSubgridAnalysis = null;
+  const hadConnectionVisual = topology.links?.length > 0;
+  topology = sanitizeConnectionTopology(topology, snapshot());
   history.commit(currentProject(), { key: label, params });
-  if (topology.links?.length) replaceTopologyVisual(buildTopologyVisual(topology, componentEntries()));
+  if (hadConnectionVisual || topology.links?.length) replaceTopologyVisual(prepareTopologyVisual(topology, componentEntries()));
   refresh();
 }
 function vehicleDimensions() {
@@ -1817,6 +2012,8 @@ function renderHistory() {
   }
 }
 function refresh() {
+  placementPicker.invalidate(); nodePicker.invalidate();
+  renderQuality.invalidateShadows();
   setText($('#object-count'), '{count} 个组件', { count: objects.length });
   const links = (topology.links || []).length;
   setText($('#topology-count'), links ? '{nodes} 节点 · {edges} 梁 · {plates} 面板 · {links} 连接' : '{nodes} 节点 · {edges} 梁 · {plates} 面板', { nodes: topology.nodes.length, edges: topology.edges.length, plates: topology.plates.length, links });
@@ -1835,6 +2032,7 @@ function refresh() {
   updateTransparencyAction();
   renderTransparencyGroups();
   renderSubgridList();
+  renderArchiveList();
 }
 function updateTransparencyAction() {
   const hasHiddenObjects = objects.some(object => object.userData.hidden)
@@ -1956,6 +2154,122 @@ function renderSubgridDiagnostics() {
     host.append(item);
   }
 }
+const referencePlaneRotations = {
+  xy: [0, 0, 0],
+  xz: [-Math.PI / 2, 0, 0],
+  yz: [0, Math.PI / 2, 0],
+};
+function referencePosition(record) {
+  return new THREE.Vector3(record.position.x * CELL_SIZE_WORLD, record.position.y * CELL_SIZE_WORLD, record.position.z * CELL_SIZE_WORLD);
+}
+function disposeReferenceImage(record) {
+  if (!record) return;
+  record.mesh?.removeFromParent();
+  record.mesh?.geometry?.dispose();
+  record.mesh?.material?.dispose();
+  record.texture?.dispose();
+  if (record.url) URL.revokeObjectURL(record.url);
+}
+function updateReferenceImageMesh(record) {
+  if (!record?.mesh) return;
+  const width = Math.max(1, Number(record.size) || 16) * CELL_SIZE_WORLD;
+  const height = width / Math.max(.001, record.aspect || 1);
+  record.mesh.geometry.dispose();
+  record.mesh.geometry = new THREE.PlaneGeometry(width, height);
+  record.mesh.position.copy(referencePosition(record));
+  record.mesh.rotation.set(...(referencePlaneRotations[record.plane] || referencePlaneRotations.xy));
+  record.mesh.material.opacity = THREE.MathUtils.clamp(Number(record.opacity) || .45, .05, 1);
+  record.mesh.visible = !referencePreview && !record.hidden;
+}
+function syncReferenceImageControls() {
+  const record = referenceImages.get(activeGridId);
+  const name = $('#reference-image-name');
+  const controls = ['reference-image-plane', 'reference-image-size', 'reference-image-x', 'reference-image-y', 'reference-image-z', 'reference-image-opacity', 'reference-image-remove'];
+  if (name) setText(name, record ? '{name}' : '当前子网格尚未导入参考图片', { name: record?.name || '' });
+  for (const id of controls) {
+    const input = $('#' + id);
+    if (input) input.disabled = !record || busy;
+  }
+  if (!record) return;
+  $('#reference-image-plane').value = record.plane;
+  $('#reference-image-size').value = String(record.size);
+  $('#reference-image-x').value = String(record.position.x);
+  $('#reference-image-y').value = String(record.position.y);
+  $('#reference-image-z').value = String(record.position.z);
+  $('#reference-image-opacity').value = String(record.opacity);
+  $('#reference-image-opacity-value').textContent = `${Math.round(record.opacity * 100)}%`;
+}
+function updateActiveReferenceImage(changes) {
+  const record = referenceImages.get(activeGridId);
+  if (!record) return;
+  Object.assign(record, changes);
+  updateReferenceImageMesh(record);
+  syncReferenceImageControls();
+}
+async function importReferenceImage(file) {
+  if (!file) return;
+  if (!file.type.startsWith('image/')) throw new Error('请选择图片文件');
+  if (file.size > 20 * 1024 * 1024) throw new Error('参考图片不能超过 20 MiB');
+  const url = URL.createObjectURL(file);
+  try {
+    const image = new Image();
+    await new Promise((resolve, reject) => {
+      image.onload = resolve;
+      image.onerror = () => reject(new Error('参考图片无法读取'));
+      image.src = url;
+    });
+    if (!image.naturalWidth || !image.naturalHeight) throw new Error('参考图片尺寸无效');
+    const previous = referenceImages.get(activeGridId);
+    const texture = new THREE.Texture(image);
+    texture.colorSpace = THREE.SRGBColorSpace;
+    texture.needsUpdate = true;
+    const record = {
+      gridId: activeGridId,
+      name: file.name,
+      url,
+      texture,
+      aspect: image.naturalWidth / image.naturalHeight,
+      plane: previous?.plane || 'xy',
+      size: previous?.size || 16,
+      position: previous ? { ...previous.position } : { x: 0, y: 0, z: 0 },
+      opacity: previous?.opacity || .45,
+      hidden: previous?.hidden === true,
+      mesh: new THREE.Mesh(new THREE.PlaneGeometry(1, 1), new THREE.MeshBasicMaterial({ map: texture, transparent: true, opacity: previous?.opacity || .45, depthTest: false, depthWrite: false, side: THREE.DoubleSide, toneMapped: false })),
+    };
+    record.mesh.name = `reference-image:${activeGridId}`;
+    record.mesh.userData.referenceImage = true;
+    record.mesh.userData.gridId = activeGridId;
+    record.mesh.renderOrder = 12;
+    const old = referenceImages.get(activeGridId);
+    if (old) disposeReferenceImage(old);
+    referenceImages.set(activeGridId, record);
+    referenceImageLayer.add(record.mesh);
+    updateReferenceImageMesh(record);
+    syncReferenceImageControls();
+  } catch (error) {
+    URL.revokeObjectURL(url);
+    throw error;
+  }
+}
+function removeReferenceImage(gridId) {
+  const record = referenceImages.get(gridId);
+  if (!record) return;
+  disposeReferenceImage(record);
+  referenceImages.delete(gridId);
+  if (gridId === activeGridId) syncReferenceImageControls();
+}
+$('#reference-image-import').onclick = () => { if (!busy) $('#reference-image-input').click(); };
+$('#reference-image-input').onchange = async event => {
+  const file = event.target.files[0]; event.target.value = '';
+  if (!file || busy) return;
+  try { await importReferenceImage(file); status('已导入参考图片 {name}', { name: file.name }); }
+  catch (error) { reportError('导入参考图片失败：{error}', error); }
+};
+$('#reference-image-plane').onchange = event => updateActiveReferenceImage({ plane: event.target.value });
+$('#reference-image-size').oninput = event => updateActiveReferenceImage({ size: THREE.MathUtils.clamp(Number(event.target.value) || 16, 1, 2000) });
+for (const axis of axes) $(`#reference-image-${axis}`).oninput = event => updateActiveReferenceImage({ position: { ...referenceImages.get(activeGridId)?.position, [axis]: THREE.MathUtils.clamp(Number(event.target.value) || 0, -10000, 10000) } });
+$('#reference-image-opacity').oninput = event => updateActiveReferenceImage({ opacity: THREE.MathUtils.clamp(Number(event.target.value) || .45, .05, 1) });
+$('#reference-image-remove').onclick = () => { if (!busy) { removeReferenceImage(activeGridId); status('已移除参考图片'); } };
 function renderSubgridList() {
   const summary = $('#subgrid-summary');
   const host = $('#subgrid-list');
@@ -1980,6 +2294,7 @@ function renderSubgridList() {
   }
   renderSubgridDiagnostics();
   syncSubgridErrorMarkers();
+  syncReferenceImageControls();
   for (const gridId of ids) {
     const components = objects.filter(object => (object.userData.gridId || 'grid-1') === gridId);
     const structuralItems = [...topology.nodes, ...topology.edges, ...topology.plates].filter(item => (item.gridId || 'grid-1') === gridId);
@@ -1994,7 +2309,7 @@ function renderSubgridList() {
       : t('{components} 个组件 · {structural} 个结构对象 · {visibility}', { components: components.length, structural: structuralItems.length, visibility: t(fullyHidden ? '已隐藏' : '可见') });
     const select = document.createElement('button'); select.type = 'button'; select.className = 'subgrid-select'; setText(select, gridId === activeGridId ? '当前' : '使用');
     select.setAttribute('aria-pressed', String(gridId === activeGridId)); select.disabled = busy;
-    select.onclick = () => { activeGridId = gridId; renderSubgridList(); status('当前子网格：{id} · {count} 个子网格', { id: gridId, count: ids.length }); };
+    select.onclick = () => { activeGridId = gridId; renderSubgridList(); syncReferenceImageControls(); status('当前子网格：{id} · {count} 个子网格', { id: gridId, count: ids.length }); };
     const action = document.createElement('button'); action.type = 'button'; setText(action, fullyHidden ? '取消隐藏' : '隐藏');
     action.disabled = busy || !visibilityTargets.length;
     action.onclick = () => { void setGridVisibility(gridId, !fullyHidden); };
@@ -2006,6 +2321,240 @@ function renderSubgridList() {
     detail.append(title, meta); row.append(detail, select, action, remove); host.append(row);
   }
 }
+function archiveId() {
+  return globalThis.crypto?.randomUUID?.() || `archive-${Date.now()}-${Math.random().toString(36).slice(2)}`;
+}
+function renderArchiveList() {
+  const host = $('#archive-list');
+  if (!host) return;
+  host.replaceChildren();
+  if (archiveLoadError) {
+    const message = document.createElement('p'); message.className = 'empty'; message.textContent = t('存档不可用：{error}', { error: archiveLoadError }); host.append(message); return;
+  }
+  if (!archiveRecords.length) {
+    const message = document.createElement('p'); message.className = 'empty'; message.textContent = t('暂无存档'); host.append(message); return;
+  }
+  for (const record of archiveRecords) {
+    const row = document.createElement('div'); row.className = 'archive-row'; row.dataset.archiveId = record.id;
+    const detail = document.createElement('div'); detail.className = 'archive-detail';
+    const title = document.createElement('strong'); title.textContent = record.name;
+    const meta = document.createElement('span');
+    const time = Number.isFinite(record.savedAt) ? new Date(record.savedAt).toLocaleString(getLocale() === 'zh' ? 'zh-CN' : 'en-US') : '';
+    meta.textContent = `${record.kind === 'auto' ? t('自动存档') : t('手动存档')} · ${time}`;
+    detail.append(title, meta);
+    const load = document.createElement('button'); load.type = 'button'; load.className = 'archive-action'; setText(load, '读取'); load.title = t('读取存档'); load.setAttribute('aria-label', `${t('读取存档')}: ${record.name}`); load.disabled = busy;
+    load.onclick = () => { void readArchive(record); };
+    const subgrid = document.createElement('button'); subgrid.type = 'button'; subgrid.className = 'archive-action'; setText(subgrid, '作为子网格'); subgrid.title = t('作为子网格导入'); subgrid.setAttribute('aria-label', `${t('作为子网格导入')}: ${record.name}`); subgrid.disabled = busy;
+    subgrid.onclick = () => { void importArchiveAsSubgrid(record); };
+    row.append(detail, load, subgrid);
+    if (record.kind !== 'auto') {
+      const remove = document.createElement('button'); remove.type = 'button'; remove.className = 'archive-delete'; setText(remove, '删除'); remove.title = t('删除存档'); remove.setAttribute('aria-label', `${t('删除存档')}: ${record.name}`); remove.disabled = busy;
+      remove.onclick = () => { void removeArchive(record); };
+      row.append(remove);
+    }
+    host.append(row);
+  }
+}
+async function refreshArchiveList() {
+  if (!archiveStore) {
+    archiveLoadError = t('浏览器不支持 IndexedDB');
+    renderArchiveList();
+    return;
+  }
+  try {
+    archiveRecords = await archiveStore.list();
+    archiveLoadError = null;
+  } catch (error) {
+    archiveLoadError = error instanceof Error ? error.message : String(error);
+  }
+  renderArchiveList();
+}
+function archiveDocument(record) {
+  return migrateDocument(record.document, catalog.index);
+}
+async function readArchive(record) {
+  if (busy) return;
+  try {
+    const document = archiveDocument(record);
+    const restored = await transact(async () => {
+      await restoreProjectDocument(document);
+      commit('读取存档 {name}', { name: record.name });
+      fit();
+    });
+    if (restored) status('已读取存档 {name}', { name: record.name });
+  } catch (error) { reportError('读取存档失败：{error}', error); }
+}
+async function importArchiveAsSubgrid(record) {
+  if (busy) return;
+  try {
+    const document = archiveDocument(record);
+    if (document.objects.length > LIMIT) throw new Error('存档超过组件上限');
+    let staged = null;
+    const prepared = await transact(async () => {
+      staged = stageImportedSubgrid(document, importedSubgridExistingIds());
+      const preview = await createImportedSubgridPreview(staged);
+      importedSubgridDraft = { ...staged, ...preview, sourceName: record.name };
+      scene.add(preview.preview);
+      tool = 'subgrid-place';
+    });
+    if (!prepared || !importedSubgridDraft) return;
+    setTool('subgrid-place');
+    if (cursorPoint && pointerInCanvas) setImportedSubgridPreviewPoint(cursorPoint);
+    status('已载入存档 {name} 作为子网格虚像；在视口点击放置，Esc 取消', { name: record.name });
+  } catch (error) {
+    clearImportedSubgridPreview();
+    reportError('作为子网格导入失败：{error}', error);
+  }
+}
+async function removeArchive(record) {
+  if (busy || record.kind === 'auto' || !archiveStore) return;
+  if (!confirm(t('删除存档确认', { name: record.name }))) return;
+  try {
+    await archiveStore.remove(record.id);
+    await refreshArchiveList();
+    status('已删除存档 {name}', { name: record.name });
+  } catch (error) { reportError('删除存档失败：{error}', error); }
+}
+async function saveNamedArchive() {
+  if (busy || !archiveStore) return;
+  const input = $('#archive-name');
+  const name = input.value.trim();
+  if (!name || name.length > 120) { setText($('#archive-status'), '请输入有效的存档名称'); return; }
+  try {
+    const existing = archiveRecords.find(record => record.kind === 'manual' && record.name === name);
+    await archiveStore.put({ id: existing?.id || archiveId(), name, kind: 'manual', savedAt: Date.now(), document: currentProject() });
+    input.value = '';
+    await refreshArchiveList();
+    setText($('#archive-status'), '已保存存档 {name}', { name });
+  } catch (error) { setText($('#archive-status'), '保存存档失败：{error}', { error: error instanceof Error ? error.message : String(error) }); }
+}
+async function saveAutoArchive(savedAt = Date.now()) {
+  if (!archiveStore) return;
+  try {
+    await archiveStore.put({ id: AUTO_ARCHIVE_ID, name: '自动存档', kind: 'auto', savedAt: Number.isFinite(savedAt) ? savedAt : Date.now(), document: currentProject() });
+    await refreshArchiveList();
+  } catch (error) {
+    archiveLoadError = error instanceof Error ? error.message : String(error);
+    renderArchiveList();
+  }
+}
+async function copyText(value) {
+  if (navigator.clipboard?.writeText) {
+    await navigator.clipboard.writeText(value);
+    return;
+  }
+  const input = document.createElement('textarea');
+  input.value = value; input.style.position = 'fixed'; input.style.opacity = '0';
+  document.body.append(input);
+  try {
+    input.select();
+    if (!document.execCommand('copy')) throw new Error('浏览器不支持复制到剪贴板');
+  } finally { input.remove(); }
+}
+async function createProjectCode() {
+  const code = await encodeProjectCode(currentProject());
+  $('#archive-code').value = code;
+  return code;
+}
+async function exportProjectCode() {
+  if (busy) return;
+  try {
+    const code = await createProjectCode();
+    download(code, `${projectFileBaseName(projectName)}.ambcode.txt`, 'text/plain;charset=utf-8');
+    setText($('#archive-code-status'), '已生成工程代码，共 {count} 个字符', { count: code.length });
+  } catch (error) { setText($('#archive-code-status'), '导出工程代码失败：{error}', { error: error instanceof Error ? error.message : String(error) }); }
+}
+async function copyProjectCode() {
+  if (busy) return;
+  try {
+    const code = $('#archive-code').value.trim() || await createProjectCode();
+    await copyText(code);
+    setText($('#archive-code-status'), '工程代码已复制到剪贴板');
+  } catch (error) { setText($('#archive-code-status'), '复制工程代码失败：{error}', { error: error instanceof Error ? error.message : String(error) }); }
+}
+async function importProjectCode() {
+  if (busy) return;
+  try {
+    const source = $('#archive-code').value.trim();
+    if (!source || source.length > MAX_PROJECT_CODE_LENGTH) throw new Error('工程代码无效或过长');
+    const document = migrateDocument(await decodeProjectCode(source), catalog.index);
+    const restored = await transact(async () => {
+      await restoreProjectDocument(document);
+      commit('从工程代码导入');
+      fit();
+      localSession?.save(true);
+    });
+    if (restored) status('已从工程代码导入工程');
+  } catch (error) { reportError('导入工程代码失败：{error}', error); }
+}
+async function shareProjectCode() {
+  if (busy) return;
+  try {
+    const code = $('#archive-code').value.trim() || await createProjectCode();
+    const url = new URL(location.href);
+    url.searchParams.set('project', code);
+    await copyText(url.toString());
+    setText($('#archive-code-status'), '分享链接已复制到剪贴板');
+  } catch (error) { setText($('#archive-code-status'), '生成分享链接失败：{error}', { error: error instanceof Error ? error.message : String(error) }); }
+}
+$('#archive-code-export').onclick = () => { void exportProjectCode(); };
+$('#archive-code-copy').onclick = () => { void copyProjectCode(); };
+$('#archive-code-import').onclick = () => { void importProjectCode(); };
+$('#archive-code-share').onclick = () => { void shareProjectCode(); };
+let pendingShareDocument = null;
+function clearShareParameter() {
+  const url = new URL(location.href);
+  if (!url.searchParams.has('project')) return;
+  url.searchParams.delete('project');
+  globalThis.history.replaceState(null, '', url.toString());
+}
+async function importSharedProject(document) {
+  const restored = await transact(async () => {
+    await restoreProjectDocument(document);
+    commit('导入分享工程');
+    fit();
+    localSession?.save(true);
+  });
+  if (restored) status('已导入分享工程');
+}
+async function importSharedArchive(document, name) {
+  if (!archiveStore) throw new Error(t('浏览器不支持 IndexedDB'));
+  const archiveName = normalizeProjectName(name || document.projectName || '分享工程');
+  await archiveStore.put({ id: archiveId(), name: archiveName, kind: 'manual', savedAt: Date.now(), document });
+  await refreshArchiveList();
+  status('已将分享工程导入存档 {name}', { name: archiveName });
+}
+function openShareImportDialog(document) {
+  pendingShareDocument = document;
+  $('#share-archive-name').value = normalizeProjectName(document.projectName || '分享工程');
+  if (typeof shareImportDialog.showModal === 'function') shareImportDialog.showModal();
+  else shareImportDialog.setAttribute('open', '');
+}
+$('#share-import-project').onclick = () => shareImportDialog.close('project');
+$('#share-import-archive').onclick = () => shareImportDialog.close('archive');
+$('#share-import-cancel').onclick = () => shareImportDialog.close('cancel');
+shareImportDialog.addEventListener('close', () => {
+  const action = shareImportDialog.returnValue;
+  const document = pendingShareDocument;
+  pendingShareDocument = null;
+  clearShareParameter();
+  if (!document || action === 'cancel') return;
+  if (action === 'project') void importSharedProject(document).catch(error => reportError('导入分享工程失败：{error}', error));
+  if (action === 'archive') void importSharedArchive(document, $('#share-archive-name').value.trim()).catch(error => reportError('导入分享存档失败：{error}', error));
+});
+async function handleShareLink() {
+  const code = new URL(location.href).searchParams.get('project');
+  if (!code) return;
+  try {
+    const document = migrateDocument(await decodeProjectCode(code), catalog.index);
+    openShareImportDialog(document);
+  } catch (error) {
+    clearShareParameter();
+    reportError('分享链接无效：{error}', error);
+  }
+}
+$('#archive-save').onclick = () => { void saveNamedArchive(); };
+void refreshArchiveList();
 function definitionOccupancyRegions(object) {
   const zones = extensionDefinition(object)?.zones || [];
   const regions = [];
@@ -2049,6 +2598,8 @@ async function setGridVisibility(gridId, hidden) {
       plates: topology.plates.map(item => (item.gridId || 'grid-1') === gridId ? setHidden(item, hidden) : item),
     };
     await restore(items, nextTopology, transparencyGroups, subgrids);
+    const reference = referenceImages.get(gridId);
+    if (reference) { reference.hidden = hidden; if (reference.mesh) reference.mesh.visible = !hidden && !referencePreview; }
     commit(hidden ? '隐藏子网格 {id}' : '取消隐藏子网格 {id}', { id: gridId });
   });
 }
@@ -2067,6 +2618,7 @@ async function deleteSubgrid(gridId) {
       links: (topology.links || []).filter(link => !removedComponentIds.has(link.from?.componentId) && !removedComponentIds.has(link.to?.componentId)),
     };
     const nextSubgrids = subgrids.filter(grid => grid.id !== gridId);
+    removeReferenceImage(gridId);
     if (!nextSubgrids.some(grid => grid.id === 'grid-1')) nextSubgrids.unshift({ id: 'grid-1' });
     activeGridId = nextSubgrids.some(grid => grid.id === activeGridId) ? activeGridId : 'grid-1';
     await restore(items, nextTopology, transparencyGroups, nextSubgrids);
@@ -2079,7 +2631,7 @@ $('#subgrid-error-toggle').onchange = syncSubgridErrorMarkers;
 $('#subgrid-view-toggle').onchange = () => {
   subgridView = $('#subgrid-view-toggle').checked;
   applySubgridViewMaterials();
-  replaceTopologyVisual(buildTopologyVisual(topology, componentEntries()));
+  replaceTopologyVisual(prepareTopologyVisual(topology, componentEntries()));
   renderSubgridList();
 };
 $('#subgrid-create-btn').onclick = () => {
@@ -2131,6 +2683,7 @@ async function createObject(data) {
   if (data.mirror?.axis) reflectObject(object, data.mirror.axis);
   configureOpaqueDepthLayer(object, RENDER_DEPTH_LAYERS.component, { key: `component:${data.id}` });
   object.visible = !data.hidden;
+  object.traverse(child => { if (child.isMesh && !child.geometry.boundingBox) child.geometry.computeBoundingBox(); });
   return object;
 }
 function applyComponentPaint(object, color) {
@@ -2139,6 +2692,7 @@ function applyComponentPaint(object, color) {
   object.traverse(child => {
     if (!child.isMesh) return;
     if (child.userData.source?.includes('/car_wheel')) return;
+    if (child.userData.connectionInterface) return;
     for (const material of Array.isArray(child.material) ? child.material : [child.material]) material.color.set(value);
   });
   return true;
@@ -2285,11 +2839,15 @@ async function updatePlacementPreview(point) {
     if (request === placementPreviewRequest) { placementPreviewLoadingType = ''; reportError('放置虚影加载失败：{error}', error); }
   }
 }
-async function restore(items, nextTopology = topology, nextTransparencyGroups = transparencyGroups, nextSubgrids = subgrids, nextProjectName = projectName) {
+async function restore(items, nextTopology = topology, nextTransparencyGroups = transparencyGroups, nextSubgrids = subgrids, nextProjectName = projectName, reuseComponents = true) {
   if (referencePreview) setReferencePreview(false);
   nextTransparencyGroups = pruneTransparencyGroups(nextTransparencyGroups, items, nextTopology);
-  const candidate = validateDocument(project(items, nextTopology, nextTransparencyGroups, nextSubgrids, nextProjectName), catalog.index);
-  const next = [];
+  const componentIds = new Set(items.map(item => item.id));
+  const prevalidatedTopology = { ...nextTopology, links: pruneInvalidConnections(nextTopology?.links || [], componentIds) };
+  let candidate = validateDocument(project(items, prevalidatedTopology, nextTransparencyGroups, nextSubgrids, nextProjectName), catalog.index);
+  const current = reuseComponents ? new Map(snapshot().map((item, index) => [item.id, { object: objects[index], signature: visualSignature(item) }])) : new Map();
+  const created = [];
+  let next = [];
   let visual;
   try {
     // Native vehicles commonly reuse a small set of definitions many times.
@@ -2298,18 +2856,32 @@ async function restore(items, nextTopology = topology, nextTransparencyGroups = 
     await Promise.all([...new Set(candidate.objects.map(data => data.type))].map(async type => {
       const definition = await catalog.definition(type); definitions.set(type, definition);
     }));
-    next.push(...await Promise.all(candidate.objects.map(data => createObject(data))));
-    visual = buildTopologyVisual(candidate.topology, componentEntries(candidate.objects));
-  } catch (error) { next.forEach(disposeObject); throw error; }
+    const sanitizedTopology = sanitizeConnectionTopology(candidate.topology, candidate.objects);
+    candidate = validateDocument(project(candidate.objects, sanitizedTopology, candidate.visibilityGroups || [], candidate.grids, candidate.projectName), catalog.index);
+    const plan = planVisualUpdate(candidate.objects, current, item => item.id, visualSignature);
+    const results = await Promise.allSettled(plan.changed.map(async data => {
+      const object = await createObject(data); created.push(object); return object;
+    }));
+    const failure = results.find(result => result.status === 'rejected');
+    if (failure) throw failure.reason;
+    const replacements = new Map(created.map(object => [object.userData.id, object]));
+    next = candidate.objects.map(data => plan.retained.get(data.id) || replacements.get(data.id));
+    visual = prepareTopologyVisual(candidate.topology, componentEntries(candidate.objects));
+  } catch (error) { created.forEach(disposeObject); throw error; }
   cancelTopologyDraft();
   transform.detach(); selected = null; selectedIds.clear(); selectedTopologyIds.clear(); selectedSubgridId = null;
-  objects.forEach(o => { scene.remove(o); disposeObject(o); });
-  objects = next; objects.forEach(o => scene.add(o));
+  const retained = new Set(next);
+  objects.forEach(o => { if (!retained.has(o)) { scene.remove(o); disposeObject(o); } });
+  objects = next; created.forEach(o => scene.add(o));
   topology = candidate.topology;
   lastSubgridAnalysis = null;
   setProjectName(candidate.projectName);
   transparencyGroups = candidate.visibilityGroups || [];
   subgrids = candidate.grids || [{ id: 'grid-1' }];
+  const validReferenceGridIds = new Set(subgrids.map(grid => grid.id));
+  for (const object of candidate.objects) validReferenceGridIds.add(object.gridId || 'grid-1');
+  for (const item of [...candidate.topology.nodes, ...candidate.topology.edges, ...candidate.topology.plates]) validReferenceGridIds.add(item.gridId || 'grid-1');
+  for (const [gridId, record] of referenceImages) if (!validReferenceGridIds.has(gridId)) { disposeReferenceImage(record); referenceImages.delete(gridId); }
   if (!subgrids.some(grid => grid.id === activeGridId)) activeGridId = subgrids[0].id;
   applySubgridViewMaterials();
   replaceTopologyVisual(visual);
@@ -2349,7 +2921,7 @@ function centerImportedVehicleGeometry() {
       points: (link.points || []).map(shiftedPoint),
     })),
   };
-  replaceTopologyVisual(buildTopologyVisual(topology, componentEntries()));
+  replaceTopologyVisual(prepareTopologyVisual(topology, componentEntries()));
   refreshConnectionPorts();
   inspect(); refresh(); renderSubgridList();
   return true;
@@ -2438,6 +3010,55 @@ async function remove(object, { selectedGroup = true } = {}) {
   select(null);
   commit('删除组件');
   status('已删除 {count} 个组件', { count: result.removed.length });
+}
+async function removeSelection() {
+  const items = snapshot();
+  const componentIds = new Set(selectedObjectIds());
+  const selectedKeys = new Set(selectedTopologyIds);
+  if (selectedTopologyNode) selectedKeys.add(topologySelectionKey('node', selectedTopologyNode));
+  if (!componentIds.size && !selectedKeys.size) return false;
+  if (mirrorMode.active) {
+    for (const id of [...componentIds]) {
+      const counterpart = mirroredComponentId(id, items);
+      if (counterpart) componentIds.add(counterpart);
+    }
+  }
+  const nodeIds = new Set();
+  const edgeIds = new Set();
+  const plateIds = new Set();
+  const linkIds = new Set();
+  for (const key of selectedKeys) {
+    const separator = key.indexOf(':');
+    if (separator < 0) continue;
+    const kind = key.slice(0, separator); const id = key.slice(separator + 1);
+    if (kind === 'node') nodeIds.add(id);
+    if (kind === 'edge') edgeIds.add(id);
+    if (kind === 'plate') plateIds.add(id);
+    if (kind === 'link') linkIds.add(id);
+  }
+  if (mirrorMode.active) {
+    for (const id of [...nodeIds]) { const counterpart = mirroredNodeId(id); if (counterpart) nodeIds.add(counterpart); }
+    for (const id of [...edgeIds]) { const counterpart = mirroredEdgeId(id); if (counterpart) edgeIds.add(counterpart); }
+    for (const id of [...plateIds]) { const counterpart = mirroredPlateId(id); if (counterpart) plateIds.add(counterpart); }
+    for (const id of [...linkIds]) { const counterpart = mirroredLinkId(id); if (counterpart) linkIds.add(counterpart); }
+  }
+  let nextTopology = structuredClone(topology);
+  for (const id of nodeIds) if (nextTopology.nodes.some(node => node.id === id)) nextTopology = removeNode(nextTopology, id);
+  for (const id of edgeIds) if (nextTopology.edges.some(edge => edge.id === id)) nextTopology = removeEdge(nextTopology, id);
+  for (const id of plateIds) if (nextTopology.plates.some(plate => plate.id === id)) nextTopology = removePlate(nextTopology, id);
+  const removedComponentLinks = new Set(componentIds);
+  nextTopology.links = (nextTopology.links || []).filter(link => !linkIds.has(link.id)
+    && !removedComponentLinks.has(link.from?.componentId) && !removedComponentLinks.has(link.to?.componentId));
+  const result = removeObjects(items, componentIds);
+  const cleanedTopology = pruneUnusedTopology(nextTopology);
+  const structuralBefore = topology.nodes.length + topology.edges.length + topology.plates.length + (topology.links || []).length;
+  const structuralAfter = cleanedTopology.nodes.length + cleanedTopology.edges.length + cleanedTopology.plates.length + (cleanedTopology.links || []).length;
+  const removedCount = result.removed.length + Math.max(0, structuralBefore - structuralAfter);
+  if (!removedCount) return false;
+  await restore(result.objects, cleanedTopology, transparencyGroups, subgrids);
+  commit('\u5220\u9664\u5df2\u9009\u5bf9\u8c61', { count: removedCount });
+  status('\u5df2\u5220\u9664\u5bf9\u8c61 {count}', { count: removedCount });
+  return true;
 }
 async function applyStructural(result, nextSelectedIds, message, params = {}) {
   await restore(result.objects, topology);
@@ -2680,6 +3301,7 @@ $('#mirror-offset-input').addEventListener('change', event => setMirrorOffsetCel
 $('#mirror-hide-plane').addEventListener('change', event => {
   mirrorMode = { ...mirrorMode, hidePlane: event.target.checked };
   updateMirrorGuide();
+  scheduleSettings();
 });
 function moveMirrorGuideFromRay() {
   const nearest = raycaster.ray.closestPointToPoint(mirrorGuide.position, new THREE.Vector3());
@@ -2722,15 +3344,19 @@ function inspect() {
   const host = $('#inspector-content'); host.replaceChildren();
   if (selectedIds.size && selectedTopologyIds.size) {
     const summary = document.createElement('strong'); summary.textContent = t('已选择 {components} 个组件和 {structural} 个结构对象', { components: selectedIds.size, structural: selectedTopologyIds.size }); host.append(summary);
-    const hint = document.createElement('p'); hint.className = 'status'; hint.textContent = t('复制、镜像和删除会作用于选中的组件；结构对象保留高亮以供参考。'); host.append(hint);
+    const hint = document.createElement('p'); hint.className = 'status'; hint.textContent = t('\u9009\u4e2d\u5bf9\u8c61\u53ef\u6279\u91cf\u5220\u9664\u6216\u6d82\u8272'); host.append(hint);
+    const button = document.createElement('button'); button.className = 'full'; button.textContent = t('\u5220\u9664\u5df2\u9009\u5bf9\u8c61'); button.id = 'delete-selected';
+    button.onclick = () => { void transact(removeSelection); }; host.append(button);
     return;
   }
   if (selectedTopologyIds.size) {
     const selectedTopology = selectedTopologyObjects();
     const summary = document.createElement('strong'); summary.textContent = t('已选择 {count} 个结构对象', { count: selectedTopology.length }); host.append(summary);
     const kinds = selectedTopology.map(object => object.userData.topology === 'edge' ? t('梁') : object.userData.topology === 'link' ? t('连接') : t('面板'));
-    const hint = document.createElement('p'); hint.className = 'status'; hint.textContent = t('Shift 点击可同时选择梁和面板。结构编辑命令尚不支持批量变换。'); host.append(hint);
+    const hint = document.createElement('p'); hint.className = 'status'; hint.textContent = t('\u9009\u4e2d\u5bf9\u8c61\u53ef\u6279\u91cf\u5220\u9664\u6216\u6d82\u8272'); host.append(hint);
     const selectedKinds = document.createElement('p'); selectedKinds.className = 'status'; selectedKinds.textContent = kinds.join(' · '); host.append(selectedKinds);
+    const button = document.createElement('button'); button.className = 'full'; button.textContent = t('\u5220\u9664\u5df2\u9009\u5bf9\u8c61'); button.id = 'delete-selected';
+    button.onclick = () => { void transact(removeSelection); }; host.append(button);
     return;
   }
   if (!selected) { host.textContent = t('选择组件查看属性。按住 Shift 点击可多选。'); return; }
@@ -2738,9 +3364,9 @@ function inspect() {
     const summary = document.createElement('strong'); summary.textContent = t('已选择 {count} 个组件', { count: selectedIds.size }); host.append(summary);
     const hint = document.createElement('p'); hint.className = 'status'; hint.textContent = selectedSubgridId
       ? t('已选择导入子网格；拖动视口中的移动手柄可整体调整组件、结构和内部连接。')
-      : t('可批量复制、镜像、拆分或删除。批量变换和框选尚未实现。'); host.append(hint);
+      : t('\u9009\u4e2d\u5bf9\u8c61\u53ef\u6279\u91cf\u590d\u5236\u3001\u955c\u50cf\u3001\u5220\u9664\u6216\u6d82\u8272'); host.append(hint);
     const button = document.createElement('button'); button.className = 'full'; button.textContent = t('删除已选组件'); button.id = 'delete-selected';
-    button.onclick = () => transact(async () => { await remove(selected); }); host.append(button);
+    button.onclick = () => { void transact(removeSelection); }; host.append(button);
     return;
   }
   const object = selected;
@@ -2793,7 +3419,7 @@ function inspect() {
   renderComponentProperties(host, object);
   renderNativeAccessoryProperty(host, object);
   renderDefinitionEditor(host, object, def);
-  const button = document.createElement('button'); button.className = 'full'; button.textContent = t('删除组件'); button.id = 'delete-selected'; button.onclick = () => transact(async () => { await remove(object); }); host.append(button);
+  const button = document.createElement('button'); button.className = 'full'; button.textContent = t('删除组件'); button.id = 'delete-selected'; button.onclick = () => { void transact(removeSelection); }; host.append(button);
 }
 
 function renderComponentExtension(host, object, definition) {
@@ -3058,8 +3684,8 @@ function renderNativeAccessoryProperty(host, object) {
   const heading = document.createElement('h3'); heading.textContent = getLocale() === 'zh' ? (filter ? '已安装滤芯' : battery ? '已安装电池' : '已安装轮胎') : (filter ? 'Installed filter' : battery ? 'Installed battery' : 'Installed tyre'); section.append(heading);
   const hint = document.createElement('p'); hint.className = 'status';
   hint.textContent = getLocale() === 'zh'
-    ? (filter ? '滤芯保存在游戏 filter 记录的 acc.item 中，并非独立组件。' : battery ? '电池保存在游戏 battery 记录的 acc.item 中，并非独立组件。' : '轮胎保存在游戏 wheel 记录的 acc.item 中，并非独立组件。')
-    : (filter ? 'The filter media is stored in the native filter record at acc.item, not as an independent component.' : battery ? 'The battery is stored in the game battery record at acc.item, not as an independent component.' : 'The tyre is stored in the game wheel record at acc.item, not as an independent component.');
+    ? (filter ? '滤芯保存在游戏 filter 记录的 acc.item 中，并非独立组件。' : battery ? '电池保存在游戏 battery 记录的 acc.item 中，并非独立组件。' : '轮胎保存在游戏 wheel 记录的 element.acc.item 中，并非独立组件。')
+    : (filter ? 'The filter media is stored in the native filter record at acc.item, not as an independent component.' : battery ? 'The battery is stored in the game battery record at acc.item, not as an independent component.' : 'The tyre is stored in the game wheel record at element.acc.item, not as an independent component.');
   section.append(hint);
   const row = document.createElement('div'); row.className = 'property component-property';
   const label = document.createElement('label'); label.textContent = getLocale() === 'zh' ? (filter ? '滤芯' : battery ? '电池' : '轮胎') : (filter ? 'Filter' : battery ? 'Battery' : 'Tyre');
@@ -3295,17 +3921,18 @@ function relativePlacementBounds(object) {
 function placementPoint() {
   const targets = constructionHitTargets();
   return resolvePlacementPoint(raycaster, targets, plane, {
+    picker: placementPicker,
     adjacentTargets: objects.filter(object => object.visible),
     adjacentPadding: CELL_SIZE_WORLD / 2,
     placementBounds: relativePlacementBounds(placementPreview),
   });
 }
 function constructionHitTargets() {
-  // Components, edges and panels all participate in the same nearest-hit
-  // placement query. Nodes stay a separate high-precision endpoint target.
+  // Connections are selectable through their own picker, but are not solid
+  // placement surfaces and must not intercept construction raycasts.
   return [
     ...objects.filter(object => object.visible),
-    ...topologyLayer.children.filter(object => object.visible && object.userData.topology !== 'node'),
+    ...topologyLayer.children.filter(object => object.visible && ['edge', 'plate'].includes(object.userData.topology)),
   ];
 }
 function pick({ ignoreComponentFilter = false } = {}) {
@@ -3330,16 +3957,7 @@ function pickTopologyNode(includeHidden = false, maxPixels = 22) {
   if (!selectableKinds.node && !includeHidden) return null;
   if ((!showNodes || !topologyHelpersVisible) && !includeHidden) return null;
   const rect = renderer.domElement.getBoundingClientRect();
-  let result = null; let best = maxPixels; let nearest = Infinity;
-  for (const node of topology.nodes) {
-    const world = new THREE.Vector3(node.position.x, node.position.y, node.position.z);
-    const projected = world.clone().project(camera);
-    if (projected.z < -1 || projected.z > 1) continue;
-    const distance = Math.hypot((projected.x - pointer.x) * rect.width / 2, (projected.y - pointer.y) * rect.height / 2);
-    const depth = world.distanceTo(camera.position);
-    if (distance < best || (distance === best && depth < nearest)) { result = node.id; best = distance; nearest = depth; }
-  }
-  return result;
+  return nodePicker.pick(topology.nodes, camera, pointer, rect.width, rect.height, maxPixels);
 }
 function pickSelectionTarget({ anchorFallback = true } = {}) {
   const roots = [
@@ -3433,8 +4051,8 @@ function pickLinkPoint() {
   }
   return nearest;
 }
-function pickEdgeByScreenTolerance(maxPixels = 18) {
-  if (!selectableKinds.edge) return null;
+function pickEdgeByScreenTolerance(maxPixels = 18, respectFilter = true) {
+  if (respectFilter && !selectableKinds.edge) return null;
   const rect = renderer.domElement.getBoundingClientRect();
   const toScreen = value => {
     const projected = value.clone().project(camera);
@@ -3599,6 +4217,56 @@ function paintTopology() {
   commitTopology({ ...topology, plates: topology.plates.map(plate => ids.has(plate.id) ? { ...plate, [field]: color } : plate) }, side === 'back' ? '已为面板背面设置颜色 {color}' : '已为面板前面设置颜色 {color}', { color });
   hoveredObject = null; updateInteractionHighlights();
 }
+function batchPaintSelection() {
+  if (busy || (!selectedIds.size && !selectedTopologyIds.size && !selectedTopologyNode)) return false;
+  const color = currentPaintColor();
+  if (!color) { status('颜色必须是 #RRGGBB 格式'); return false; }
+  const colorIndex = nearestNativePaintIndex(color);
+  if (colorIndex === null) return false;
+  const items = snapshot();
+  const componentIds = new Set(selectedObjectIds());
+  const selectedKeys = new Set(selectedTopologyIds);
+  if (mirrorMode.active) {
+    for (const id of [...componentIds]) { const counterpart = mirroredComponentId(id, items); if (counterpart) componentIds.add(counterpart); }
+  }
+  const edgeIds = new Set(); const plateIds = new Set(); const linkIds = new Set();
+  for (const key of selectedKeys) {
+    const separator = key.indexOf(':');
+    if (separator < 0) continue;
+    const kind = key.slice(0, separator); const id = key.slice(separator + 1);
+    if (kind === 'edge') edgeIds.add(id);
+    if (kind === 'plate') plateIds.add(id);
+    if (kind === 'link') linkIds.add(id);
+  }
+  if (mirrorMode.active) {
+    for (const id of [...edgeIds]) { const counterpart = mirroredEdgeId(id); if (counterpart) edgeIds.add(counterpart); }
+    for (const id of [...plateIds]) { const counterpart = mirroredPlateId(id); if (counterpart) plateIds.add(counterpart); }
+    for (const id of [...linkIds]) { const counterpart = mirroredLinkId(id); if (counterpart) linkIds.add(counterpart); }
+  }
+  const componentTargets = objects.filter(object => componentIds.has(object.userData.id));
+  const edgeTargets = topology.edges.filter(edge => edgeIds.has(edge.id));
+  const plateTargets = topology.plates.filter(plate => plateIds.has(plate.id));
+  const linkTargets = (topology.links || []).filter(link => linkIds.has(link.id));
+  const paintedCount = componentTargets.length + edgeTargets.length + plateTargets.length + linkTargets.length;
+  if (!paintedCount) {
+    status('选中对象不支持涂色');
+    return false;
+  }
+  void transact(async () => {
+    for (const object of componentTargets) setComponentPaintColor(object, color, colorIndex);
+    const nextTopology = {
+      ...topology,
+      edges: topology.edges.map(edge => edgeIds.has(edge.id) ? { ...edge, color } : edge),
+      plates: topology.plates.map(plate => plateIds.has(plate.id) ? { ...plate, color_front: color, color_back: color } : plate),
+      links: (topology.links || []).map(link => linkIds.has(link.id) ? { ...link, paintColor: color } : link),
+    };
+    if (edgeTargets.length || plateTargets.length || linkTargets.length) commitTopology(nextTopology, '为选中对象设置颜色 {color}', { color });
+    else commit('为选中对象设置颜色 {color}', { color });
+    hoveredObject = null; updateInteractionHighlights();
+    status('已为选中对象设置颜色 {color}', { color });
+  });
+  return true;
+}
 function hidePickedObject() {
   const selectedComponents = selectedObjects().filter(object => object.visible);
   if (selectedComponents.length) {
@@ -3729,6 +4397,7 @@ function edgePoint() {
   // The endpoint node occupies a full grid cell, so keep its visible cube
   // outside the hit surface using the same bounds-aware rule as components.
   const candidate = node ? null : resolvePlacementPoint(raycaster, constructionHitTargets(), plane, {
+    picker: placementPicker,
     adjacentTargets: objects.filter(object => object.visible),
     adjacentPadding: CELL_SIZE_WORLD / 2,
     hitPadding: 0,
@@ -3750,7 +4419,7 @@ function updateEdgePreview(point) {
     edgeRuler.hide();
     edgeAnchor.visible = !!point;
     if (point) edgeAnchor.position.copy(point);
-    setText(buildStatus, point ? '姊?1 鏍?路 鐐瑰嚮璧风偣' : '姊?1 鏍?路 鏃犳湁鏁存牸璧风偣');
+    setText(buildStatus, point ? '梁 1 格 · 点击起点' : '梁 1 格 · 无有效起点');
     return;
   }
   edgePreview.visible = !!point && updateEdgeMesh(edgePreview, edgeDraft.start, point, { size: edgeSize });
@@ -3773,9 +4442,9 @@ function nodePoint() {
   return projectBuildPoint(raycaster.ray, nodeMoveFrame || cameraBuildFrame(camera, controls.target));
 }
 function commitTopology(next, message, params = {}) {
-  const cleaned = pruneUnusedTopology(next);
+  const cleaned = pruneUnusedTopology(sanitizeConnectionTopology(next, snapshot()));
   const candidate = validateDocument(project(snapshot(), cleaned, transparencyGroups, subgrids), catalog.index);
-  const visual = buildTopologyVisual(candidate.topology, componentEntries(candidate.objects));
+  const visual = prepareTopologyVisual(candidate.topology, componentEntries(candidate.objects));
   topology = candidate.topology;
   if (selectedTopologyNode && !topology.nodes.some(node => node.id === selectedTopologyNode)) clearNodeSelection();
   subgrids = candidate.grids || subgrids;
@@ -3815,7 +4484,12 @@ function finishPlate(type = 'plate') {
     const color = currentPaintColor();
     const result = command(topology.plates, plateEdgeIds, topology.edges, topology.nodes, { normalOffset: CELL_SIZE_WORLD / 2, gridId: activeGridId, ...(color ? { color_front: color, color_back: color } : {}) });
     const positions = new Map(topology.nodes.map(node => [node.id, new THREE.Vector3(node.position.x, node.position.y, node.position.z)]));
-    result.plate.normalOffset = cameraFacingPlateOffset(result.plate.nodeIds, positions, camera.position, CELL_SIZE_WORLD / 2);
+    const cameraOffset = cameraFacingPlateOffset(result.plate.nodeIds, positions, camera.position, CELL_SIZE_WORLD / 2);
+    // The game derives a plate's front side from its node winding. Align the
+    // newly created loop with the side visible to the user before exporting;
+    // the X-reflection in native export will then preserve this orientation.
+    if (cameraOffset < 0) result.plate.nodeIds.reverse();
+    result.plate.normalOffset = Math.abs(cameraOffset);
     const surfaceDirection = cameraFacingPlateDirection(result.plate.nodeIds, positions, camera.position);
     result.plate.surfaceDirection = { x: surfaceDirection.x, y: surfaceDirection.y, z: surfaceDirection.z };
     const next = addMirroredPlate({ ...topology, plates: result.plates }, result.plate);
@@ -3903,6 +4577,75 @@ function handleEdgeClick(event) {
   commitTopology({ ...mirrored, nodes: mirrored.nodes.map(node => node.gridId ? node : { ...node, gridId: activeGridId }) }, mirrorMode.active ? '已创建实体梁及其镜像' : '已创建 1 格实体梁');
   cancelEdge();
 }
+function constructionEdgeSplitTarget() {
+  const hit = pickEdgeByScreenTolerance(24, false);
+  if (!hit) return null;
+  const edge = topology.edges.find(value => value.id === hit.id);
+  if (!edge) return null;
+  const endpoints = [edge.a, edge.b].map(id => topology.nodes.find(node => node.id === id));
+  if (endpoints.some(node => !node)) return null;
+  const rect = renderer.domElement.getBoundingClientRect();
+  const endpointNearPointer = endpoints.some(node => {
+    const projected = new THREE.Vector3(node.position.x, node.position.y, node.position.z).project(camera);
+    // Node cubes are deliberately larger than the visible beam profile, so
+    // endpoint clicks need a wider priority zone than beam center picking.
+    return Math.hypot((projected.x - pointer.x) * rect.width / 2, (projected.y - pointer.y) * rect.height / 2) <= 40;
+  });
+  // Endpoint clicks should continue to use the existing node snap path.
+  if (endpointNearPointer) return null;
+  let candidates;
+  try { candidates = edgeSplitPoints(topology.nodes, edge.id, topology.edges); } catch { return { edge, point: null }; }
+  if (!candidates.length) return { edge, point: null };
+  const a = new THREE.Vector3(endpoints[0].position.x, endpoints[0].position.y, endpoints[0].position.z);
+  const b = new THREE.Vector3(endpoints[1].position.x, endpoints[1].position.y, endpoints[1].position.z);
+  const center = new THREE.Vector3();
+  raycaster.ray.distanceSqToSegment(a, b, new THREE.Vector3(), center);
+  const point = candidates.map(value => new THREE.Vector3(value.x, value.y, value.z))
+    .reduce((closest, candidate) => candidate.distanceToSquared(center) < closest.distanceToSquared(center) ? candidate : closest);
+  return { edge, point };
+}
+
+function splitConstructionEdgeState(target, state = topology) {
+  if (!target?.point) return null;
+  const result = splitEdge(state.nodes, state.edges, target.edge.id, target.point, state.plates);
+  return { ...state, nodes: result.nodes, edges: result.edges, plates: result.plates, node: result.node };
+}
+
+function beginConstructionEdgeDraft(point, event) {
+  edgeDraft = { start: point.clone(), frame: cameraBuildFrame(camera, point), axis: null };
+  edgePointer = { clientX: event.clientX, clientY: event.clientY };
+  edgeAnchor.position.copy(point); edgeAnchor.visible = true;
+  edgeRuler.show(point, point);
+  setText(buildStatus, '梁 1 格 · 点击终点 · Esc 取消');
+  status('起点已定位；移动鼠标预览实体梁，再次点击完成');
+}
+
+function handleEdgeClickWithBeamAnchors(event) {
+  if (event.altKey) return splitPickedEdge();
+  let working = topology;
+  const splitTarget = constructionEdgeSplitTarget();
+  if (splitTarget && !splitTarget.point) {
+    status('该梁没有可用的整数格内部分割点');
+    return;
+  }
+  if (splitTarget?.point) working = splitConstructionEdgeState(splitTarget, working);
+  let point = splitTarget?.point ? working.node.position : edgePoint();
+  if (!point) { status('当前位置无法投影到建造平面，请调整视角或按 Esc 重新开始'); return; }
+  point = new THREE.Vector3(point.x, point.y, point.z);
+  if (!edgeDraft) {
+    if (splitTarget?.point) commitTopology(working, '已切分实体梁并新增节点');
+    beginConstructionEdgeDraft(point, event);
+    return;
+  }
+  const color = currentPaintColor();
+  const existingNodeIds = new Set(working.nodes.map(node => node.id));
+  const created = createEdgeFromPoints(working, edgeDraft.start, point, { ...(color ? { color } : {}), size: edgeSize, gridId: activeGridId });
+  const withGridNodes = { ...created, nodes: created.nodes.map(node => existingNodeIds.has(node.id) ? node : { ...node, gridId: activeGridId }) };
+  const mirrored = addMirroredEdge(withGridNodes, edgeDraft.start, point);
+  commitTopology({ ...mirrored, nodes: mirrored.nodes.map(node => node.gridId ? node : { ...node, gridId: activeGridId }) }, mirrorMode.active ? '已创建实体梁及其镜像' : '已创建 1 格实体梁');
+  cancelEdge();
+}
+
 function handleConnectionClick() {
   const endpoint = pickConnectionPort();
   if (!endpoint) { status('连接工具需要点击组件端口'); return; }
@@ -3918,6 +4661,15 @@ function handleConnectionClick() {
   $('#connection-to-port').value = String(endpoint.port);
   const kind = $('#connection-kind').value;
   const componentIds = new Set(snapshot().map(item => item.id));
+  if (kind === 'mechanical') {
+    const components = componentEntries();
+    const fromRole = mechanicalEndpointRole(connectionDraft, components);
+    const toRole = mechanicalEndpointRole(endpoint, components);
+    if ((fromRole === 'input' && toRole === 'input') || (fromRole === 'output' && toRole === 'output')) {
+      status('机械连接必须连接输出端与输入端');
+      return;
+    }
+  }
   const link = orientMechanicalLink({ kind, from: connectionDraft, to: endpoint, points: kind === 'belt' ? [] : connectionDraft.points || [] }, componentEntries(), definitions);
   const result = createLink(topology.links || [], link, componentIds);
   const links = addMirroredLink(result.links, result.link);
@@ -4006,8 +4758,9 @@ renderer.domElement.addEventListener('pointerdown', event => {
   dragOccurred = transform.dragging;
   down = { x: event.clientX, y: event.clientY };
 });
-renderer.domElement.addEventListener('pointermove', event => {
-  if (busy) return;
+const pointerMoveTask = createFrameTask(processPointerMove);
+function processPointerMove(event) {
+  if (busy || transform.dragging || orbitInteracting) return;
   if (selectionBoxDraft) {
     const left = Math.min(selectionBoxDraft.startX, event.clientX) - selectionBoxDraft.viewportRect.left;
     const top = Math.min(selectionBoxDraft.startY, event.clientY) - selectionBoxDraft.viewportRect.top;
@@ -4045,9 +4798,12 @@ renderer.domElement.addEventListener('pointermove', event => {
   updateEdgePreview(point);
   void updatePlacementPreview(point);
   if (tool === 'subgrid-place') setImportedSubgridPreviewPoint(point);
-});
-renderer.domElement.addEventListener('pointerleave', () => { pointerInCanvas = false; hoveredObject = null; hideConnectionPortTooltip(); updateInteractionHighlights(); edgePreview.visible = false; edgeAnchor.visible = false; edgeRuler.hide(); if (placementPreview) placementPreview.visible = false; placementIndicator.hidden = true; if (importedSubgridDraft?.preview) importedSubgridDraft.preview.visible = false; });
+}
+renderer.domElement.addEventListener('pointermove', event => pointerMoveTask.schedule(event));
+renderer.domElement.addEventListener('pointercancel', () => pointerMoveTask.cancel());
+renderer.domElement.addEventListener('pointerleave', () => { pointerMoveTask.cancel(); pointerInCanvas = false; hoveredObject = null; hideConnectionPortTooltip(); updateInteractionHighlights(); edgePreview.visible = false; edgeAnchor.visible = false; edgeRuler.hide(); if (placementPreview) placementPreview.visible = false; placementIndicator.hidden = true; if (importedSubgridDraft?.preview) importedSubgridDraft.preview.visible = false; });
 renderer.domElement.addEventListener('pointerup', event => {
+  pointerMoveTask.cancel();
   if (selectionBoxDraft) {
     const start = selectionBoxDraft; selectionBoxDraft = null;
     if (renderer.domElement.hasPointerCapture(event.pointerId)) renderer.domElement.releasePointerCapture(event.pointerId);
@@ -4069,7 +4825,7 @@ renderer.domElement.addEventListener('pointerup', event => {
   pointerRay(event);
   if (event.altKey && copyPointedComponentToPlacement()) return;
   if (tool === 'edge') {
-    try { handleEdgeClick(event); } catch (error) { reportError('梁操作失败：{error}', error); }
+    try { handleEdgeClickWithBeamAnchors(event); } catch (error) { reportError('梁操作失败：{error}', error); }
     return;
   }
   if (tool === 'connect') {
@@ -4181,6 +4937,7 @@ function setReferencePreview(value) {
   // Reference preview only hides editor helpers. Keep the user's configured
   // background so dark wheels, suspension and engine parts remain visible.
   scene.background.set(settings.backgroundColor);
+  for (const record of referenceImages.values()) if (record.mesh) record.mesh.visible = !referencePreview && !record.hidden;
   grid.visible = !referencePreview && gridPreferenceVisible && topologyHelpersVisible;
   transform.getHelper().visible = !referencePreview;
   updateConnectionVisibility();
@@ -4227,6 +4984,10 @@ const cameraLightIntensityOutput = document.createElement('output'); cameraLight
 cameraLightIntensityRow.append(cameraLightIntensityLabel, cameraLightIntensityInput, cameraLightIntensityOutput);
 cameraLightSettings.append(cameraLightToggle, cameraLightIntensityRow); renderSettingsFields.prepend(cameraLightSettings);
 gridFields.append(renderSettingsFields);
+mountRenderQualitySettings(gridFields, settings.renderQuality, quality => {
+  settings.renderQuality = quality; renderQuality.setQuality(quality);
+  renderStats.hidden = !quality.showStats; lastRenderTime = -Infinity; scheduleSettings();
+}, () => renderQuality.reloadRequired);
 // Panel paint always follows the ray-visible side; keeping a manual front/back
 // selector would let a click silently colour the face away from the player.
 $('#paint-side')?.closest('.property')?.remove();
@@ -4310,7 +5071,7 @@ $('#edge-lengths-visible').addEventListener('change', updateEdgeLengthVisibility
 function updateEdgeOutlineVisibility() {
   settings.edgeOutlinesVisible = normalizeSettings({ version: 1, edgeOutlinesVisible: $('#edge-outlines-visible').checked }).edgeOutlinesVisible;
   setEdgeOutline(edgePreview, settings.edgeOutlinesVisible);
-  replaceTopologyVisual(buildTopologyVisual(topology, componentEntries()));
+  replaceTopologyVisual(prepareTopologyVisual(topology, componentEntries()));
   scheduleSettings();
 }
 $('#edge-outlines-visible').addEventListener('change', updateEdgeOutlineVisibility);
@@ -4491,7 +5252,7 @@ function updateCatalogCardSize(value = $('#catalog-card-size').value) {
 }
 $('#catalog-card-size').addEventListener('input', () => { updateCatalogCardSize(); scheduleSettings(); });
 $('#undo-btn').onclick = undo; $('#redo-btn').onclick = redo;
-$('#new-btn').onclick = () => { if (!busy && (!objects.length || confirm(t('清空当前工程？此操作可以撤销。')))) transact(async () => { activeGridId = 'grid-1'; nativeSceneShift.set(0, 0, 0); await restore([], { nodes: [], edges: [], plates: [], links: [] }, [], [{ id: 'grid-1' }], DEFAULT_PROJECT_NAME); commit(); }); };
+$('#new-btn').onclick = () => { if (!busy && (!objects.length || confirm(t('清空当前工程？此操作可以撤销。')))) transact(async () => { activeGridId = 'grid-1'; nativeSceneShift.set(0, 0, 0); for (const record of referenceImages.values()) disposeReferenceImage(record); referenceImages.clear(); await restore([], { nodes: [], edges: [], plates: [], links: [] }, [], [{ id: 'grid-1' }], DEFAULT_PROJECT_NAME); commit(); }); };
 
 function download(content, name, type) {
   const url = URL.createObjectURL(new Blob([content], { type }));
@@ -4530,7 +5291,7 @@ $('#mesh-input').onchange = e => {
   transact(async () => {
     const n = library.register(files);
     setText($('#asset-status'), '本地已登记 {count} 个 Mesh。按组件请求解码，不上传。材质、动态装配尚未还原。', { count: n });
-    await restore(snapshot()); fit(); status('模型库已登记；选择组件并在视口点击放置');
+    await restore(snapshot(), topology, transparencyGroups, subgrids, projectName, false); fit(); status('模型库已登记；选择组件并在视口点击放置');
   });
 };
 
@@ -4739,8 +5500,7 @@ window.addEventListener('keydown', e => {
   if (binding) setTool(binding[0]);
   if (key === 'delete' || key === 'backspace') {
     e.preventDefault();
-    if (selectedTopologyNode) deleteTopology('node', selectedTopologyNode);
-    else transact(async () => { await remove(selected); });
+    void transact(removeSelection);
   }
   if (key === 'f') fit();
 });
@@ -4791,15 +5551,16 @@ function showBackupStatus({ state, savedAt, detail }) {
   const labels = { ready: '自动保存：每分钟', restored: '已恢复本地工程', recovered: '已从上一份有效备份恢复', saved: '已自动保存 {time}', error: '本地恢复失败：{detail}', 'write-error': '本地保存失败，请下载工程：{detail}', conflict: '另一标签页已保存，自动保存已暂停' };
   setText(backupStatus, labels[state], () => ({ detail, time: savedAt ? new Date(savedAt).toLocaleTimeString(getLocale() === 'zh' ? 'zh-CN' : 'en-US') : '' }));
   resumeBackup.hidden = !['error', 'conflict'].includes(state);
+  if (['saved', 'restored', 'recovered'].includes(state)) void saveAutoArchive(savedAt);
 }
 resumeBackup.onclick = () => {
   if (!busy && confirm(t('用当前工程覆盖本地恢复记录并继续自动保存？'))) localSession?.resume();
 };
 function collectSettings() {
   return {
-    version: 1, language: getLocale(), leftWidth: leftSidebarWidth, rightWidth: rightSidebarWidth, leftCollapsed: leftSidebar.hidden, rightOpen: !rightSidebar.hidden,
+    version: 1, renderQuality: settings.renderQuality, language: getLocale(), leftWidth: leftSidebarWidth, rightWidth: rightSidebarWidth, leftCollapsed: leftSidebar.hidden, rightOpen: !rightSidebar.hidden,
     gridColor: $('#grid-color').value, gridOpacity: Number($('#grid-opacity').value), gridStyle: $('#grid-style').value, gridVisible: gridPreferenceVisible,
-    nodesVisible: showNodes, nodeColor: $('#node-color').value, nodeSize: Number($('#node-size').value), nodeOpacity: Number($('#node-opacity').value), edgeAxisSnap, edgeSize, connectionVisibility: { ...connectionVisibility }, edgeLengthsVisible: settings.edgeLengthsVisible, edgeOutlinesVisible: settings.edgeOutlinesVisible, tool, selectedType,
+    nodesVisible: showNodes, nodeColor: $('#node-color').value, nodeSize: Number($('#node-size').value), nodeOpacity: Number($('#node-opacity').value), edgeAxisSnap, edgeSize, hideMirrorPlane: mirrorMode.hidePlane, connectionVisibility: { ...connectionVisibility }, edgeLengthsVisible: settings.edgeLengthsVisible, edgeOutlinesVisible: settings.edgeOutlinesVisible, tool, selectedType,
     backgroundColor: settings.backgroundColor, lightAzimuth: settings.lightAzimuth, lightElevation: settings.lightElevation, lightIntensity: settings.lightIntensity, shadowStrength: settings.shadowStrength, lightSoftness: settings.lightSoftness, cameraLightEnabled: settings.cameraLightEnabled, cameraLightIntensity: settings.cameraLightIntensity, paintColor: settings.paintColor, paintQuickColors: settings.paintQuickColors, orthographic: settings.orthographic, placementOrientationIndicator: settings.placementOrientationIndicator,
     showBuildingFurniture: $('#show-building-furniture').checked, modelThumbnails: $('#use-model-thumbnails').checked, catalogCardSize: settings.catalogCardSize, favoriteComponents: [...settings.favoriteComponents], query: $('#component-search').value, category: $('#category-filter').value,
     sidebarTabs: { left: settings.sidebarTabs.left, right: settings.sidebarTabs.right },
@@ -4816,7 +5577,9 @@ function scheduleSettings() {
   if (!preferencesReady) return;
   clearTimeout(settingsTimer); settingsTimer = setTimeout(saveSettings, 180);
 }
-controls.addEventListener('change', () => { scheduleSettings(); if (!busy && pointerInCanvas) refreshEdgePreview(); });
+controls.addEventListener('change', () => { scheduleSettings(); if (!busy && pointerInCanvas && edgePointer) pointerMoveTask.schedule(edgePointer); });
+controls.addEventListener('start', () => { orbitInteracting = true; pointerMoveTask.cancel(); renderQuality.setInteraction(true); });
+controls.addEventListener('end', () => { orbitInteracting = false; renderQuality.setInteraction(dragRenderMode); if (pointerInCanvas && edgePointer) pointerMoveTask.schedule(edgePointer); });
 window.addEventListener('pagehide', saveSettings);
 document.addEventListener('visibilitychange', () => { if (document.visibilityState === 'hidden') saveSettings(); });
 
@@ -4829,7 +5592,7 @@ export function changeLanguage(locale) {
   applyTranslations(document);
   renderOfficialPaintColors();
   renderLatestPagesBuildTime();
-  renderCategories(); renderCatalog(); inspect(); refresh();
+  renderCategories(); renderCatalog(); inspect(); refresh(); renderArchiveList();
   if (definitionOpen && $('#inspector-content details')) $('#inspector-content details').open = true;
   leftSidebar.scrollTop = scrollTop;
   orientation.relabel();
@@ -4930,6 +5693,15 @@ async function initialize() {
   viewport.dataset.ready = 'true';
   void loadLatestPagesBuildTime();
   if (storedSettings.error) status('设置保存失败：{detail}', { detail: storedSettings.error.message });
+  void handleShareLink();
 }
 initialize().catch(error => reportError('组件目录加载失败：{error}', error));
-renderer.setAnimationLoop(time => { updateFps(time); controls.update(); updateReferenceGrid(); updateTopologyHelperVisibility(); orientation.update(); edgeRuler.update(); edgeLengthLabels.update(); updatePlacementIndicator(); updateSubgridErrorMarkerPositions(); renderer.render(scene, camera); });
+renderer.setAnimationLoop(time => {
+  const interval = settings.renderQuality.maxFps ? 1000 / settings.renderQuality.maxFps : 0;
+  if (interval && time - lastRenderTime < interval - .5) return;
+  lastRenderTime = time;
+  controls.update(); transformTask.flush(); pointerMoveTask.flush();
+  updateFps(time); updateReferenceGrid(); updateTopologyHelperVisibility(); orientation.update(); edgeRuler.update(); edgeLengthLabels.update(); updatePlacementIndicator(); updateSubgridErrorMarkerPositions();
+  renderQuality.beforeRender();
+  renderer.render(scene, camera);
+});

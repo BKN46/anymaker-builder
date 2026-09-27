@@ -3,6 +3,7 @@ import { AssetLibrary, disposeObject } from './library.js';
 import { CELL_SIZE_WORLD } from '../editor/grid.js';
 import { stretchMeshPositions } from '../editor/component-extension.js';
 import { correctGeometryNormals } from './geometry-ops.js';
+import { connectionInterfaceVertexColors, isConnectionInterfacePart } from './mesh-interface-colors.js';
 
 const typed = (values, Type) => values == null ? null : new Type(values);
 export const WHEEL_TYRE_OUTBOARD_OFFSET = CELL_SIZE_WORLD;
@@ -218,7 +219,10 @@ export class PublishedAssetLibrary {
           if (part.normals) geometry.setAttribute('normal', new THREE.BufferAttribute(part.normals, 3)); else geometry.computeVertexNormals();
           correctGeometryNormals(geometry);
           if (part.uv) geometry.setAttribute('uv', new THREE.BufferAttribute(part.uv, 2));
-          geometry.setAttribute('gameColorBytes', new THREE.BufferAttribute(part.colors, 4, true));
+          const interfacePart = isConnectionInterfacePart(part.name, source);
+          const packedColors = new THREE.BufferAttribute(part.colors, 4, true);
+          geometry.setAttribute('gameColorBytes', packedColors);
+          if (interfacePart) geometry.setAttribute('color', new THREE.BufferAttribute(connectionInterfaceVertexColors(part.colors, part.name, source), 4, true));
           // The wheel hub definition only references the suspension meshes.
           // Its tyre/rim children are added explicitly by the published wheel
           // binding, and retain their diagnostic tyre/rim contrast instead of
@@ -227,8 +231,9 @@ export class PublishedAssetLibrary {
           const color = source.endsWith('car_wheel.mesh') ? '#1b2027'
             : source.endsWith('car_wheel_b_1.mesh') ? '#667380'
               : source.endsWith('car_wheel_trims_a.mesh') ? '#aebbc5' : '#b4c3ce';
-          const mesh = new THREE.Mesh(geometry, new THREE.MeshStandardMaterial({ color, roughness: wheelVisual ? .52 : .7, metalness: wheelVisual ? .35 : .1, side: THREE.DoubleSide }));
+          const mesh = new THREE.Mesh(geometry, new THREE.MeshStandardMaterial({ color: interfacePart ? '#ffffff' : color, vertexColors: interfacePart, roughness: wheelVisual ? .52 : .7, metalness: wheelVisual ? .35 : .1, side: THREE.DoubleSide }));
           mesh.name = part.name; mesh.userData.source = source; mesh.castShadow = mesh.receiveShadow = true;
+          mesh.userData.connectionInterface = interfacePart;
           applyMeshTransform(mesh, transform);
           group.add(mesh);
         }

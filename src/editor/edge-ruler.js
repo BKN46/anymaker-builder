@@ -1,7 +1,7 @@
 import * as THREE from 'three';
 import { edgeMeasurements } from './construction-view.js';
 import { CELL_SIZE_CM, formatCells } from './grid.js';
-import { applyTranslations, setText } from '../i18n.js';
+import { applyTranslations, setText, getLocale } from '../i18n.js';
 
 const colors = { x: '#c94747', y: '#278452', z: '#326bc5' };
 const svgNS = 'http://www.w3.org/2000/svg';
@@ -25,7 +25,9 @@ export function createEdgeRuler(viewport, camera) {
     return { path, label, output };
   });
   let measurements = [];
-  function hide() { root.hidden = true; measurements = []; }
+  let measurementKey = '';
+  let projectionKey = '';
+  function hide() { root.hidden = true; measurements = []; measurementKey = ''; }
   function project(point, width, height) {
     const p = point.clone().project(getCamera());
     if (p.z < -1 || p.z > 1 || ![p.x, p.y, p.z].every(Number.isFinite)) return null;
@@ -34,6 +36,9 @@ export function createEdgeRuler(viewport, camera) {
   function update() {
     if (root.hidden) return;
     const width = viewport.clientWidth; const height = viewport.clientHeight;
+    const key = projectionStamp(getCamera(), width, height) + measurementKey;
+    if (key === projectionKey) return;
+    projectionKey = key;
     measurements.forEach((measurement, index) => {
       const { path, label } = entries[index];
       const a = project(measurement.from, width, height); const b = project(measurement.to, width, height);
@@ -50,6 +55,9 @@ export function createEdgeRuler(viewport, camera) {
   }
   return {
     show(start, end, axis = null) {
+      const key = [start.x, start.y, start.z, end.x, end.y, end.z, axis, getLocale()].join(',');
+      if (key === measurementKey && !root.hidden) return;
+      measurementKey = key; projectionKey = '';
       measurements = edgeMeasurements(start, end);
       if (!measurements.length) { hide(); return; }
       root.hidden = false; root.dataset.axis = axis || '';
@@ -70,43 +78,57 @@ export function createEdgeRuler(viewport, camera) {
   };
 }
 
+function projectionStamp(camera, width, height) {
+  return [...camera.position.toArray(), ...camera.quaternion.toArray(), ...camera.projectionMatrix.elements, width, height].join(',');
+}
+
 export function createEdgeLengthLabels(viewport, camera) {
   const getCamera = typeof camera === 'function' ? camera : () => camera;
   const root = document.createElement('div'); root.id = 'edge-length-labels'; root.hidden = true;
   viewport.append(root);
-  let entries = [];
-  function project(point) {
-    const value = point.clone().project(getCamera());
-    if (value.z < -1 || value.z > 1 || ![value.x, value.y, value.z].every(Number.isFinite)) return null;
-    return { x: (value.x + 1) * viewport.clientWidth / 2, y: (1 - value.y) * viewport.clientHeight / 2 };
-  }
+  let entries = new Map();
+  let pending = null;
+  let projectionKey = '';
+  const projected = new THREE.Vector3();
   function update() {
     if (root.hidden) return;
-    for (const { label, midpoint } of entries) {
-      const point = project(midpoint);
-      label.hidden = !point;
-      if (point) label.style.transform = `translate(${point.x}px, ${point.y}px) translate(-50%, -50%)`;
+    if (pending) {
+      const { nodes, edges } = pending; pending = null;
+      const byId = new Map(nodes.map(node => [node.id, node.position]));
+      const next = new Map();
+      for (const edge of edges) {
+        const a = byId.get(edge.a); const b = byId.get(edge.b);
+        if (!a || !b || edge.hidden) continue;
+        const key = [a.x, a.y, a.z, b.x, b.y, b.z].join(',');
+        const previous = entries.get(edge.id);
+        if (previous?.key === key) { next.set(edge.id, previous); continue; }
+        const measurements = edgeMeasurements(a, b);
+        if (!measurements.length) continue;
+        const label = previous?.label || document.createElement('output'); label.className = 'edge-length-label';
+        label.textContent = measurements.map(({ axis, cells }) => axis.toUpperCase() + ' ' + formatCells(cells)).join(' · ');
+        label.title = measurements.map(({ axis, cells }) => axis.toUpperCase() + ' ' + formatCells(cells) + ' blocks / ' + formatCm(cells) + ' cm').join(' · ');
+        if (!previous) root.append(label);
+        next.set(edge.id, { label, key, midpoint: new THREE.Vector3(a.x + b.x, a.y + b.y, a.z + b.z).multiplyScalar(.5) });
+      }
+      for (const [id, entry] of entries) if (!next.has(id)) entry.label.remove();
+      entries = next; projectionKey = '';
+    }
+    const width = viewport.clientWidth; const height = viewport.clientHeight;
+    const activeCamera = getCamera();
+    const key = projectionStamp(activeCamera, width, height);
+    if (key === projectionKey) return;
+    projectionKey = key;
+    for (const { label, midpoint } of entries.values()) {
+      projected.copy(midpoint).project(activeCamera);
+      const visible = projected.z >= -1 && projected.z <= 1 && Math.abs(projected.x) <= 1 && Math.abs(projected.y) <= 1;
+      label.hidden = !visible;
+      if (visible) label.style.transform = 'translate(' + ((projected.x + 1) * width / 2) + 'px, ' + ((1 - projected.y) * height / 2) + 'px) translate(-50%, -50%)';
     }
   }
   return {
-    setEdges(nodes, edges) {
-      const byId = new Map(nodes.map(node => [node.id, node.position]));
-      root.replaceChildren();
-      entries = edges.flatMap(edge => {
-        const a = byId.get(edge.a); const b = byId.get(edge.b);
-        if (!a || !b) return [];
-        const measurements = edgeMeasurements(a, b);
-        if (!measurements.length) return [];
-        const label = document.createElement('output'); label.className = 'edge-length-label';
-        label.textContent = measurements.map(({ axis, cells }) => `${axis.toUpperCase()} ${formatCells(cells)}`).join(' · ');
-        label.title = measurements.map(({ axis, cells }) => `${axis.toUpperCase()} ${formatCells(cells)} blocks / ${formatCm(cells)} cm`).join(' · ');
-        root.append(label);
-        return [{ label, midpoint: new THREE.Vector3(a.x, a.y, a.z).add(new THREE.Vector3(b.x, b.y, b.z)).multiplyScalar(.5) }];
-      });
-      update();
-    },
+    setEdges(nodes, edges) { pending = { nodes, edges }; update(); },
     setVisible(value) { root.hidden = !value; if (value) update(); },
     update,
-    dispose() { entries = []; root.remove(); },
+    dispose() { entries.clear(); pending = null; root.remove(); },
   };
 }

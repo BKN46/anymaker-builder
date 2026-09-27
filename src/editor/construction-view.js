@@ -81,14 +81,16 @@ function hitWorldNormal(hit, ray) {
   return normal;
 }
 
-function adjacentPlacementHit(ray, targets, padding = CELL_SIZE_WORLD / 2) {
+function adjacentPlacementHit(ray, targets, padding = CELL_SIZE_WORLD / 2, picker = null) {
   let nearest = null;
+  const expanded = new THREE.Box3();
+  const intersection = new THREE.Vector3();
   for (const target of targets || []) {
     if (!target?.visible) continue;
-    const bounds = new THREE.Box3().setFromObject(target);
+    const bounds = picker ? picker.bounds(target) : new THREE.Box3().setFromObject(target);
     if (bounds.isEmpty()) continue;
-    const expanded = bounds.clone().expandByScalar(padding);
-    const point = ray.intersectBox(expanded, new THREE.Vector3());
+    expanded.copy(bounds).expandByScalar(padding);
+    const point = ray.intersectBox(expanded, intersection);
     if (!point) continue;
     const distance = point.clone().sub(ray.origin).dot(ray.direction);
     if (distance < -EPSILON || (nearest && distance >= nearest.distance)) continue;
@@ -106,12 +108,12 @@ function adjacentPlacementHit(ray, targets, padding = CELL_SIZE_WORLD / 2) {
 // lines. Component placement uses the closest real triangle and its world
 // normal together with the placed Mesh bounds. It falls back to an expanded
 // component envelope and finally the Y=0 work plane.
-export function resolvePlacementPoint(pointerRaycaster, targets, workPlane, { adjacentTargets = [], adjacentPadding = CELL_SIZE_WORLD / 2, hitPadding = CELL_SIZE_WORLD, placementBounds = null } = {}) {
+export function resolvePlacementPoint(pointerRaycaster, targets, workPlane, { adjacentTargets = [], adjacentPadding = CELL_SIZE_WORLD / 2, hitPadding = CELL_SIZE_WORLD, placementBounds = null, picker = null } = {}) {
   const ray = pointerRaycaster.ray;
-  const hit = pointerRaycaster.intersectObjects(targets, true)[0];
+  const hit = picker ? picker.firstHit(pointerRaycaster, targets) : pointerRaycaster.intersectObjects(targets, true)[0];
   const point = hit && quantizePlacementPoint(hit.point, hitWorldNormal(hit, ray), hitPadding, placementBounds);
   if (point) return point;
-  const adjacent = adjacentPlacementHit(ray, adjacentTargets, adjacentPadding);
+  const adjacent = adjacentPlacementHit(ray, adjacentTargets, adjacentPadding, picker);
   const adjacentPoint = adjacent && quantizePlacementPoint(adjacent.point, adjacent.normal, PLACEMENT_SURFACE_EPSILON, placementBounds);
   if (adjacentPoint) return adjacentPoint;
   const planePoint = ray.intersectPlane(workPlane, new THREE.Vector3());
@@ -313,9 +315,12 @@ export function updateEdgeMesh(mesh, start, end, { size } = {}) {
   }
   const edgeSize = size === undefined ? mesh.userData.edgeSize : size;
   mesh.userData.edgeSize = edgeSize === 3 ? 3 : 1;
+  const signature = [...a.toArray(), ...b.toArray(), mesh.userData.edgeSize].join(',');
+  if (mesh.userData.edgeGeometrySignature === signature) { mesh.visible = true; return true; }
   const { geometry, midpoint } = createEdgeGeometry(a, b, mesh.userData.edgeSize);
   mesh.geometry.dispose();
   mesh.geometry = geometry;
+  mesh.userData.edgeGeometrySignature = signature;
   mesh.position.copy(midpoint);
   mesh.quaternion.identity();
   mesh.scale.setScalar(1);
@@ -491,15 +496,18 @@ function routeFrame(direction) {
 }
 
 function routeSegment(start, end, material, radius, radialSegments) {
+  const direction = end.clone().sub(start);
+  const length = direction.length();
+  // Native routes commonly contain coincident port stubs. Do not leave a
+  // hidden unit cylinder behind: Three.js still includes invisible geometry
+  // in Box3 calculations used by selection and interaction helpers.
+  if (length <= EPSILON) return null;
   const geometry = new THREE.CylinderGeometry(.5, .5, 1, radialSegments);
   // Roll the section by half a facet step so the octagon presents a flat
   // upper face instead of a vertex. The roll is carried through the segment
   // quaternion below for every world-axis direction.
   geometry.rotateY(Math.PI / radialSegments);
   const mesh = new THREE.Mesh(geometry, material);
-  const direction = end.clone().sub(start);
-  const length = direction.length();
-  if (length <= EPSILON) { mesh.visible = false; return mesh; }
   const { localX, localY, localZ } = routeFrame(direction);
   mesh.position.copy(start).add(end).multiplyScalar(.5);
   mesh.quaternion.setFromRotationMatrix(new THREE.Matrix4().makeBasis(localX, localY, localZ));
@@ -570,7 +578,8 @@ export function createConnectionRoute(points, material, { radius = .015, radialS
     const direction = path[index].clone().sub(path[index - 1]).normalize();
     const start = path[index - 1].clone().addScaledVector(direction, trim[index - 1]);
     const end = path[index].clone().addScaledVector(direction, -trim[index]);
-    route.add(routeSegment(start, end, material, radius, radialSegments));
+    const segment = routeSegment(start, end, material, radius, radialSegments);
+    if (segment) route.add(segment);
   }
   for (let index = 1; index < path.length - 1; index++) {
     if (trim[index] <= EPSILON) continue;

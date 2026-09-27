@@ -1,4 +1,68 @@
 import { test, expect } from '@playwright/test';
+import { observeRendering } from './render-observer.js';
+
+test('rendering quality applies detailed controls, caches shadows and persists through reload', async ({ page }, testInfo) => {
+  await observeRendering(page);
+  const errors = []; page.on('pageerror', error => errors.push(error.message));
+  await page.goto('./'); await expect(page.locator('#viewport')).toHaveAttribute('data-ready', 'true');
+  await page.locator('#right-sidebar-toggle').click();
+  await expect(page.locator('#render-quality-settings')).toContainText('Rendering quality');
+  await page.locator('#render-preset').selectOption('quality');
+  await expect(page.locator('#render-shadowMapSize')).toHaveValue('2048');
+  await page.locator('#render-resolutionScale').fill('0.8');
+  await page.locator('#render-maxPixelRatio').fill('1.25');
+  await page.locator('#render-interactionScale').fill('0.5');
+  await page.locator('#render-maxFps').selectOption('120');
+  await page.locator('#render-shadowMapSize').selectOption('512');
+  await page.locator('#render-shadowType').selectOption('pcf');
+  await page.locator('#render-shadowUpdate').selectOption('on-change');
+  await page.locator('#render-interactionShadows').uncheck();
+  await page.locator('#render-toneMapping').selectOption('aces');
+  await page.locator('#render-exposure').fill('1.4');
+  await page.locator('#render-showStats').check();
+  await page.locator('#render-antialias').uncheck();
+  await expect(page.locator('#render-reload-notice')).toBeVisible();
+  await expect(page.locator('#render-preset')).toHaveValue('custom');
+  await expect(page.locator('#render-stats')).toContainText('draws');
+  const live = await page.evaluate(() => {
+    const { renderer, scene } = window.__renderTestState;
+    return { ratio: renderer.getPixelRatio(), size: scene.children.find(o => o.isDirectionalLight).shadow.mapSize.x, exposure: renderer.toneMappingExposure, auto: renderer.shadowMap.autoUpdate };
+  });
+  expect(live).toEqual({ ratio: .8, size: 512, exposure: 1.4, auto: false });
+  await expect.poll(() => page.evaluate(() => {
+    window.dispatchEvent(new Event('pagehide'));
+    return JSON.parse(localStorage.getItem('anymaker:' + location.pathname + ':settings:v1')).renderQuality?.maxFps;
+  })).toBe(120);
+  await page.locator('#language-select').selectOption('zh');
+  await expect(page.locator('#render-quality-settings')).toContainText('渲染质量');
+  await page.reload(); await expect(page.locator('#viewport')).toHaveAttribute('data-ready', 'true');
+  await expect(page.locator('#render-resolutionScale')).toHaveValue('0.8');
+  await expect(page.locator('#render-shadowType')).toHaveValue('pcf');
+  await expect(page.locator('#render-maxFps')).toHaveValue('120');
+  await expect(page.locator('#render-exposure')).toHaveValue('1.4');
+  await expect(page.locator('#render-antialias')).not.toBeChecked();
+  await expect(page.locator('#render-reload-notice')).toBeHidden();
+  await page.locator('#render-quality-settings h2').scrollIntoViewIfNeeded();
+  await page.screenshot({ path: testInfo.outputPath('render-quality-settings.png') });
+  expect(await page.evaluate(() => window.__renderTestState.renderer.getContext().getContextAttributes().antialias)).toBe(false);
+  const sample = await page.evaluate(async () => {
+    const state = window.__renderTestState;
+    await new Promise(resolve => requestAnimationFrame(() => requestAnimationFrame(resolve)));
+    const before = state.shadowFrames; const frames = state.frames;
+    await new Promise(resolve => setTimeout(resolve, 250));
+    return { shadows: state.shadowFrames - before, frames: state.frames - frames };
+  });
+  expect(sample.shadows).toBe(0); expect(sample.frames).toBeGreaterThan(0);
+  await page.locator('#right-sidebar-toggle').click();
+  const canvas = page.locator('#viewport canvas'); const box = await canvas.boundingBox();
+  await page.mouse.move(box.x + box.width / 2, box.y + box.height / 2);
+  await page.mouse.down({ button: 'right' });
+  await page.mouse.move(box.x + box.width / 2 + 50, box.y + box.height / 2 + 30, { steps: 8 });
+  expect(await page.evaluate(() => window.__renderTestState.renderer.getPixelRatio())).toBe(.4);
+  await page.mouse.up({ button: 'right' });
+  expect(await page.evaluate(() => window.__renderTestState.renderer.getPixelRatio())).toBe(.8);
+  expect(errors).toEqual([]);
+});
 
 const settingsKey = 'anymaker:/anymaker-builder/:settings:v1';
 const projectKey = 'anymaker:/anymaker-builder/:autosave:v1';
@@ -6,6 +70,19 @@ async function ready(page, catalogCount = '332 / 598') {
   await expect(page.locator('#catalog-count')).toHaveText(catalogCount);
   await expect(page.locator('#viewport')).toHaveAttribute('data-ready', 'true');
 }
+
+test('mirror plane visibility preference survives reload', async ({ page }) => {
+  await page.goto('./'); await ready(page);
+  await page.locator('#mirror-action').click();
+  await expect(page.locator('#mirror-hide-plane')).not.toBeChecked();
+  await page.locator('#mirror-hide-plane').check();
+  await expect(page.locator('#viewport')).toHaveAttribute('data-mirror-guide-visible', 'false');
+  await expect.poll(() => page.evaluate(key => JSON.parse(localStorage.getItem(key))?.hideMirrorPlane, settingsKey)).toBe(true);
+  await page.reload(); await ready(page);
+  await page.locator('#mirror-action').click();
+  await expect(page.locator('#mirror-hide-plane')).toBeChecked();
+  await expect(page.locator('#viewport')).toHaveAttribute('data-mirror-guide-visible', 'false');
+});
 
 test('English default, language switching, axis views, grid and panel preferences survive reload', async ({ page }) => {
   await page.goto('./'); await ready(page);
@@ -129,7 +206,8 @@ test('60-second autosave recovers committed structures but not unfinished edge d
   expect(record.document.topology.nodes).toHaveLength(2);
   expect(record.document.topology.edges).toHaveLength(1);
   expect(record.document.objects).toEqual([component]);
-  expect(Object.keys(record.document).sort()).toEqual(['format', 'objects', 'topology', 'version']);
+  expect(Object.keys(record.document).sort()).toEqual(['format', 'grids', 'objects', 'projectName', 'topology', 'version']);
+  expect(record.document.renderQuality).toBeUndefined();
   await page.reload(); await ready(page);
   await expect(page.locator('#topology-count')).toHaveText('2 nodes · 1 edges · 0 plates');
   await expect(page.locator('#autosave-status')).toHaveAttribute('data-state', 'restored');

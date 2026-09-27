@@ -14,10 +14,11 @@ import { copyObjects, mirrorObjects, moveObjects, removeObjects, splitGrid, merg
 import { Project, Vehicle, Grid, Component, Node, Edge, Plate, Link, fromEditorDocument, toEditorDocument, toEditorTopology, validateProject, nativeGridFrame, nativeGridLocalDelta } from '../src/editor/model.js';
 import { parseNativePair, nativeStats, toNativeData, toNativePair, toNativePairFromEditor, verifyNativePairRoundTrip } from '../src/native/anymaker-data.js';
 import { createNode, moveNode, moveNodeAndMerge, mergeNodes, removeNode, removeEdge, removePlate, createEdge, createEdgeFromPoints, splitEdge, createPlate, createPlateFromEdges, createGlassPlateFromEdges, triangulatePlate, validateTopologyState, pruneUnusedTopology } from '../src/editor/topology.js';
-import { LINK_COLORS, LINK_KINDS, LINK_RENDER_STYLES, createLink, moveLinkPoint, removeLink, validateLinks } from '../src/editor/connections.js';
+import { LINK_COLORS, LINK_KINDS, LINK_RENDER_STYLES, MAX_CONNECTION_ROUTE_SEGMENT, connectionRouteIsSafe, createLink, moveLinkPoint, pruneInvalidConnections, removeLink, validateLinks } from '../src/editor/connections.js';
 import * as THREE from 'three';
 import { LineMaterial } from 'three/addons/lines/LineMaterial.js';
 import { correctGeometryNormals, reflectGeometry, reflectVisualBasis } from '../src/assets/geometry-ops.js';
+import { connectionInterfaceVertexColors, isConnectionInterfacePart } from '../src/assets/mesh-interface-colors.js';
 import { NODE_PLACEMENT_BOUNDS, cameraBuildFrame, projectBuildPoint, resolveEdgePoint, resolvePlacementPoint, edgeMeasurements, createEdgeMesh, createEdgeJointMesh, createConnectionRoute, createDashedConnection, updateEdgeMesh, setEdgeOutline, edgeConnectionCorners, plateSurfaceBoundary, plateSurfaceVertices, cameraFacingPlateOffset, cameraFacingPlateDirection, rayFacingPlateSide } from '../src/editor/construction-view.js';
 import { CELL_SIZE_WORLD, CELL_SIZE_CM, assertGridVector, cellToWorld, quantizeWorldVector, worldToCell } from '../src/editor/grid.js';
 import { categoryInfo } from '../src/catalog/category-icons.js';
@@ -28,6 +29,7 @@ import { DEPTH_SUBLAYERS, LOG_DEPTH_LAYER_STEP, LOG_DEPTH_SUBLAYER_STEP, RENDER_
 import { t, setLocale, addMessages } from '../src/i18n.js';
 import { connectionDescriptorLabel, connectionNetworkLabel, connectionPortRoleLabel } from '../src/editor/connection-port-labels.js';
 import { connectionDirectionVector, connectionRouteCellPosition, logicNodePort, logicNodePortsForNetwork, logicNodeCellPosition, orientMechanicalLink } from '../src/editor/connection-ports.js';
+import { NATIVE_PORT_COLORS, nativeConnectionPortColor, nativeMechanicalPortRole } from '../src/editor/connection-port-colors.js';
 import { componentPropertyDescriptors, updateNativeProperty, validateNativeProperties } from '../src/editor/component-properties.js';
 import { nativePaintColor, nearestNativePaintIndex, officialPaintColors } from '../src/editor/native-paint.js';
 import { paintColorValue } from '../src/editor/paint-color.js';
@@ -43,6 +45,177 @@ import { stageImportedSubgrid, translateImportedSubgrid, translateSubgridTopolog
 import { analyzeSubgridIntegrity, partitionSubgrids } from '../src/editor/subgrid-connectivity.js';
 import { locatableSubgridErrors } from '../src/editor/subgrid-error-markers.js';
 import { LITERS_PER_CELL, tankCapacityCells, tankCapacityLiters } from '../src/editor/tank-capacity.js';
+import { encodeProjectCode, decodeProjectCode } from '../src/editor/project-code.js';
+import { createFrameTask, planVisualUpdate, topologyVisualRecords, visualSignature } from '../src/editor/visual-cache.js';
+import { normalizeRenderQuality, renderPixelRatio, renderQualityPreset, RENDER_QUALITY_DEFAULTS, RENDER_QUALITY_PRESETS, createRenderQualityController } from '../src/editor/render-quality.js';
+import { createPlacementPicker, createProjectedNodePicker } from '../src/editor/placement-picking.js';
+
+test('placement picking caches world bounds and only raycasts the nearest solid candidates', () => {
+  const picker = createPlacementPicker();
+  const geometry = new THREE.BoxGeometry(1, 1, 1);
+  const material = new THREE.MeshBasicMaterial({ side: THREE.DoubleSide });
+  const roots = Array.from({ length: 100 }, (_, index) => {
+    const root = new THREE.Group();
+    root.position.set(index < 2 ? 0 : index * 2, 0, index === 1 ? -4 : 0);
+    root.add(new THREE.Mesh(geometry, material));
+    return root;
+  });
+  let raycasts = 0; let boundsUpdates = 0;
+  for (const root of roots) {
+    const update = root.updateWorldMatrix;
+    root.updateWorldMatrix = function (...args) { boundsUpdates++; return update.apply(this, args); };
+    const mesh = root.children[0]; const raycast = mesh.raycast;
+    mesh.raycast = function (...args) { raycasts++; return raycast.apply(this, args); };
+  }
+  const outline = new THREE.LineSegments(new THREE.EdgesGeometry(geometry), new THREE.LineBasicMaterial());
+  outline.raycast = () => assert.fail('placement must not pick editor outlines');
+  roots[0].add(outline);
+  const raycaster = new THREE.Raycaster(new THREE.Vector3(0, 0, 5), new THREE.Vector3(0, 0, -1));
+  for (let index = 0; index < 50; index++) {
+    raycaster.ray.origin.x = (index % 10) * .01;
+    const hit = picker.firstHit(raycaster, roots);
+    assert.equal(hit.object, roots[0].children[0]);
+    assert.equal(hit.distance, 4.5);
+  }
+  assert.equal(raycasts, 50, 'one narrow-phase mesh query per pointer sample, not 100');
+  assert.equal(boundsUpdates, 100, 'each root computes bounds once across 50 samples');
+  roots[0].position.x = 3;
+  picker.invalidate();
+  assert.equal(picker.firstHit(raycaster, roots).object, roots[1].children[0]);
+  roots[1].visible = false;
+  assert.equal(picker.firstHit(raycaster, roots), null);
+  roots[1].visible = true;
+  raycaster.far = 6;
+  assert.equal(picker.firstHit(raycaster, roots), null);
+  outline.geometry.dispose(); outline.material.dispose(); geometry.dispose(); material.dispose();
+});
+
+test('cached placement preserves real surface hits, interior rays and adjacent snapping after geometry changes', () => {
+  const picker = createPlacementPicker();
+  const geometry = new THREE.BoxGeometry(CELL_SIZE_WORLD, CELL_SIZE_WORLD, CELL_SIZE_WORLD);
+  const material = new THREE.MeshBasicMaterial({ side: THREE.DoubleSide });
+  const component = new THREE.Mesh(geometry, material);
+  component.position.set(cell(2), cell(1), cell(2));
+  component.updateMatrixWorld(true);
+  const workPlane = new THREE.Plane(new THREE.Vector3(0, 1, 0), 0);
+  const raycaster = new THREE.Raycaster(new THREE.Vector3(cell(2), 1, cell(2) + .065), new THREE.Vector3(0, -1, 0));
+  const options = { adjacentTargets: [component], placementBounds: NODE_PLACEMENT_BOUNDS };
+  const expected = resolvePlacementPoint(raycaster, [component], workPlane, options);
+  for (let i = 0; i < 30; i++) assert.deepEqual(resolvePlacementPoint(raycaster, [component], workPlane, { ...options, picker }).toArray(), expected.toArray());
+  component.rotation.z = Math.PI / 4;
+  component.geometry = new THREE.BoxGeometry(.24, .08, .08);
+  picker.invalidate(); component.updateMatrixWorld(true);
+  raycaster.ray.origin.set(cell(2), 1, cell(2));
+  const fullHit = raycaster.intersectObject(component)[0];
+  assert.ok(picker.firstHit(raycaster, [component]).point.distanceTo(fullHit.point) < 1e-9);
+  raycaster.ray.origin.copy(component.position);
+  assert.ok(picker.firstHit(raycaster, [component]).point.distanceTo(raycaster.intersectObject(component)[0].point) < 1e-9);
+  component.geometry.dispose(); geometry.dispose(); material.dispose();
+});
+
+test('node snapping reuses projections and refreshes for camera, viewport and topology changes', () => {
+  const picker = createProjectedNodePicker();
+  const camera = new THREE.PerspectiveCamera(45, 1, .01, 100);
+  camera.position.set(0, 0, 5); camera.lookAt(0, 0, 0); camera.updateMatrixWorld(true);
+  let reads = 0;
+  const position = { x: 0, y: 0, z: 1 };
+  const nodes = [{ id: 'near', get position() { reads++; return position; } }, { id: 'far', position: { x: 0, y: 0, z: 0 } }];
+  const pointer = new THREE.Vector2();
+  for (let i = 0; i < 50; i++) {
+    pointer.x = i % 2 * .001;
+    assert.equal(picker.pick(nodes, camera, pointer, 1000, 1000, 22), 'near');
+  }
+  assert.equal(reads, 3, 'XYZ coordinates are read only while refreshing the projected cache');
+  position.x = 2; picker.invalidate();
+  assert.equal(picker.pick(nodes, camera, pointer, 1000, 1000, 22), 'far');
+  camera.position.x = 2; camera.lookAt(2, 0, 1); camera.updateMatrixWorld(true);
+  assert.equal(picker.pick(nodes, camera, pointer, 1000, 1000, 22), 'near');
+  assert.equal(picker.pick(nodes, camera, pointer, 500, 500, 22), 'near');
+  assert.equal(picker.pick([nodes[1]], camera, pointer, 500, 500, 22), null);
+});
+
+test('render quality validates legacy settings, numeric limits and independent presets', () => {
+  assert.deepEqual(normalizeSettings().renderQuality, RENDER_QUALITY_DEFAULTS);
+  assert.deepEqual(normalizeRenderQuality({ maxPixelRatio: Infinity, resolutionScale: 0, shadowMapSize: 99999, maxFps: -1, antialias: 'false', toneMapping: '__proto__' }), RENDER_QUALITY_DEFAULTS);
+  const quality = normalizeRenderQuality({ ...RENDER_QUALITY_PRESETS.quality, showStats: true });
+  assert.equal(renderQualityPreset(quality), 'quality');
+  assert.equal(renderQualityPreset({ ...quality, exposure: 1.5 }), 'custom');
+  assert.equal(renderPixelRatio(quality, 3), 2);
+  assert.equal(renderPixelRatio(RENDER_QUALITY_DEFAULTS, 2, true), 1.125);
+  assert.equal(renderPixelRatio(RENDER_QUALITY_DEFAULTS, NaN), 1);
+  quality.maxPixelRatio = 3;
+  assert.equal(RENDER_QUALITY_PRESETS.quality.maxPixelRatio, 2);
+});
+
+test('shadow caching freezes during interaction and refreshes after drop without switching light variants', () => {
+  let ratio = 1; let disposed = 0;
+  const renderer = { shadowMap: {}, capabilities: { maxTextureSize: 2048 }, getContext: () => ({ getContextAttributes: () => ({ antialias: true }) }), getPixelRatio: () => ratio, setPixelRatio: value => { ratio = value; } };
+  const light = new THREE.DirectionalLight(); light.castShadow = true;
+  const controller = createRenderQualityController(renderer, light, RENDER_QUALITY_DEFAULTS);
+  controller.beforeRender(); assert.equal(renderer.shadowMap.needsUpdate, true);
+  controller.beforeRender(); assert.equal(renderer.shadowMap.needsUpdate, false);
+  controller.setInteraction(true); controller.invalidateShadows(); controller.beforeRender();
+  assert.equal(renderer.shadowMap.needsUpdate, false); assert.equal(light.castShadow, true);
+  assert.equal(ratio, .75);
+  controller.setInteraction(false); controller.beforeRender();
+  assert.equal(renderer.shadowMap.needsUpdate, true); assert.equal(ratio, 1);
+  light.shadow.map = { dispose() { disposed++; } };
+  controller.setQuality({ ...RENDER_QUALITY_DEFAULTS, shadowMapSize: 4096, antialias: false });
+  assert.equal(disposed, 1); assert.equal(light.shadow.map, null); assert.equal(light.shadow.mapSize.x, 2048);
+  assert.equal(controller.reloadRequired, true);
+  controller.setQuality({ ...RENDER_QUALITY_DEFAULTS, interactionShadows: true, shadowUpdate: 'continuous' });
+  controller.setInteraction(true); assert.equal(renderer.shadowMap.autoUpdate, true);
+});
+
+test('frame tasks coalesce pointer bursts, flush final values and discard cancelled work', () => {
+  const values = []; const task = createFrameTask(value => values.push(value));
+  for (let i = 0; i < 100; i++) task.schedule(i);
+  assert.deepEqual(values, []); assert.equal(task.flush(), true);
+  assert.deepEqual(values, [99]); assert.equal(task.flush(), false);
+  task.schedule(100); task.cancel(); assert.equal(task.flush(), false);
+  task.schedule(101); task.flush(); assert.deepEqual(values, [99, 101]);
+});
+
+test('visual update plans preserve unchanged components without depending on property order', () => {
+  const before = { id: 'a', nativeExtension: [0, 0, 0], position: { x: 0, y: 0, z: 0 } };
+  const object = {};
+  const existing = new Map([['a', { object, signature: visualSignature(before) }]]);
+  const reordered = { position: { y: 0, z: 0, x: 0 }, nativeExtension: [0, 0, 0], id: 'a' };
+  const plan = planVisualUpdate([reordered], existing, value => value.id, visualSignature);
+  assert.equal(plan.retained.get('a'), object); assert.equal(plan.changed.length, 0);
+  const changed = planVisualUpdate([{ ...before, nativeExtension: [0, 0, 4] }], existing, value => value.id, visualSignature);
+  assert.equal(changed.changed.length, 1); assert.equal(changed.retained.size, 0);
+  assert.deepEqual(before.nativeExtension, [0, 0, 0]);
+  assert.equal(existing.get('a').object, object);
+});
+
+test('topology visuals invalidate only changed entities and their endpoint dependencies', () => {
+  const state = { nodes: ['a', 'b', 'c', 'd'].map((id, i) => ({ id, position: { x: i, y: 0, z: 0 } })), edges: [{ id: 'ab', a: 'a', b: 'b' }, { id: 'cd', a: 'c', b: 'd' }], plates: [{ id: 'p', nodeIds: ['b', 'c', 'd'] }], links: [{ id: 'l', from: { componentId: 'motor' }, to: { componentId: 'shaft' } }] };
+  const components = new Map([['motor', { position: { x: 0, y: 0, z: 0 } }], ['shaft', { nativeExtension: [0, 0, 0] }]]);
+  const records = topologyVisualRecords(state, components);
+  const existing = new Map(records.map(record => [record.key, { signature: record.signature, object: {} }]));
+  const moved = structuredClone(state); moved.nodes[0].position.x = .08;
+  const plan = planVisualUpdate(topologyVisualRecords(moved, components), existing, r => r.key, r => r.signature);
+  assert.deepEqual(plan.changed.map(record => record.key), ['node:a', 'edge:ab']);
+  components.get('shaft').nativeExtension[2] = 4;
+  const linked = planVisualUpdate(topologyVisualRecords(state, components), existing, r => r.key, r => r.signature);
+  assert.deepEqual(linked.changed.map(record => record.key), ['link:l']);
+});
+
+test('unchanged beam previews retain GPU geometry and depth ordering retains material programs', () => {
+  const start = new THREE.Vector3(); const end = new THREE.Vector3(.8, 0, 0);
+  const mesh = createEdgeMesh(start, end, new THREE.MeshStandardMaterial(), { outlined: true });
+  const geometry = mesh.geometry; let disposed = 0; geometry.addEventListener('dispose', () => disposed++);
+  for (let i = 0; i < 50; i++) assert.equal(updateEdgeMesh(mesh, start, end), true);
+  assert.equal(mesh.geometry, geometry); assert.equal(disposed, 0);
+  configureOpaqueDepthLayer(mesh, RENDER_DEPTH_LAYERS.edge, { key: 'edge:a' });
+  const version = mesh.material.version;
+  configureOpaqueDepthLayer(mesh, RENDER_DEPTH_LAYERS.edge, { key: 'edge:a' });
+  assert.equal(mesh.material.version, version);
+  updateEdgeMesh(mesh, start, new THREE.Vector3(1.6, 0, 0));
+  assert.equal(disposed, 1); assert.notEqual(mesh.geometry, geometry);
+  mesh.geometry.dispose(); mesh.material.dispose();
+});
 
 test('native file pairs download directly while XML can use a save picker', async () => {
   const files = [{ name: 'vehicle.data', content: '{"data":1}', type: 'application/json' }, { name: 'vehicle.meta', content: '{"meta":1}', type: 'application/json' }];
@@ -67,6 +240,14 @@ test('mirror mode reflects integer-grid points on every plane without moving poi
   const onPlane = { x: cell(1), y: 0, z: 0 };
   assert.equal(sameGridPoint(mirrorPoint(onPlane, { axis: 'x', offset: cell(1) }), onPlane), true);
   assert.deepEqual(mirrorSurfaceDirection({ x: .5, y: -.25, z: .75 }, { axis: 'y' }), { x: .5, y: .25, z: .75 });
+});
+
+test('project code round-trips a serializable document without editor-only view state', async () => {
+  const document = { format: 'anymaker-web-project', version: 1, projectName: 'share-test', objects: [], topology: { nodes: [], edges: [], plates: [], links: [] } };
+  const code = await encodeProjectCode(document);
+  assert.match(code, /^AMB1\.[A-Za-z0-9_-]+$/);
+  assert.deepEqual(await decodeProjectCode(code), document);
+  await assert.rejects(() => decodeProjectCode('AMB1.invalid'), /Base64URL|解压|工程/);
 });
 
 test('mirror mode conjugates XYZ rotation and moves paired nodes as one topology change', () => {
@@ -496,6 +677,9 @@ test('UI preferences default to English and reject unsafe or unsupported values'
   }
   assert.equal(defaults.edgeAxisSnap, false);
   assert.equal(defaults.edgeSize, 1);
+  assert.equal(defaults.hideMirrorPlane, false);
+  assert.equal(normalizeSettings({ version: 1, hideMirrorPlane: true }).hideMirrorPlane, true);
+  for (const invalid of ['true', 1, null, {}]) assert.equal(normalizeSettings({ version: 1, hideMirrorPlane: invalid }).hideMirrorPlane, false);
   assert.equal(normalizeSettings({ version: 1, edgeSize: 3 }).edgeSize, 3);
   assert.equal(normalizeSettings({ version: 1, edgeSize: 2 }).edgeSize, 1);
   assert.deepEqual(defaults.connectionVisibility, { electric: true, mechanical: true, liquid: true, gas: true, belt: true, data: true });
@@ -859,6 +1043,24 @@ test('native mechanical export reverses input-first links and omits default port
   const vehicle = toNativePairFromEditor(project([relay, button], { nodes: [], edges: [], plates: [], links: [link] }), { componentDefinitions: definitions }).data.vehicles.vehicles[0];
   assert.deepEqual(vehicle.mechanical_links, [{ p0: { comp: 2 }, p1: { comp: 1 }, points: [[-1, 0, 0], [0, 0, 0]] }]);
 });
+test('native mechanical export repairs a unique output port and drops input-only links', () => {
+  const definitions = new Map([
+    ['mechanical_junction_scale', { logic_nodes: [{ type: 'mechanical_in', direction: 4 }, { direction: 5 }], surfaces: [{}, {}, {}, {}, { dir: 5, gender: 1, type: 'mechanical' }] }],
+    ['mechanical_bracket', { logic_nodes: [{ type: 'mechanical_in', direction: 4 }, { direction: 5 }], surfaces: [{}, { dir: 5, gender: 2, type: 'mechanical' }, { dir: 4, gender: 1, type: 'mechanical' }] }],
+    ['electric_relay', { logic_nodes: [{ type: 'mechanical_in', direction: 3 }] }],
+  ]);
+  const component = (id, type) => ({ id, type, position: { x: 0, y: 0, z: 0 }, rotation: { x: 0, y: 0, z: 0 }, scale: { x: 1, y: 1, z: 1 } });
+  const document = project([
+    component('junction', 'mechanical_junction_scale'),
+    component('bracket', 'mechanical_bracket'),
+    component('relay', 'electric_relay'),
+  ], { links: [
+    { id: 'repair', kind: 'mechanical', from: { componentId: 'junction' }, to: { componentId: 'bracket' }, points: [] },
+    { id: 'drop', kind: 'mechanical', from: { componentId: 'relay' }, to: { componentId: 'bracket' }, points: [] },
+  ] });
+  const vehicle = toNativePairFromEditor(document, { componentDefinitions: definitions }).data.vehicles.vehicles[0];
+  assert.deepEqual(vehicle.mechanical_links, [{ p0: { comp: 1, pos: 1 }, p1: { comp: 2 }, points: [] }]);
+});
 test('native export omits unreferenced editor nodes and keeps structural references intact', () => {
   const document = project([], {
     nodes: [
@@ -891,6 +1093,20 @@ test('installed native items remain on their host component and export back into
   assert.deepEqual(pair.data.definitions.components, ['wheel']);
   assert.equal(pair.data.vehicles.vehicles[0].grids[0].components.length, 1);
   assert.deepEqual(pair.data.vehicles.vehicles[0].grids[0].components[0].element, native.vehicles.vehicles[0].grids[0].components[0].element);
+});
+test('wheel tyres normalize legacy direct acc items to the game element path', () => {
+  const native = {
+    definitions: { components: ['wheel'] },
+    vehicles: { vehicles: [{ id: 1, grids: [{ components: [{
+      def: 0, id: 7, pos: [2, 3, 4],
+      acc: { item: { _type: 'wheel_5_prong_tread', id: 42, pattern: 1 } },
+    }] }] }] },
+  };
+  const document = toEditorDocument(parseNativePair(native, {}));
+  assert.equal(document.objects[0].nativeAccessoryContainer, 'element.acc');
+  const exported = toNativePairFromEditor(validateDocument(document, new Map([['wheel', {}]]))).data.vehicles.vehicles[0].grids[0].components[0];
+  assert.equal(exported.acc, undefined);
+  assert.deepEqual(exported.element, native.vehicles.vehicles[0].grids[0].components[0].acc && { acc: native.vehicles.vehicles[0].grids[0].components[0].acc });
 });
 test('regular wheel exposes every verified compatible wheel and tread accessory', () => {
   const types = accessoryOptionsForComponent('wheel');
@@ -981,6 +1197,26 @@ test('native export maps RGB paint across components, edges, plate faces and lin
   assert.deepEqual([vehicle.plates[0].col_front, vehicle.plates[0].col_back], [26, 79]);
   assert.equal(vehicle.electric_links[0].color, 26);
   assert.throws(() => toNativePairFromEditor(project([{ ...object, paintColor: 'red' }])), /Hex RGB/);
+});
+test('native plate export keeps the saved front direction after X reflection', () => {
+  const document = project([], {
+    nodes: [
+      { id: 'a', position: { x: 0, y: 0, z: 0 } },
+      { id: 'b', position: { x: cell(1), y: 0, z: 0 } },
+      { id: 'c', position: { x: 0, y: cell(1), z: 0 } },
+    ],
+    plates: [{ id: 'plate', nodeIds: ['a', 'c', 'b'], surfaceDirection: { x: 0, y: 0, z: 1 } }],
+  });
+  const vehicle = toNativePairFromEditor(document).data.vehicles.vehicles[0];
+  assert.deepEqual(vehicle.plates[0].nodes, [1, 3, 2]);
+  const points = new Map(vehicle.nodes.map(node => [node.id, node.pos]));
+  const [a, b, c] = vehicle.plates[0].nodes.map(id => points.get(id));
+  const normal = [
+    (b[1] - a[1]) * (c[2] - a[2]) - (b[2] - a[2]) * (c[1] - a[1]),
+    (b[2] - a[2]) * (c[0] - a[0]) - (b[0] - a[0]) * (c[2] - a[2]),
+    (b[0] - a[0]) * (c[1] - a[1]) - (b[1] - a[1]) * (c[0] - a[0]),
+  ];
+  assert.ok(normal[2] > 0);
 });
 test('project names persist in documents and produce safe export file names', () => {
   assert.equal(normalizeProjectName('  Research Vehicle  '), 'Research Vehicle');
@@ -1271,6 +1507,18 @@ test('connection commands preserve six link families and validate endpoints', ()
   assert.throws(() => createLink(links, { kind: 'electric', from: { componentId: 'missing' }, to: { componentId: 'target' }, points: [] }, componentIds), /unknown component/);
   assert.throws(() => validateLinks([{ id: 'bad', kind: 'belt', from: { componentId: 'source' }, to: { componentId: 'source' }, points: [] }], componentIds), /same component port/);
   assert.equal(removeLink(links, links[0].id, componentIds).links.length, LINK_KINDS.length - 1);
+});
+test('malformed connection routes can be pruned without losing empty native routes', () => {
+  const valid = { id: 'valid', kind: 'electric', from: { componentId: 'source' }, to: { componentId: 'target' }, points: [] };
+  const malformed = [
+    valid,
+    { ...valid, id: 'missing', from: { componentId: 'unknown' } },
+    { ...valid, id: 'long', points: [{ x: 0, y: 0, z: 0 }, { x: MAX_CONNECTION_ROUTE_SEGMENT + 1, y: 0, z: 0 }] },
+    { ...valid, id: 'valid' },
+  ];
+  assert.equal(connectionRouteIsSafe(valid), true);
+  assert.equal(connectionRouteIsSafe(malformed[2]), false);
+  assert.deepEqual(pruneInvalidConnections(malformed, new Set(['source', 'target'])).map(link => link.id), ['valid']);
 });
 test('node movement atomically merges coincident logical nodes and preserves valid references', () => {
   const state = {
@@ -1631,7 +1879,15 @@ test('edge joints and connection routes cover shared nodes and route corners', (
     { x: 0, y: 0, z: 0 }, { x: 0, y: 0, z: 0 }, { x: cell(1), y: 0, z: 0 },
   ], material);
   assert.equal(noOffset.children.some(child => child.geometry.type === 'SphereGeometry'), false);
+  assert.equal(noOffset.children.filter(child => child.geometry.type === 'CylinderGeometry').length, 1);
+  const noOffsetBounds = new THREE.Box3().setFromObject(noOffset);
+  assert.ok(noOffsetBounds.getSize(new THREE.Vector3()).x < .2);
+  const emptyRoute = createConnectionRoute([
+    { x: 0, y: 0, z: 0 }, { x: 0, y: 0, z: 0 },
+  ], material);
+  assert.equal(emptyRoute.children.length, 0);
   noOffset.traverse(object => object.geometry?.dispose());
+  emptyRoute.traverse(object => object.geometry?.dispose());
   stubbed.traverse(object => object.geometry?.dispose());
   joint.geometry.dispose(); route.traverse(object => object.geometry?.dispose()); material.dispose();
 });
@@ -1859,6 +2115,28 @@ test('model simplification reduces faces; scale, normals, cleanup and bounds mat
   const tiny = convertModel(simplifyModel(parseModel(modelArrayBuffer(modelGlbFixture()), 'quad.glb'), 0), { scale: .01 });
   assert.equal(tiny.topology, null);
   assert.match(tiny.error, /格点吸附/);
+});
+
+test('connection port markers retain native interface colors by network and role', () => {
+  assert.equal(nativeConnectionPortColor('electric', { type: 'electric' }), NATIVE_PORT_COLORS.electric);
+  assert.equal(nativeConnectionPortColor('data', { type: 'data' }), NATIVE_PORT_COLORS.data);
+  assert.equal(nativeConnectionPortColor('gas', { type: 'gas' }), NATIVE_PORT_COLORS.gas);
+  assert.equal(nativeMechanicalPortRole({ type: 'mechanical_in' }), 'input');
+  assert.equal(nativeMechanicalPortRole({ gender: 1 }), 'output');
+  assert.equal(nativeMechanicalPortRole({ direction: 4 }, { surfaces: [{ type: 'mechanical', dir: 4, gender: 2 }] }), 'input');
+  assert.equal(nativeConnectionPortColor('mechanical', { type: 'mechanical_in' }), NATIVE_PORT_COLORS.mechanicalInput);
+  assert.equal(nativeConnectionPortColor('mechanical', { gender: 1 }), NATIVE_PORT_COLORS.mechanicalOutput);
+  assert.equal(nativeConnectionPortColor('unknown', {}), NATIVE_PORT_COLORS.fallback);
+});
+test('published Mesh interface parts opt into packed game vertex colours only for connection surfaces', () => {
+  assert.equal(isConnectionInterfacePart('mechanical_surface_f', 'meshes/components/wheel_hub_a_base.mesh'), true);
+  assert.equal(isConnectionInterfacePart('electric_surface_a', 'meshes/components/manifold_pipe_c_straight.mesh'), true);
+  assert.equal(isConnectionInterfacePart('group_49', 'meshes/components/interface_electric_a.mesh'), true);
+  assert.equal(isConnectionInterfacePart('unclassified_part', 'meshes/components/unknown.mesh'), false);
+  assert.equal(isConnectionInterfacePart('small_engine_mating_surface_2', 'meshes/components/engine_block_a_0_0_0.mesh'), false);
+  assert.equal(isConnectionInterfacePart('body', 'meshes/components/engine_block_a_0_0_0.mesh'), false);
+  assert.deepEqual([...connectionInterfaceVertexColors(Uint8Array.from([51, 51, 51, 255, 255, 49, 49, 255]), 'mechanical_surface_f', 'meshes/components/wheel_hub_a_base.mesh')], [51, 51, 51, 255, 255, 49, 49, 255]);
+  assert.deepEqual([...connectionInterfaceVertexColors(Uint8Array.from([51, 51, 51, 255]), 'Group_49', 'meshes/components/interface_electric_a.mesh')], [51, 51, 51, 255]);
 });
 
 test('model shell discards enclosed geometry and small protrusions before budgeted quad lofting', () => {

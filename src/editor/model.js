@@ -338,7 +338,9 @@ export function toEditorDocument(model, { vehicleIds = null } = {}) {
     const id = nativeImport ? `${vehicle.id}:${grid.id}:${component.id}` : component.id;
     const state = component.extras?.native?.state;
     const accessoryItem = nativeAccessoryFromState(state);
-    const accessoryContainer = nativeAccessoryContainerFromState(state);
+    const accessoryContainer = accessoryItem && ['wheel', 'wheel_b'].includes(component.type)
+      ? 'element.acc'
+      : nativeAccessoryContainerFromState(state);
     // `acc.item` (or legacy `element.acc.item`) is an installed item, not a
     // component record. Keep it on its host as an explicit accessory field;
     // the renderer adds its visual below the host's component transform.

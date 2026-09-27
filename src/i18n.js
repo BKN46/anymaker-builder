@@ -40,9 +40,10 @@ export function t(key, params = {}) {
   return template.replace(/\{([A-Za-z][\w]*)\}/g, (match, name) => Object.hasOwn(resolved, name) ? String(resolved[name] ?? '') : match);
 }
 export function setText(element, key, params = {}) {
-  element.dataset.i18n = key;
+  if (element.dataset.i18n !== key) element.dataset.i18n = key;
   parameters.set(element, params);
-  element.textContent = t(key, params);
+  const text = t(key, params);
+  if (element.textContent !== text) element.textContent = text;
 }
 export function applyTranslations(root = document) {
   const selector = '[data-i18n], [data-i18n-title], [data-i18n-aria-label], [data-i18n-placeholder]';

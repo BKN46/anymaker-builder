@@ -63,6 +63,8 @@ export function configureOpaqueDepth(material, layer, { key = '' } = {}) {
   if (!material || material.transparent || material.depthWrite === false) return material;
   const rank = stableDepthRank(key);
   const bias = depthBias(layer, rank);
+  if (material.userData.renderDepthState && material.userData.renderDepthLayer === layer
+      && material.userData.renderDepthRank === rank && material.polygonOffsetUnits === bias) return material;
   material.depthTest = true;
   material.depthWrite = true;
   material.depthFunc = THREE.LessEqualDepth;

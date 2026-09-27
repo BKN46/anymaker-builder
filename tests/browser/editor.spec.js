@@ -1,11 +1,190 @@
 import { test, expect } from '@playwright/test';
 import { meshFixture, modelGlbFixture } from '../fixtures.js';
 import { readFileSync } from 'node:fs';
+import { observeRendering, renderedIdentities } from './render-observer.js';
+
+test('pointer drags translate and rotate smoothly with one commit and a fixed camera', async ({ page }) => {
+  await observeRendering(page);
+  const errors = []; page.on('pageerror', error => errors.push(error.message));
+  await page.goto('./'); await expect(page.locator('#viewport')).toHaveAttribute('data-ready', 'true');
+  const component = { id: 'moving-shaft', type: 'drive_shaft', position: { x: 0, y: 0, z: 0 }, rotation: { x: 0, y: 0, z: 0 }, scale: { x: 1, y: 1, z: 1 } };
+  await page.locator('#file-input').setInputFiles({ name: 'drag.json', mimeType: 'application/json', buffer: Buffer.from(JSON.stringify({ format: 'anymaker-web-project', version: 1, objects: [component] })) });
+  await expect(page.locator('#object-count')).toHaveText('1 个组件');
+  const canvas = page.locator('#viewport canvas'); const box = await canvas.boundingBox();
+  await canvas.click({ position: { x: box.width / 2, y: box.height / 2 } });
+  await page.locator('[data-view="front"]').click();
+  for (const mode of ['translate', 'rotate']) {
+    await page.locator('[data-tool="' + mode + '"]').click();
+    const before = await saveProject(page);
+    const historyCount = await page.locator('#history-list button').count();
+    const drag = await page.evaluate(mode => {
+      const { scene, renderer, camera } = window.__renderTestState;
+      const helper = scene.children.find(o => o.isTransformControlsRoot);
+      helper.updateMatrixWorld(true);
+      const control = helper.controls;
+      const axis = mode === 'rotate' ? 'Z' : 'X';
+      const handle = control._gizmo.gizmo[mode].children.find(o => o.name === axis && o.visible);
+      const point = handle.position.clone();
+      if (mode === 'rotate') point.fromBufferAttribute(handle.geometry.attributes.position, 16);
+      else { handle.geometry.computeBoundingBox(); handle.geometry.boundingBox.getCenter(point); }
+      handle.localToWorld(point).project(camera);
+      const origin = control.worldPosition.clone().project(camera);
+      const rect = renderer.domElement.getBoundingClientRect();
+      const x = rect.x + (point.x + 1) * rect.width / 2; const y = rect.y + (1 - point.y) * rect.height / 2;
+      const cx = rect.x + (origin.x + 1) * rect.width / 2; const cy = rect.y + (1 - origin.y) * rect.height / 2;
+      return { x, y, endX: mode === 'rotate' ? cx - (y - cy) : x + 85, endY: mode === 'rotate' ? cy + (x - cx) : y, camera: camera.position.toArray(), ratio: renderer.getPixelRatio(), uuid: scene.children.find(o => o.userData.id === 'moving-shaft').uuid };
+    }, mode);
+    await page.mouse.move(drag.x, drag.y); await page.mouse.down();
+    await page.mouse.move(drag.endX, drag.endY, { steps: 24 });
+    expect(await page.evaluate(() => window.__renderTestState.scene.children.find(o => o.isTransformControlsRoot).controls.dragging)).toBe(true);
+    expect(await page.evaluate(() => window.__renderTestState.renderer.getPixelRatio())).toBeCloseTo(drag.ratio * .75);
+    expect(await page.locator('#history-list button').count()).toBe(historyCount);
+    await page.mouse.up();
+    const after = await saveProject(page);
+    expect(after.objects[0][mode === 'translate' ? 'position' : 'rotation']).not.toEqual(before.objects[0][mode === 'translate' ? 'position' : 'rotation']);
+    expect(await page.locator('#history-list button').count()).toBe(historyCount + 1);
+    const state = await page.evaluate(() => { const s = window.__renderTestState; return { camera: s.camera.position.toArray(), ratio: s.renderer.getPixelRatio(), uuid: s.scene.children.find(o => o.userData.id === 'moving-shaft').uuid }; });
+    expect(state).toEqual({ camera: drag.camera, ratio: drag.ratio, uuid: drag.uuid });
+    await page.locator('#undo-btn').click(); expect((await saveProject(page)).objects).toEqual(before.objects);
+    await page.locator('#redo-btn').click(); expect((await saveProject(page)).objects).toEqual(after.objects);
+    // History restore clears selection. Select the transformed shaft again.
+    const point = await page.evaluate(() => { const s = window.__renderTestState; const o = s.scene.children.find(o => o.userData.id === 'moving-shaft'); const p = o.position.clone().project(s.camera); const r = s.renderer.domElement.getBoundingClientRect(); return { x: r.x + (p.x + 1) * r.width / 2, y: r.y + (1 - p.y) * r.height / 2 }; });
+    await page.mouse.click(point.x, point.y);
+  }
+  expect(errors).toEqual([]);
+});
+
+test('editing a linear size retains unrelated component visuals and restores with one undo', async ({ page }) => {
+  await observeRendering(page);
+  const errors = []; page.on('pageerror', error => errors.push(error.message));
+  await page.goto('./'); await expect(page.locator('#viewport')).toHaveAttribute('data-ready', 'true');
+  await page.locator('#language-select').selectOption('en');
+  const objects = Array.from({ length: 60 }, (_, index) => ({
+    id: 'shaft-' + index, type: 'drive_shaft', gridId: 'grid-1',
+    position: { x: (index % 10 - 5) * .24, y: Math.floor(index / 10) * .24, z: 0 },
+    rotation: { x: 0, y: 0, z: 0 }, scale: { x: 1, y: 1, z: 1 },
+  }));
+  await page.locator('#file-input').setInputFiles({ name: 'shafts.json', mimeType: 'application/json', buffer: Buffer.from(JSON.stringify({ format: 'anymaker-web-project', version: 1, objects })) });
+  await expect(page.locator('#object-count')).toHaveText('60 components');
+  await page.locator('[data-view="front"]').click();
+  const before = await renderedIdentities(page);
+  const point = await page.evaluate(() => {
+    const { scene, camera, renderer } = window.__renderTestState;
+    const object = scene.children.find(o => o.userData.id === 'shaft-25');
+    let mesh; object.traverse(child => { if (child.isMesh && !mesh) mesh = child; });
+    const point = mesh.geometry.boundingBox.getCenter(mesh.position.clone());
+    mesh.localToWorld(point).project(camera);
+    const rect = renderer.domElement.getBoundingClientRect();
+    return { x: rect.x + (point.x + 1) * rect.width / 2, y: rect.y + (1 - point.y) * rect.height / 2 };
+  });
+  await page.mouse.click(point.x, point.y);
+  await openRightSidebar(page); await page.locator('#right-tab-inspector').click();
+  const input = page.getByLabel('Linear size Z', { exact: true });
+  await expect(input).toHaveValue('1');
+  await input.fill('8'); await input.press('Tab');
+  await expect(input).toHaveValue('8');
+  const after = await renderedIdentities(page);
+  expect(after.components['shaft-25']).not.toBe(before.components['shaft-25']);
+  for (const object of objects.filter(o => o.id !== 'shaft-25')) expect(after.components[object.id]).toBe(before.components[object.id]);
+  const saved = await saveProject(page);
+  expect(saved.objects.find(o => o.id === 'shaft-25').nativeExtension).toEqual([0, 0, 7]);
+  expect(saved.objects.find(o => o.id === 'shaft-25').scale).toEqual({ x: 1, y: 1, z: 1 });
+  await page.locator('#undo-btn').click();
+  const undone = await saveProject(page);
+  expect(undone.objects.find(o => o.id === 'shaft-25').nativeExtension).toBeUndefined();
+  const undoVisuals = await renderedIdentities(page);
+  expect(undoVisuals.components['shaft-24']).toBe(before.components['shaft-24']);
+  await page.locator('#redo-btn').click();
+  expect((await saveProject(page)).objects.find(o => o.id === 'shaft-25').nativeExtension).toEqual([0, 0, 7]);
+  expect(errors).toEqual([]);
+});
+
+test('beam cursor is half size and hovering reuses scene bounds without raycasting distant meshes', async ({ page }) => {
+  await observeRendering(page);
+  const errors = []; page.on('pageerror', error => errors.push(error.message));
+  await page.goto('./'); await expect(page.locator('#viewport')).toHaveAttribute('data-ready', 'true');
+  const objects = Array.from({ length: 60 }, (_, index) => ({
+    id: 'hover-shaft-' + index, type: 'drive_shaft',
+    position: { x: index % 10 * .32, y: 0, z: Math.floor(index / 10) * .32 },
+    rotation: { x: 0, y: 0, z: 0 }, scale: { x: 1, y: 1, z: 1 },
+  }));
+  await page.locator('#file-input').setInputFiles({ name: 'hover.json', mimeType: 'application/json', buffer: Buffer.from(JSON.stringify({ format: 'anymaker-web-project', version: 1, objects })) });
+  await expect(page.locator('#object-count')).toHaveText('60 个组件');
+  await page.locator('[data-view="top"]').click();
+  await page.locator('[data-tool="edge"]').click();
+  const canvas = page.locator('#viewport canvas'); const box = await canvas.boundingBox();
+  const x = box.x + box.width * .06; const y = box.y + box.height * .7;
+  await page.mouse.move(x, y);
+  await expect.poll(() => page.evaluate(() => window.__renderTestState.scene.getObjectByName('edge-placement-anchor').visible)).toBe(true);
+  const before = await page.evaluate(() => {
+    const { scene } = window.__renderTestState;
+    const anchor = scene.getObjectByName('edge-placement-anchor');
+    const counts = { boundsUpdates: 0, raycasts: 0, statusMutations: 0 };
+    window.__hoverTestCounts = counts;
+    for (const root of scene.children.filter(object => object.userData.id)) {
+      const update = root.updateWorldMatrix;
+      root.updateWorldMatrix = function (...args) { counts.boundsUpdates++; return update.apply(this, args); };
+      root.traverse(mesh => {
+        if (!mesh.isMesh) return;
+        const raycast = mesh.raycast;
+        mesh.raycast = function (...args) { counts.raycasts++; return raycast.apply(this, args); };
+      });
+    }
+    new MutationObserver(records => { counts.statusMutations += records.length; }).observe(document.querySelector('#build-status'), { attributes: true, childList: true, characterData: true, subtree: true });
+    return { radius: anchor.geometry.parameters.radius, position: anchor.position.toArray(), geometry: anchor.geometry.uuid };
+  });
+  expect(before.radius).toBe(.035);
+  for (let step = 1; step <= 8; step++) {
+    await page.mouse.move(x + step, y + step * 8);
+    await page.evaluate(() => new Promise(resolve => requestAnimationFrame(() => requestAnimationFrame(resolve))));
+  }
+  const after = await page.evaluate(() => {
+    const anchor = window.__renderTestState.scene.getObjectByName('edge-placement-anchor');
+    return { counts: window.__hoverTestCounts, position: anchor.position.toArray(), geometry: anchor.geometry.uuid };
+  });
+  expect(after.position).not.toEqual(before.position);
+  expect(after.geometry).toBe(before.geometry);
+  expect(after.counts).toEqual({ boundsUpdates: 0, raycasts: 0, statusMutations: 0 });
+  await expect(page.locator('#build-status')).toHaveText('梁 1 格 · 点击起点');
+  await page.mouse.click(x + 8, y + 64);
+  await page.mouse.click(x + 90, y + 64);
+  await expect(page.locator('#topology-count')).toHaveText('2 节点 · 1 梁 · 0 面板');
+  await page.locator('#undo-btn').click();
+  await expect(page.locator('#topology-count')).toHaveText('0 节点 · 0 梁 · 0 面板');
+  expect(errors).toEqual([]);
+});
+
+test('beam and panel commits reuse existing structure meshes across addition and undo', async ({ page }) => {
+  await observeRendering(page);
+  await page.goto('./'); await expect(page.locator('#viewport')).toHaveAttribute('data-ready', 'true');
+  await page.locator('[data-view="front"]').click();
+  const canvas = page.locator('#viewport canvas');
+  const corners = [[430, 560], [730, 560], [730, 280], [430, 280]];
+  await page.locator('[data-tool="edge"]').click();
+  let previous = null;
+  for (let index = 0; index < corners.length; index++) {
+    await canvas.click({ position: { x: corners[index][0], y: corners[index][1] } });
+    const next = corners[(index + 1) % corners.length];
+    await canvas.click({ position: { x: next[0], y: next[1] } });
+    const current = await renderedIdentities(page);
+    if (previous) for (const [id, uuid] of Object.entries(previous.topology)) expect(current.topology[id]).toBe(uuid);
+    previous = current;
+  }
+  await expect(page.locator('#topology-count')).toHaveText('4 节点 · 4 梁 · 0 面板');
+  await page.locator('[data-tool="plate"]').click();
+  for (const [x, y] of [[580, 560], [730, 420], [580, 280], [430, 420]]) await canvas.click({ position: { x, y } });
+  await expect(page.locator('#topology-count')).toHaveText('4 节点 · 4 梁 · 1 面板');
+  const panel = await renderedIdentities(page);
+  for (const [id, uuid] of Object.entries(previous.topology)) expect(panel.topology[id]).toBe(uuid);
+  await page.locator('#undo-btn').click();
+  await expect(page.locator('#topology-count')).toHaveText('4 节点 · 4 梁 · 0 面板');
+  expect((await renderedIdentities(page)).topology).toEqual(previous.topology);
+});
 
 test.beforeEach(async ({ page }) => {
   await page.addInitScript(() => {
     const key = 'anymaker:' + location.pathname + ':settings:v1';
-    localStorage.setItem(key, JSON.stringify({ version: 1, language: 'zh' }));
+    if (!localStorage.getItem(key)) localStorage.setItem(key, JSON.stringify({ version: 1, language: 'zh' }));
   });
 });
 
@@ -605,6 +784,30 @@ test('native vehicle can be staged as a ghost subgrid and placed into the curren
   expect(saved.grids).toContainEqual({ id: 'imported-vehicle-1' });
 });
 
+test('multi-selection paints and deletes every selected component from the keyboard', async ({ page }) => {
+  await page.goto('./');
+  await expect(page.locator('#viewport')).toHaveAttribute('data-ready', 'true');
+  await page.locator('#mesh-input').setInputFiles({ name: 'engine_block_a_0_0_0.mesh', mimeType: 'application/octet-stream', buffer: meshFixture() });
+  const canvas = page.locator('canvas');
+  await page.locator('#component-search').fill('engine');
+  for (const x of [380, 680]) {
+    await page.locator('[data-id="engine"]').click();
+    await canvas.click({ position: { x, y: 400 } });
+  }
+  await page.locator('[data-tool="select"]').click();
+  await canvas.click({ position: { x: 380, y: 400 } });
+  await page.keyboard.down('Shift'); await canvas.click({ position: { x: 680, y: 400 } }); await page.keyboard.up('Shift');
+  await expect(page.locator('#inspector-content')).toContainText('已选择 2 个组件');
+  await page.keyboard.press('c');
+  const painted = await saveProject(page);
+  expect(painted.objects).toHaveLength(2);
+  expect(painted.objects.every(object => object.paintColor === '#dddddd')).toBe(true);
+  await page.keyboard.press('Delete');
+  await expect(page.locator('#object-count')).toHaveText('0 个组件');
+  await page.locator('#undo-btn').click();
+  await expect(page.locator('#object-count')).toHaveText('2 个组件');
+});
+
 test('subgrid list deletes an authored subgrid as one undoable action', async ({ page }) => {
   await page.goto('./');
   await expect(page.locator('#viewport')).toHaveAttribute('data-ready', 'true');
@@ -634,14 +837,15 @@ test('extendable components expose native linear dimensions instead of transform
   await openRightSidebar(page); await page.locator('#right-tab-inspector').click();
   await expect(page.locator('#inspector-content')).toContainText('Linear size');
   const input = page.locator('input[aria-label="Linear size Z"]');
-  await expect(input).toHaveValue('0');
+  // The control includes the one-cell base; nativeExtension stores only the added cells.
+  await expect(input).toHaveValue('1');
   await input.fill('3'); await input.press('Tab');
   await expect(input).toHaveValue('3');
   const document = await page.evaluate(() => {
     window.dispatchEvent(new Event('pagehide'));
     return JSON.parse(localStorage.getItem('anymaker:' + location.pathname + ':autosave:v1')).document;
   });
-  expect(document.objects[0].nativeExtension).toEqual([0, 0, 3]);
+  expect(document.objects[0].nativeExtension).toEqual([0, 0, 2]);
 });
 
 test('tank capacity includes base cells as well as native extensions', async ({ page }) => {
@@ -704,6 +908,7 @@ test('history drawer restores a committed snapshot and viewport reports vehicle 
 });
 
 test('paint and connection context toolbars expose saved colors, network ports and selection highlighting', async ({ page }) => {
+  await observeRendering(page);
   await page.goto('./');
   await expect(page.locator('#viewport')).toHaveAttribute('data-ready', 'true');
   await expect(page.locator('#selection-filter-toolbar')).toBeVisible();
@@ -772,14 +977,49 @@ test('paint and connection context toolbars expose saved colors, network ports a
   await page.locator('[data-tool="connect"]').click();
   await expect(page.locator('#connection-toolbar')).toBeVisible();
   await expect(page.locator('#viewport')).toHaveAttribute('data-connection-port-count', '1');
+  await expect(page.locator('#viewport')).toHaveAttribute('data-connection-port-colors', '#ff3131');
+  await expect.poll(() => page.evaluate(() => {
+    const layer = window.__renderTestState.scene.getObjectByName('connection-ports');
+    return layer?.getObjectsByProperty('name', 'connection-port-direction-arrow').length || 0;
+  })).toBe(1);
   await page.locator('#connection-kind-buttons [data-kind="liquid"]').click();
   await expect(page.locator('#connection-kind-buttons [data-kind="liquid"]')).toHaveClass(/active/);
   await expect(page.locator('#viewport')).toHaveAttribute('data-connection-port-count', '0');
+  await expect(page.locator('#viewport')).toHaveAttribute('data-connection-port-colors', '');
 
   await page.reload();
   await expect(page.locator('#viewport')).toHaveAttribute('data-ready', 'true');
   await page.locator('[data-tool="paint"]').click();
   await expect(page.locator('#paint-quick-colors')).not.toContainText('#7c3aed');
+});
+
+test('project restore removes unrenderable and oversized connections', async ({ page }) => {
+  const errors = []; page.on('pageerror', error => errors.push(error.message));
+  await page.goto('./');
+  await expect(page.locator('#viewport')).toHaveAttribute('data-ready', 'true');
+  const component = (id, x) => ({
+    id, type: 'electric_port_straight', position: { x, y: 0, z: 0 },
+    rotation: { x: 0, y: 0, z: 0 }, scale: { x: 1, y: 1, z: 1 },
+  });
+  const link = (id, points, port = 0) => ({
+    id, kind: 'electric', from: { componentId: 'source', port: 0 },
+    to: { componentId: 'target', port }, points,
+  });
+  const document = {
+    format: 'anymaker-web-project', version: 1,
+    objects: [component('source', 0), component('target', .8)],
+    topology: { nodes: [], edges: [], plates: [], links: [
+      link('valid', []), link('missing-port', [], 255), link('oversized', [{ x: 128, y: 0, z: 0 }]),
+    ] },
+  };
+  await page.locator('#file-input').setInputFiles({ name: 'connections.json', mimeType: 'application/json', buffer: Buffer.from(JSON.stringify(document)) });
+  await expect(page.locator('#object-count')).toContainText('2');
+  const saved = await page.evaluate(() => {
+    window.dispatchEvent(new Event('pagehide'));
+    return JSON.parse(localStorage.getItem('anymaker:' + location.pathname + ':autosave:v1')).document;
+  });
+  expect(saved.topology.links.map(link => link.id)).toEqual(['valid']);
+  expect(errors).toEqual([]);
 });
 
 test('registered reference vehicle imports every component and structural record', async ({ page }) => {
@@ -808,7 +1048,8 @@ test('registered reference vehicle imports every component and structural record
   for (const expected of evidence.referenceComponents) {
     const handle = imported.objects.find(object => object.id === expected.id);
     expect(handle.type).toBe('mechanical_handle');
-    for (const [index, axis] of ['x', 'y', 'z'].entries()) expect(handle.position[axis] - hinge.position[axis]).toBeCloseTo(expected.worldPosition[index] - hingePosition[index], 10);
+    // The evidence uses native coordinates; the editor reflects X (see the domain-model unit test).
+    for (const [index, axis] of ['x', 'y', 'z'].entries()) expect(handle.position[axis] - hinge.position[axis]).toBeCloseTo((axis === 'x' ? -1 : 1) * (expected.worldPosition[index] - hingePosition[index]), 10);
   }
   await page.locator('canvas').screenshot({ path: 'test-results/reference-vehicle-import.png' });
   await page.locator('#library-btn').click();
@@ -1080,6 +1321,28 @@ test('ray-placed edge creation previews, cancels and commits both endpoints atom
   expect(errors).toEqual([]);
 });
 
+test('edge tool creates a node on an existing beam before continuing a new beam', async ({ page }) => {
+  await page.goto('./');
+  await expect(page.locator('#viewport')).toHaveAttribute('data-ready', 'true');
+  await page.locator('[data-view="front"]').click();
+  const canvas = page.locator('canvas');
+  await page.locator('[data-tool="edge"]').click();
+  await canvas.click({ position: { x: 400, y: 420 } });
+  await canvas.click({ position: { x: 800, y: 420 } });
+  const base = await saveProject(page);
+  expect(base.topology.nodes).toHaveLength(2);
+  expect(base.topology.edges).toHaveLength(1);
+  await canvas.click({ position: { x: 600, y: 420 } });
+  const split = await saveProject(page);
+  expect(split.topology.nodes).toHaveLength(3);
+  expect(split.topology.edges).toHaveLength(2);
+  await canvas.click({ position: { x: 600, y: 260 } });
+  const continued = await saveProject(page);
+  expect(continued.topology.nodes).toHaveLength(4);
+  expect(continued.topology.edges).toHaveLength(3);
+  expect(continued.topology.edges.some(edge => edge.a === split.topology.nodes[2].id || edge.b === split.topology.nodes[2].id)).toBe(true);
+});
+
 test('front-view solid edges are pickable off the centerline and split with hidden nodes', async ({ page }) => {
   await page.goto('./');
   await expect(page.locator('#viewport')).toHaveAttribute('data-ready', 'true');
@@ -1265,7 +1528,8 @@ test('XYZ rulers follow axis snapping, language, cancellation and committed endp
   const built = await saveProject(page);
   const [a, b] = built.topology.nodes.map(node => node.position);
   expect(b.y).toBe(a.y); expect(b.z).toBe(a.z); expect(Math.abs(b.x - a.x) / .08).toBe(dimensions[0]);
-  expect(Object.keys(built).sort()).toEqual(['format', 'objects', 'topology', 'version']);
+  expect(Object.keys(built).sort()).toEqual(['format', 'grids', 'objects', 'projectName', 'topology', 'version']);
+  expect(built.renderQuality).toBeUndefined();
   await page.locator('#undo-btn').click();
   await expect(page.locator('#topology-count')).toHaveText('0 nodes · 0 edges · 0 plates');
   await page.locator('#redo-btn').click();
