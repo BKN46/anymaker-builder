@@ -2,6 +2,7 @@ import * as THREE from 'three';
 import { Line2 } from 'three/addons/lines/Line2.js';
 import { LineGeometry } from 'three/addons/lines/LineGeometry.js';
 import { CELL_SIZE_WORLD, AXES, assertGridVector, quantizeWorldVector, worldToCell } from './grid.js';
+import { createPlacementPicker } from './placement-picking.js';
 
 export const GRID_SIZE = 20;
 export const GRID_DIVISIONS = GRID_SIZE / CELL_SIZE_WORLD;
@@ -36,41 +37,33 @@ export function projectBuildPoint(ray, frame) {
   return gridPoint ? vector(gridPoint) : null;
 }
 
-function placementBoundsCorners(bounds) {
-  if (!bounds || bounds.isEmpty()) return null;
-  const corners = [];
-  for (const x of [bounds.min.x, bounds.max.x]) for (const y of [bounds.min.y, bounds.max.y]) for (const z of [bounds.min.z, bounds.max.z]) {
-    corners.push(new THREE.Vector3(x, y, z));
-  }
-  return corners;
-}
-
 function quantizePlacementPoint(point, direction = null, distance = 0, placementBounds = null) {
-  const corners = placementBoundsCorners(placementBounds);
-  if (!direction || !corners) {
+  if (!direction || !placementBounds || placementBounds.isEmpty()) {
     const adjusted = point.clone();
     if (direction && distance) adjusted.addScaledVector(direction, distance);
     const gridPoint = quantizeWorldVector(adjusted);
     return gridPoint ? vector(gridPoint) : null;
   }
   const outward = direction.clone().normalize();
-  const minimumProjection = Math.min(...corners.map(corner => corner.dot(outward)));
+  const minimumProjection = AXES.reduce((sum, axis) => sum + outward[axis] * (outward[axis] >= 0 ? placementBounds.min[axis] : placementBounds.max[axis]), 0);
   const desired = point.clone().addScaledVector(outward, -minimumProjection);
   const rounded = quantizeWorldVector(desired);
   if (!rounded) return null;
   const base = vector(rounded);
   const surfaceProjection = point.dot(outward);
   let best = null;
+  const candidate = new THREE.Vector3();
   // Independent XYZ rounding can move an oblique component back through the
   // hit triangle. Search the neighbouring grid points for the closest origin
   // whose nearest bound remains on the outward side of the real Mesh plane.
   for (const dx of [-1, 0, 1]) for (const dy of [-1, 0, 1]) for (const dz of [-1, 0, 1]) {
-    const candidate = base.clone().add(new THREE.Vector3(dx, dy, dz).multiplyScalar(CELL_SIZE_WORLD));
+    candidate.set(base.x + dx * CELL_SIZE_WORLD, base.y + dy * CELL_SIZE_WORLD, base.z + dz * CELL_SIZE_WORLD);
+    if (!validPoint(candidate)) continue;
     if (candidate.dot(outward) + minimumProjection < surfaceProjection - PLACEMENT_SURFACE_EPSILON) continue;
     const score = candidate.distanceToSquared(desired);
-    if (!best || score < best.score) best = { point: candidate, score };
+    if (!best || score < best.score - 1e-12) best = { point: candidate.clone(), score };
   }
-  return best?.point || base;
+  return best?.point || null;
 }
 
 function hitWorldNormal(hit, ray) {
@@ -81,39 +74,17 @@ function hitWorldNormal(hit, ray) {
   return normal;
 }
 
-function adjacentPlacementHit(ray, targets, padding = CELL_SIZE_WORLD / 2, picker = null) {
-  let nearest = null;
-  const expanded = new THREE.Box3();
-  const intersection = new THREE.Vector3();
-  for (const target of targets || []) {
-    if (!target?.visible) continue;
-    const bounds = picker ? picker.bounds(target) : new THREE.Box3().setFromObject(target);
-    if (bounds.isEmpty()) continue;
-    expanded.copy(bounds).expandByScalar(padding);
-    const point = ray.intersectBox(expanded, intersection);
-    if (!point) continue;
-    const distance = point.clone().sub(ray.origin).dot(ray.direction);
-    if (distance < -EPSILON || (nearest && distance >= nearest.distance)) continue;
-    const closest = bounds.clampPoint(point, new THREE.Vector3());
-    const normal = point.clone().sub(closest);
-    if (normal.lengthSq() <= EPSILON) continue;
-    normal.normalize();
-    if (normal.dot(ray.direction) > 0) normal.negate();
-    nearest = { point: closest, normal, distance };
-  }
-  return nearest;
-}
-
 // Structural coordinates identify cells, rather than their visible boundary
 // lines. Component placement uses the closest real triangle and its world
-// normal together with the placed Mesh bounds. It falls back to an expanded
-// component envelope and finally the Y=0 work plane.
+// normal together with the placed Mesh bounds. It falls back to expanded
+// per-Mesh oriented bounds and finally the Y=0 work plane.
 export function resolvePlacementPoint(pointerRaycaster, targets, workPlane, { adjacentTargets = [], adjacentPadding = CELL_SIZE_WORLD / 2, hitPadding = CELL_SIZE_WORLD, placementBounds = null, picker = null } = {}) {
   const ray = pointerRaycaster.ray;
-  const hit = picker ? picker.firstHit(pointerRaycaster, targets) : pointerRaycaster.intersectObjects(targets, true)[0];
+  const surfacePicker = picker || createPlacementPicker();
+  const hit = surfacePicker.firstHit(pointerRaycaster, targets);
   const point = hit && quantizePlacementPoint(hit.point, hitWorldNormal(hit, ray), hitPadding, placementBounds);
   if (point) return point;
-  const adjacent = adjacentPlacementHit(ray, adjacentTargets, adjacentPadding, picker);
+  const adjacent = surfacePicker.adjacentHit(pointerRaycaster, adjacentTargets, adjacentPadding);
   const adjacentPoint = adjacent && quantizePlacementPoint(adjacent.point, adjacent.normal, PLACEMENT_SURFACE_EPSILON, placementBounds);
   if (adjacentPoint) return adjacentPoint;
   const planePoint = ray.intersectPlane(workPlane, new THREE.Vector3());

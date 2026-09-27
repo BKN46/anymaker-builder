@@ -13,6 +13,7 @@
 | [06 本地反编译分析](06_REVERSE_ENGINEERING.md) | 只读游戏输入、Ghidra 导出流程和证据边界 |
 | [07 3D 模型解析](07_MODEL_IMPORT.md) | GLB/OBJ/STL、外壳简化、方向对称、格点结构生成、占地和验证边界 |
 | [08 编辑性能与渲染质量](08_EDITOR_PERFORMANCE.md) | 增量更新、交互降采样、详细画质参数、持久化与性能验证边界 |
+| [09 接口识别色](09_INTERFACE_COLORS.md) | 真实 Mesh 局部颜色、机身涂装隔离、动态端头遮挡与渲染回归 |
 | [资源研究记录](RESOURCE_ANALYSIS.md) | 扫描方法、Mesh 支持范围、Stormworks 方法参考 |
 | [审计报告](evidence/asset-audit.json) | ROM 计数、EXE/定义/Mesh SHA-256、解析成功和失败记录 |
 | [原生子网格变换证据](evidence/native-grid-transform.json) | 游戏 GCL 函数与常量、安装偏移、四个车门把手回归坐标 |

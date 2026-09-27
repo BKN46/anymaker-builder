@@ -1,7 +1,187 @@
 import { test, expect } from '@playwright/test';
 import { meshFixture, modelGlbFixture } from '../fixtures.js';
 import { readFileSync } from 'node:fs';
-import { observeRendering, renderedIdentities } from './render-observer.js';
+import { observeRendering, renderedIdentities, renderedInterfaceSamples, projectWorldPoint, renderedPlacementState } from './render-observer.js';
+
+test('beam placement rejects a node behind a solid and reacquires it from the unobstructed view', async ({ page }) => {
+  await observeRendering(page);
+  const errors = []; page.on('pageerror', error => errors.push(error.message));
+  await page.goto('./'); await expect(page.locator('#viewport')).toHaveAttribute('data-ready', 'true');
+  const blocked = { x: -.08, y: .08, z: -.24 };
+  const document = { format: 'anymaker-web-project', version: 1,
+    objects: [{ id: 'wall-motor', type: 'electric_motor_b', position: { x: 0, y: 0, z: 0 }, rotation: { x: 0, y: 0, z: 0 }, scale: { x: 1, y: 1, z: 1 } }],
+    topology: {
+      nodes: [{ id: 'behind', position: blocked }, { id: 'beam-end', position: { x: .32, y: .08, z: -.24 } }],
+      edges: [{ id: 'thick-support', a: 'behind', b: 'beam-end', size: 3 }], plates: [], links: [],
+    },
+  };
+  await page.locator('#file-input').setInputFiles({ name: 'occluded-node.json', mimeType: 'application/json', buffer: Buffer.from(JSON.stringify(document)) });
+  await expect(page.locator('#object-count')).toHaveText('1 个组件');
+  await page.locator('#fit-btn').click(); await page.locator('[data-view="front"]').click();
+  await page.locator('[data-tool="edge"]').click();
+  let point = await projectWorldPoint(page, blocked);
+  await page.mouse.move(point.x, point.y);
+  const anchorPosition = () => page.evaluate(() => {
+    const anchor = window.__renderTestState.scene.getObjectByName('edge-placement-anchor');
+    return anchor.visible ? anchor.position.toArray() : null;
+  });
+  await expect.poll(async () => (await anchorPosition())?.[2]).toBeGreaterThan(.13);
+  await page.locator('[data-view="back"]').click();
+  point = await projectWorldPoint(page, blocked); await page.mouse.move(point.x, point.y);
+  await expect.poll(anchorPosition).toEqual([blocked.x, blocked.y, blocked.z]);
+  await page.mouse.click(point.x, point.y);
+  await expect(page.locator('#build-status')).toContainText('点击完成');
+  await page.keyboard.press('Escape');
+  expect(errors).toEqual([]);
+});
+
+test('placement rotation immediately resnaps the preview and commits at the shown contact', async ({ page }) => {
+  await observeRendering(page);
+  const errors = []; page.on('pageerror', error => errors.push(error.message));
+  await page.goto('./'); await expect(page.locator('#viewport')).toHaveAttribute('data-ready', 'true');
+  const object = { id: 'support-motor', type: 'electric_motor_b', position: { x: 0, y: 0, z: 0 }, rotation: { x: 0, y: 0, z: 0 }, scale: { x: 1, y: 1, z: 1 } };
+  await page.locator('#file-input').setInputFiles({ name: 'contact.json', mimeType: 'application/json', buffer: Buffer.from(JSON.stringify({ format: 'anymaker-web-project', version: 1, objects: [object] })) });
+  await expect(page.locator('#object-count')).toHaveText('1 个组件');
+  await page.locator('#fit-btn').click(); await page.locator('[data-view="front"]').click();
+  await page.locator('#component-search').fill('drive_shaft'); await page.locator('[data-id="drive_shaft"]').click();
+  const point = await projectWorldPoint(page, { x: -.08, y: .08, z: .13 });
+  await page.mouse.move(point.x, point.y);
+  await expect.poll(async () => (await renderedPlacementState(page))?.visible).toBe(true);
+  const initial = await renderedPlacementState(page);
+  expect(initial.min[2]).toBeGreaterThanOrEqual(.13 - .0008);
+  // The real shaft is offset along Z. A half turn makes the long end face
+  // the support and requires a different cell; a quarter turn can round to
+  // the same cell, so it would not exercise immediate contact correction.
+  await page.locator('#viewport').focus(); await page.keyboard.press('k'); await page.keyboard.press('k');
+  await expect.poll(async () => (await renderedPlacementState(page))?.rotation[1]).toBeCloseTo(Math.PI);
+  const rotated = await renderedPlacementState(page);
+  expect(rotated.min[2]).toBeGreaterThanOrEqual(.13 - .0008);
+  expect(rotated.position).not.toEqual(initial.position);
+  await page.mouse.click(point.x, point.y);
+  await expect(page.locator('#object-count')).toHaveText('2 个组件');
+  const saved = await saveProject(page); const placed = saved.objects.find(object => object.type === 'drive_shaft');
+  expect([placed.position.x, placed.position.y, placed.position.z]).toEqual(rotated.position);
+  expect(placed.rotation.y).toBeCloseTo(Math.PI);
+  await page.locator('#undo-btn').click(); await expect(page.locator('#object-count')).toHaveText('1 个组件');
+  expect(errors).toEqual([]);
+});
+
+test('late placement loading stays hidden after pointer leave and uses the current position on return', async ({ page }) => {
+  await observeRendering(page);
+  const errors = []; page.on('pageerror', error => errors.push(error.message));
+  const manifest = JSON.parse(readFileSync(new URL('../../public/assets/manifests/mesh-manifest.json', import.meta.url)));
+  let release; const held = new Promise(resolve => { release = resolve; }); let requested = false;
+  await page.route('**/' + manifest.entries['meshes/components/drive_shaft_a.mesh'].url, async route => { requested = true; await held; await route.continue(); });
+  try {
+    await page.goto('./'); await expect(page.locator('#viewport')).toHaveAttribute('data-ready', 'true');
+    await page.locator('[data-view="top"]').click();
+    await page.locator('#component-search').fill('drive_shaft'); await page.locator('[data-id="drive_shaft"]').click();
+    const canvas = page.locator('#viewport canvas'); const box = await canvas.boundingBox();
+    await page.mouse.move(box.x + box.width * .35, box.y + box.height * .65);
+    await expect.poll(() => requested).toBe(true);
+    await page.mouse.move(20, 20); release();
+    await expect.poll(async () => (await renderedPlacementState(page))?.visible).toBe(false);
+    await expect(page.locator('#placement-indicator')).toBeHidden();
+    const point = { x: box.x + box.width * .65, y: box.y + box.height * .65 };
+    await page.mouse.move(point.x, point.y);
+    await expect.poll(async () => (await renderedPlacementState(page))?.visible).toBe(true);
+    const expected = await page.evaluate(point => {
+      const { camera, renderer } = window.__renderTestState; const rect = renderer.domElement.getBoundingClientRect();
+      const x = (point.x - rect.x) / rect.width * 2 - 1; const y = 1 - (point.y - rect.y) / rect.height * 2;
+      const near = camera.position.clone().set(x, y, -1).unproject(camera);
+      const direction = camera.position.clone().set(x, y, 1).unproject(camera).sub(near);
+      return near.addScaledVector(direction, -near.y / direction.y).toArray().map(value => Math.round(value / .08) * .08);
+    }, point);
+    const preview = await renderedPlacementState(page);
+    preview.position.forEach((value, axis) => expect(value).toBeCloseTo(expected[axis], 10));
+    await page.mouse.click(point.x, point.y); await expect(page.locator('#object-count')).toHaveText('1 个组件');
+    const saved = await saveProject(page);
+    expect([saved.objects[0].position.x, saved.objects[0].position.y, saved.objects[0].position.z]).toEqual(preview.position);
+  } finally { release(); }
+  expect(errors).toEqual([]);
+});
+
+test('native interface colours are visible on real Mesh faces and survive paint, mirrors and subgrid view', async ({ page }, testInfo) => {
+  await observeRendering(page);
+  const errors = []; page.on('pageerror', error => errors.push(error.message));
+  await page.goto('./'); await expect(page.locator('#viewport')).toHaveAttribute('data-ready', 'true');
+  const types = ['electrical_interface_straight', 'data_interface_straight', 'gas_interface_straight',
+    'mechanical_interface_in_straight', 'mechanical_interface_out_straight', 'air_manifold',
+    'wheel', 'electric_motor_b', 'liquid_interface_straight'];
+  const objects = types.map((type, i) => ({
+    id: type, type, position: { x: (i % 3 - 1) * .48, y: .72 - Math.floor(i / 3) * .48, z: 0 },
+    rotation: { x: 0, y: 0, z: 0 }, scale: Object.fromEntries(['x', 'y', 'z'].map(axis => [axis, i === 6 ? .5 : i === 7 ? 1.3 : 3])),
+    paintColor: '#dddddd', ...(i === 1 ? { localMirrorAxes: ['x'] } : {}),
+  }));
+  await page.locator('#file-input').setInputFiles({ name: 'interfaces.json', mimeType: 'application/json', buffer: Buffer.from(JSON.stringify({ format: 'anymaker-web-project', version: 1, objects })) });
+  await expect(page.locator('#object-count')).toHaveText('9 个组件');
+  await page.locator('#fit-btn').click();
+  await page.locator('[data-view="front"]').click();
+  const canvas = page.locator('#viewport canvas'); const box = await canvas.boundingBox();
+  await canvas.hover({ position: { x: box.width / 2, y: box.height / 2 } });
+  await page.mouse.wheel(0, -450);
+  await page.locator('#viewport').screenshot({ path: testInfo.outputPath('interfaces-initial.png') });
+  const visible = async () => {
+    const samples = await renderedInterfaceSamples(page);
+    expect(samples.electrical_interface_straight.counts.red, 'electric red').toBeGreaterThan(8);
+    expect(samples.data_interface_straight.counts.blue, 'data blue').toBeGreaterThan(8);
+    expect(samples.gas_interface_straight.counts.yellow, 'gas yellow').toBeGreaterThan(8);
+    expect(samples.mechanical_interface_in_straight.counts.teal, 'mechanical input teal').toBeGreaterThan(8);
+    expect(samples.mechanical_interface_out_straight.counts.yellow, 'mechanical output yellow').toBeGreaterThan(8);
+    expect(samples.air_manifold.counts.teal, 'manifold teal').toBeGreaterThan(8);
+    expect(samples.electric_motor_b.counts.red).toBe(0);
+    expect(samples.liquid_interface_straight.counts.red).toBe(0);
+    for (const sample of Object.values(samples)) expect(sample.interfaces.every(color => color === 'ffffff')).toBe(true);
+    return samples;
+  };
+  await expect(async () => { await visible(); }).toPass({ timeout: 5000 });
+  const initial = await visible();
+  for (const sample of Object.values(initial)) expect(sample.body.every(color => color === 'dddddd')).toBe(true);
+  await testInfo.attach('interface-framebuffer', { body: JSON.stringify(initial, null, 2), contentType: 'application/json' });
+  await page.locator('#viewport').screenshot({ path: testInfo.outputPath('interfaces-front.png') });
+
+  // Painting a mixed Mesh must affect its body, while its real connector
+  // faces remain red even when the connection marker tool is inactive.
+  await page.locator('[data-tool="paint"]').click();
+  await page.locator('#paint-toolbar-hex').fill('#556677');
+  await page.locator('#paint-toolbar-hex').press('Tab');
+  const point = await page.evaluate(() => {
+    const { scene, camera, renderer } = window.__renderTestState;
+    const object = scene.children.find(o => o.userData.id === 'electrical_interface_straight');
+    const point = object.position.clone().add(object.position.clone().set(.075, .075, .12)).project(camera);
+    const rect = renderer.domElement.getBoundingClientRect();
+    return { x: rect.x + (point.x + 1) * rect.width / 2, y: rect.y + (1 - point.y) * rect.height / 2 };
+  });
+  await page.mouse.click(point.x, point.y);
+  await page.locator('[data-tool="select"]').click();
+  await expect.poll(async () => (await renderedInterfaceSamples(page)).electrical_interface_straight.body[0]).toBe('556677');
+  await visible();
+  await page.locator('#undo-btn').click();
+  await expect.poll(async () => (await renderedInterfaceSamples(page)).electrical_interface_straight.body[0]).toBe('dddddd');
+  await visible();
+  await page.locator('#redo-btn').click();
+  await expect.poll(async () => (await renderedInterfaceSamples(page)).electrical_interface_straight.body[0]).toBe('556677');
+  await visible();
+
+  if (await page.locator('#left-sidebar-toggle').getAttribute('aria-expanded') === 'false') await page.locator('#left-sidebar-toggle').click();
+  await page.locator('#left-tab-subgrids').click();
+  await page.locator('#subgrid-view-toggle').check();
+  const gridView = await renderedInterfaceSamples(page);
+  expect(gridView.electrical_interface_straight.body[0]).not.toBe('556677');
+  for (const sample of Object.values(gridView)) expect(sample.interfaces.every(color => color === 'ffffff')).toBe(true);
+  expect(gridView.data_interface_straight.counts.blue).toBeGreaterThan(8);
+  expect(gridView.mechanical_interface_in_straight.counts.teal).toBeGreaterThan(8);
+  await page.locator('#subgrid-view-toggle').uncheck();
+  await visible();
+  await page.locator('[data-tool="connect"]').click();
+  await page.locator('[data-tool="select"]').click();
+  await expect(page.locator('#viewport')).toHaveAttribute('data-connection-port-count', '0');
+  await visible();
+  await page.locator('[data-view="back"]').click();
+  await expect.poll(async () => (await renderedInterfaceSamples(page)).wheel.counts.teal).toBeGreaterThan(3);
+  await page.locator('#viewport').screenshot({ path: testInfo.outputPath('interfaces-back.png') });
+  expect(errors).toEqual([]);
+});
 
 test('pointer drags translate and rotate smoothly with one commit and a fixed camera', async ({ page }) => {
   await observeRendering(page);
@@ -151,6 +331,51 @@ test('beam cursor is half size and hovering reuses scene bounds without raycasti
   await expect(page.locator('#topology-count')).toHaveText('2 节点 · 1 梁 · 0 面板');
   await page.locator('#undo-btn').click();
   await expect(page.locator('#topology-count')).toHaveText('0 节点 · 0 梁 · 0 面板');
+  expect(errors).toEqual([]);
+});
+
+test('beam cursor follows fresh pointer input while the camera is still damping after orbit', async ({ page }) => {
+  await observeRendering(page);
+  const errors = []; page.on('pageerror', error => errors.push(error.message));
+  await page.goto('./'); await expect(page.locator('#viewport')).toHaveAttribute('data-ready', 'true');
+  await page.locator('[data-tool="edge"]').click();
+  const canvas = page.locator('#viewport canvas'); const box = await canvas.boundingBox();
+  await page.mouse.move(box.x + box.width * .5, box.y + box.height * .65);
+  await expect.poll(() => page.evaluate(() => window.__renderTestState.scene.getObjectByName('edge-placement-anchor').visible)).toBe(true);
+  await page.mouse.down({ button: 'right' });
+  await page.mouse.move(box.x + box.width * .62, box.y + box.height * .59, { steps: 6 });
+  await page.mouse.up({ button: 'right' });
+  await page.evaluate(releasePointer => {
+    const { renderer } = window.__renderTestState;
+    const samples = []; window.__orbitPointerSamples = samples;
+    let pointer = releasePointer;
+    renderer.domElement.addEventListener('pointermove', event => { pointer = { x: event.clientX, y: event.clientY }; }, true);
+    const render = renderer.render;
+    renderer.render = function (scene, camera) {
+      const result = render.call(this, scene, camera);
+      if (pointer) {
+        const rect = this.domElement.getBoundingClientRect();
+        const direction = camera.position.clone().set((pointer.x - rect.x) / rect.width * 2 - 1, 1 - (pointer.y - rect.y) / rect.height * 2, .5).unproject(camera).sub(camera.position).normalize();
+        const expected = camera.position.clone().addScaledVector(direction, -camera.position.y / direction.y);
+        expected.set(...expected.toArray().map(value => Math.round(value / .08) * .08));
+        const anchor = scene.getObjectByName('edge-placement-anchor');
+        samples.push({ error: anchor.position.distanceTo(expected), visible: anchor.visible, camera: camera.quaternion.toArray(), pointer });
+      }
+      return result;
+    };
+  }, { x: box.x + box.width * .62, y: box.y + box.height * .59 });
+  // With no new mouse movement, the release position must also follow the
+  // moving camera instead of reverting to the position before the orbit.
+  await page.evaluate(() => new Promise(resolve => requestAnimationFrame(() => requestAnimationFrame(resolve))));
+  for (let step = 0; step < 6; step++) {
+    await page.mouse.move(box.x + box.width * (.32 + step * .045), box.y + box.height * .76);
+    await page.evaluate(() => new Promise(resolve => requestAnimationFrame(() => requestAnimationFrame(resolve))));
+  }
+  const samples = await page.evaluate(() => window.__orbitPointerSamples);
+  expect(samples.length).toBeGreaterThanOrEqual(6);
+  expect(samples.at(-1).camera).not.toEqual(samples[0].camera);
+  expect(samples.every(sample => sample.visible)).toBe(true);
+  expect(Math.max(...samples.map(sample => sample.error))).toBeLessThan(1e-6);
   expect(errors).toEqual([]);
 });
 

@@ -39,6 +39,8 @@ export function createFrameTask(callback) {
   let value;
   return {
     schedule(next) { value = next; pending = true; },
+    // Camera-only refreshes must not replace real input queued for this frame.
+    scheduleIfIdle(next) { if (!pending) { value = next; pending = true; } },
     cancel() { pending = false; value = undefined; },
     flush() {
       if (!pending) return false;

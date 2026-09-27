@@ -2,6 +2,7 @@ import test from 'node:test';
 import assert from 'node:assert/strict';
 import { readFileSync, readdirSync } from 'node:fs';
 import { createHash } from 'node:crypto';
+import { gunzipSync } from 'node:zlib';
 import { meshFixture, modelGlbFixture } from './fixtures.js';
 import { parseModel } from '../src/assets/model-import.js';
 import { simplifyModel, convertModel, modelBounds, MODEL_VERTEX_TARGETS } from '../src/editor/model-conversion.js';
@@ -18,13 +19,14 @@ import { LINK_COLORS, LINK_KINDS, LINK_RENDER_STYLES, MAX_CONNECTION_ROUTE_SEGME
 import * as THREE from 'three';
 import { LineMaterial } from 'three/addons/lines/LineMaterial.js';
 import { correctGeometryNormals, reflectGeometry, reflectVisualBasis } from '../src/assets/geometry-ops.js';
-import { connectionInterfaceVertexColors, isConnectionInterfacePart } from '../src/assets/mesh-interface-colors.js';
+import { applyConnectionInterfaceColors } from '../src/assets/mesh-interface-colors.js';
+import { AssetLibrary, disposeObject } from '../src/assets/library.js';
 import { NODE_PLACEMENT_BOUNDS, cameraBuildFrame, projectBuildPoint, resolveEdgePoint, resolvePlacementPoint, edgeMeasurements, createEdgeMesh, createEdgeJointMesh, createConnectionRoute, createDashedConnection, updateEdgeMesh, setEdgeOutline, edgeConnectionCorners, plateSurfaceBoundary, plateSurfaceVertices, cameraFacingPlateOffset, cameraFacingPlateDirection, rayFacingPlateSide } from '../src/editor/construction-view.js';
 import { CELL_SIZE_WORLD, CELL_SIZE_CM, assertGridVector, cellToWorld, quantizeWorldVector, worldToCell } from '../src/editor/grid.js';
 import { categoryInfo } from '../src/catalog/category-icons.js';
 import { normalizeSettings, createLocalStore, AUTOSAVE_INTERVAL } from '../src/editor/local-storage.js';
 import { applyGridStyle, orientCamera, VIEW_DIRECTIONS } from '../src/editor/view-settings.js';
-import { applyMeshTransform, staticMeshParts, stitchTiledMeshParts, WHEEL_TYRE_OUTBOARD_OFFSET, withWheelTyreOffset } from '../src/assets/published-library.js';
+import { PublishedAssetLibrary, applyMeshTransform, staticMeshParts, stitchTiledMeshParts, WHEEL_TYRE_OUTBOARD_OFFSET, withWheelTyreOffset } from '../src/assets/published-library.js';
 import { DEPTH_SUBLAYERS, LOG_DEPTH_LAYER_STEP, LOG_DEPTH_SUBLAYER_STEP, RENDER_DEPTH_LAYERS, assignOpaqueDepthOrder, configureOpaqueDepthLayer, depthBias, logDepthBias, stableDepthRank } from '../src/editor/render-depth.js';
 import { t, setLocale, addMessages } from '../src/i18n.js';
 import { connectionDescriptorLabel, connectionNetworkLabel, connectionPortRoleLabel } from '../src/editor/connection-port-labels.js';
@@ -113,6 +115,129 @@ test('cached placement preserves real surface hits, interior rays and adjacent s
   component.geometry.dispose(); geometry.dispose(); material.dispose();
 });
 
+test('placement adjacency leaves gaps between component meshes empty', () => {
+  const picker = createPlacementPicker();
+  const group = new THREE.Group();
+  const geometry = new THREE.BoxGeometry(.08, .08, .08);
+  const material = new THREE.MeshBasicMaterial();
+  for (const x of [-.24, .24]) {
+    const mesh = new THREE.Mesh(geometry, material); mesh.position.set(x, .24, 0); group.add(mesh);
+  }
+  const raycaster = new THREE.Raycaster(new THREE.Vector3(0, 1, 0), new THREE.Vector3(0, -1, 0));
+  const workPlane = new THREE.Plane(new THREE.Vector3(0, 1, 0), 0);
+  assert.equal(picker.firstHit(raycaster, [group]), null);
+  assert.equal(picker.adjacentHit(raycaster, [group], .04), null, 'the union of two parts is not a solid surface');
+  assert.deepEqual(resolvePlacementPoint(raycaster, [group], workPlane, { picker, adjacentTargets: [group], placementBounds: NODE_PLACEMENT_BOUNDS }).toArray(), [0, 0, 0]);
+  raycaster.ray.origin.x = .24;
+  assert.deepEqual(resolvePlacementPoint(raycaster, [group], workPlane, { picker, adjacentTargets: [group], placementBounds: NODE_PLACEMENT_BOUNDS }).toArray(), [.24, .32, 0]);
+  geometry.dispose(); material.dispose();
+});
+
+test('placement adjacency follows rotated scaled Mesh bounds instead of their empty AABB corners', () => {
+  const picker = createPlacementPicker();
+  const mesh = new THREE.Mesh(new THREE.BoxGeometry(.48, .08, .08), new THREE.MeshBasicMaterial());
+  mesh.position.y = .16; mesh.rotation.z = Math.PI / 4; mesh.scale.set(-1.5, .5, 1.2);
+  mesh.updateMatrixWorld(true);
+  const raycaster = new THREE.Raycaster(new THREE.Vector3(-.16, 1, .065), new THREE.Vector3(0, -1, 0));
+  assert.equal(picker.firstHit(raycaster, [mesh]), null);
+  const hit = picker.adjacentHit(raycaster, [mesh], .04);
+  assert.ok(hit);
+  const local = mesh.worldToLocal(hit.point.clone());
+  assert.ok(mesh.geometry.boundingBox.clone().expandByScalar(1e-9).containsPoint(local), 'snap contact lies on the oriented part');
+  assert.ok(Math.abs(local.z - .04) < 1e-8, 'near-edge contact retains the real local side');
+  assert.ok(hit.normal.dot(raycaster.ray.direction) <= 1e-6);
+  assert.ok(hit.point.y < .16, 'no phantom snap to the top of the world AABB');
+  mesh.geometry.dispose(); mesh.material.dispose();
+});
+
+test('placement adjacency respects ray range and never flips the far exit into a front surface', () => {
+  const picker = createPlacementPicker();
+  const mesh = new THREE.Mesh(new THREE.BoxGeometry(.08, .08, .08), new THREE.MeshBasicMaterial());
+  const raycaster = new THREE.Raycaster(new THREE.Vector3(.065, .06, 0), new THREE.Vector3(0, -1, 0));
+  assert.equal(picker.adjacentHit(raycaster, [mesh], .04), null, 'origin inside expanded padding must not snap to its far exit');
+  raycaster.ray.origin.y = 1; raycaster.far = .5;
+  assert.equal(picker.adjacentHit(raycaster, [mesh], .04), null);
+  raycaster.far = 2; raycaster.near = .99;
+  assert.equal(picker.adjacentHit(raycaster, [mesh], .04), null);
+  raycaster.near = 0;
+  assert.ok(picker.adjacentHit(raycaster, [mesh], .04));
+  raycaster.layers.disableAll();
+  assert.equal(picker.adjacentHit(raycaster, [mesh], .04), null, 'adjacent fallback follows the same layer mask as precise ray hits');
+  mesh.geometry.dispose(); mesh.material.dispose();
+});
+
+test('construction node snapping rejects occluded candidates in perspective and orthographic views', () => {
+  const wall = new THREE.Mesh(new THREE.BoxGeometry(.16, .4, .08), new THREE.MeshBasicMaterial({ side: THREE.DoubleSide }));
+  const nodes = [{ id: 'blocked', position: { x: 0, y: 0, z: -.16 } }, { id: 'free', position: { x: .16, y: 0, z: 0 } }];
+  for (const camera of [new THREE.PerspectiveCamera(45, 1, .01, 100), new THREE.OrthographicCamera(-1, 1, 1, -1, .01, 100)]) {
+    camera.position.set(0, 0, 3); camera.lookAt(0, 0, 0); camera.updateMatrixWorld(true);
+    const picker = createPlacementPicker(); const nodesPicker = createProjectedNodePicker(); const pointer = new THREE.Vector2();
+    assert.equal(nodesPicker.pick(nodes, camera, pointer, 200, 200, 22), 'blocked');
+    const accept = node => picker.pointVisible(node.position, camera, [wall], .04);
+    assert.equal(nodesPicker.pick(nodes, camera, pointer, 200, 200, 22, accept), 'free');
+    assert.equal(picker.pointVisible({ x: 0, y: 0, z: 0 }, camera, [wall], .04), true, 'allow a node cube touching the visible surface');
+    wall.visible = false;
+    assert.equal(nodesPicker.pick(nodes, camera, pointer, 200, 200, 22, accept), 'blocked');
+    wall.visible = true;
+  }
+  wall.geometry.dispose(); wall.material.dispose();
+});
+
+test('construction node occlusion preserves visible beam caps at oblique angles for both beam sizes', () => {
+  for (const size of [1, 3]) {
+    const material = new THREE.MeshBasicMaterial({ side: THREE.DoubleSide });
+    const edge = createEdgeMesh(new THREE.Vector3(), new THREE.Vector3(-.64, 0, 0), material, { size });
+    const wall = new THREE.Mesh(new THREE.BoxGeometry(2, 2, .08), material);
+    wall.position.z = .4;
+    for (const camera of [new THREE.PerspectiveCamera(45, 1, .01, 100), new THREE.OrthographicCamera(-1, 1, 1, -1, .01, 100)]) {
+      for (const position of [[0, 0, 3], [2, 1, 3], [3, 3, 3]]) {
+        camera.position.set(...position); camera.lookAt(0, 0, 0); camera.updateMatrixWorld(true);
+        const picker = createPlacementPicker();
+        assert.equal(picker.pointVisible({ x: 0, y: 0, z: 0 }, camera, [edge], size * .04), true, 'a visible endpoint cube does not hide its own logical node');
+        assert.equal(picker.pointVisible({ x: 0, y: 0, z: 0 }, camera, [edge, wall], size * .04), false, 'a separate foreground solid still blocks that endpoint');
+      }
+    }
+    edge.geometry.dispose(); wall.geometry.dispose(); material.dispose();
+  }
+});
+
+test('construction node visibility excludes its incident structure but retains unrelated occluders', () => {
+  const camera = new THREE.PerspectiveCamera(45, 1, .01, 100);
+  camera.position.set(2.5, 2.2, 3); camera.lookAt(0, 0, 0); camera.updateMatrixWorld(true);
+  const start = new THREE.Vector3(-1.12, 0, -.24); const end = new THREE.Vector3(-.56, 0, -2);
+  const material = new THREE.MeshBasicMaterial({ side: THREE.DoubleSide });
+  const edge = createEdgeMesh(start, end, material);
+  edge.userData.nodeIds = ['a', 'b'];
+  const wall = new THREE.Mesh(new THREE.BoxGeometry(.24, .24, .24), material);
+  wall.position.copy(end).lerp(camera.position, .1);
+  const picker = createPlacementPicker();
+  const ignoreIncident = target => target.userData.nodeIds?.includes('b');
+  assert.equal(picker.pointVisible(end, camera, [edge], .04, ignoreIncident), true, 'slanted bridge faces cannot hide their own endpoint');
+  assert.equal(picker.pointVisible(end, camera, [edge, wall], .04, ignoreIncident), false, 'ignoring incident geometry does not bypass a separate foreground solid');
+  wall.userData.nodeIds = ['other-a', 'other-b'];
+  assert.equal(picker.pointVisible(end, camera, [edge, wall], .04, ignoreIncident), false, 'unrelated structure also blocks the node');
+  edge.geometry.dispose(); wall.geometry.dispose(); material.dispose();
+});
+
+test('oblique surface snapping remains outside the hit plane and stable at a rounding tie', () => {
+  const material = new THREE.MeshBasicMaterial({ side: THREE.DoubleSide });
+  const mesh = new THREE.Mesh(new THREE.PlaneGeometry(1, 1), material);
+  mesh.rotation.y = Math.PI / 4; mesh.updateMatrixWorld(true);
+  const normal = new THREE.Vector3(0, 0, 1).transformDirection(mesh.matrixWorld);
+  const raycaster = new THREE.Raycaster(normal.clone(), normal.clone().negate());
+  const plane = new THREE.Plane(new THREE.Vector3(0, 1, 0), 0);
+  const positions = [];
+  for (const jitter of [0, -1e-11, 1e-11]) {
+    raycaster.ray.origin.copy(normal); raycaster.ray.origin.y += jitter;
+    const point = resolvePlacementPoint(raycaster, [mesh], plane, { placementBounds: NODE_PLACEMENT_BOUNDS });
+    assertGridVector(point);
+    assert.ok(point.dot(normal) - .04 * (Math.abs(normal.x) + Math.abs(normal.y) + Math.abs(normal.z)) >= -.0008);
+    positions.push(point.toArray());
+  }
+  assert.deepEqual(positions[1], positions[0]); assert.deepEqual(positions[2], positions[0]);
+  mesh.geometry.dispose(); material.dispose();
+});
+
 test('node snapping reuses projections and refreshes for camera, viewport and topology changes', () => {
   const picker = createProjectedNodePicker();
   const camera = new THREE.PerspectiveCamera(45, 1, .01, 100);
@@ -165,6 +290,21 @@ test('shadow caching freezes during interaction and refreshes after drop without
   assert.equal(controller.reloadRequired, true);
   controller.setQuality({ ...RENDER_QUALITY_DEFAULTS, interactionShadows: true, shadowUpdate: 'continuous' });
   controller.setInteraction(true); assert.equal(renderer.shadowMap.autoUpdate, true);
+});
+
+test('camera refreshes cannot overwrite newer pointer input in the same frame', () => {
+  const values = []; const task = createFrameTask(value => values.push(value));
+  task.schedule('new-pointer');
+  for (let i = 0; i < 10; i++) task.scheduleIfIdle('old-camera-pointer');
+  task.flush();
+  assert.deepEqual(values, ['new-pointer']);
+  task.scheduleIfIdle('stationary-pointer-after-camera-change'); task.flush();
+  assert.equal(values.at(-1), 'stationary-pointer-after-camera-change');
+  task.scheduleIfIdle('camera-refresh'); task.schedule('newer-pointer'); task.flush();
+  assert.equal(values.at(-1), 'newer-pointer');
+  task.schedule('cancelled-pointer'); task.cancel();
+  task.scheduleIfIdle('release-position'); task.flush();
+  assert.equal(values.at(-1), 'release-position');
 });
 
 test('frame tasks coalesce pointer bursts, flush final values and discard cancelled work', () => {
@@ -2128,15 +2268,98 @@ test('connection port markers retain native interface colors by network and role
   assert.equal(nativeConnectionPortColor('mechanical', { gender: 1 }), NATIVE_PORT_COLORS.mechanicalOutput);
   assert.equal(nativeConnectionPortColor('unknown', {}), NATIVE_PORT_COLORS.fallback);
 });
-test('published Mesh interface parts opt into packed game vertex colours only for connection surfaces', () => {
-  assert.equal(isConnectionInterfacePart('mechanical_surface_f', 'meshes/components/wheel_hub_a_base.mesh'), true);
-  assert.equal(isConnectionInterfacePart('electric_surface_a', 'meshes/components/manifold_pipe_c_straight.mesh'), true);
-  assert.equal(isConnectionInterfacePart('group_49', 'meshes/components/interface_electric_a.mesh'), true);
-  assert.equal(isConnectionInterfacePart('unclassified_part', 'meshes/components/unknown.mesh'), false);
-  assert.equal(isConnectionInterfacePart('small_engine_mating_surface_2', 'meshes/components/engine_block_a_0_0_0.mesh'), false);
-  assert.equal(isConnectionInterfacePart('body', 'meshes/components/engine_block_a_0_0_0.mesh'), false);
-  assert.deepEqual([...connectionInterfaceVertexColors(Uint8Array.from([51, 51, 51, 255, 255, 49, 49, 255]), 'mechanical_surface_f', 'meshes/components/wheel_hub_a_base.mesh')], [51, 51, 51, 255, 255, 49, 49, 255]);
-  assert.deepEqual([...connectionInterfaceVertexColors(Uint8Array.from([51, 51, 51, 255]), 'Group_49', 'meshes/components/interface_electric_a.mesh')], [51, 51, 51, 255]);
+test('real published and local Meshes isolate interface triangles without colouring their casing', async () => {
+  const manifest = JSON.parse(readFileSync(new URL('../public/assets/manifests/mesh-manifest.json', import.meta.url)));
+  const samples = [
+    ['interface_electric_a', 132], ['interface_data_b', 18], ['interface_gas_a', 48],
+    ['interface_mechanical_f_a', 38], ['wheel_hub_a_base', 48], ['manifold_pipe_c_straight', 6],
+    ['mechanical_bracket', 32], ['engine_block_a_0_0_0', 16], ['gear_box_a', 32],
+    ['air_manifold_a', 16], ['electric_motor_a', 0], ['electric_motor_b', 0],
+    ['interface_liquid_a', 0], ['interface_torque_a', 0], ['circular_dial_c_a', 0],
+  ];
+  for (const [name, interfaceTriangles] of samples) {
+    const source = 'meshes/components/' + name + '.mesh';
+    const payload = JSON.parse(gunzipSync(readFileSync(new URL('../public/' + manifest.entries[source].url, import.meta.url))));
+    const parsed = { ...payload, parts: payload.parts.map(part => ({ ...part,
+      positions: new Float32Array(part.positions), normals: new Float32Array(part.normals),
+      uv: new Float32Array(part.uv), colors: new Uint8Array(part.colors), indices: new Uint32Array(part.indices),
+    })) };
+    const definition = { id: name, mesh: source };
+    const published = new PublishedAssetLibrary('./');
+    published.manifestPromise = Promise.resolve(manifest);
+    published.meshCache.set(source, Promise.resolve(parsed));
+    const local = new AssetLibrary(); local.parse = async () => parsed;
+    for (const library of [published, local]) {
+      const object = await library.instantiate(definition);
+      const mesh = object.children[0]; const geometry = mesh.geometry;
+      const materials = Array.isArray(mesh.material) ? mesh.material : [mesh.material];
+      assert.equal(geometry.index.count, parsed.parts[0].indices.length, name);
+      assert.deepEqual([...parsed.parts[0].indices], payload.parts[0].indices, 'shared source indices stay intact');
+      assert.deepEqual([...geometry.attributes.gameColorBytes.array], payload.parts[0].colors, 'raw colours stay intact');
+      assert.equal(materials[0].vertexColors, false, 'body remains paintable diagnostic material');
+      assert.equal(materials[0].color.getHexString(), 'b4c3ce');
+      const group = geometry.groups.find(group => materials[group.materialIndex].userData.connectionInterface);
+      assert.equal((group?.count || 0) / 3, interfaceTriangles, name);
+      if (group) {
+        assert.equal(geometry.groups.length, 2, 'only two draw calls, regardless of port count');
+        assert.equal(materials[1].color.getHexString(), 'ffffff');
+        assert.equal(materials[1].vertexColors, true);
+        const identified = new Set(['ff3131', '1860ff', '1e9999', 'ffcc31', '136666', '997100', 'cc9900']);
+        for (let i = group.start; i < group.start + group.count; i++) {
+          const vertex = geometry.index.getX(i);
+          const raw = payload.parts[0].colors.slice(vertex * 4, vertex * 4 + 3).map(n => n.toString(16).padStart(2, '0')).join('');
+          assert.ok(identified.has(raw), 'no casing/slot bytes enter the protected interface group');
+          assert.equal(new THREE.Color().fromBufferAttribute(geometry.attributes.color, vertex).getHexString(), raw, 'sRGB survives the linear vertex channel');
+        }
+        const reflected = reflectGeometry(geometry, 'x');
+        assert.deepEqual(reflected.groups, geometry.groups);
+        assert.deepEqual(reflected.attributes.color.array, geometry.attributes.color.array);
+        reflected.dispose();
+      } else assert.equal(geometry.attributes.color, undefined, 'unverified body palette is not rendered as literal colour');
+      let disposed = 0; materials.forEach(material => material.addEventListener('dispose', () => disposed++));
+      disposeObject(object); assert.equal(disposed, materials.length);
+    }
+  }
+});
+
+test('interface classification never bleeds across a mixed body triangle or mutates shared indices', () => {
+  const geometry = new THREE.BufferGeometry();
+  const original = new Uint16Array([0, 1, 2, 0, 2, 3]);
+  geometry.setIndex(new THREE.BufferAttribute(original, 1));
+  const colors = new Uint8Array([255, 49, 49, 255, 255, 49, 49, 255, 255, 49, 49, 255, 153, 0, 0, 255]);
+  const material = new THREE.MeshStandardMaterial({ color: '#b4c3ce' });
+  const materials = applyConnectionInterfaceColors(geometry, colors, 'meshes/components/interface_electric_a.mesh', material);
+  assert.deepEqual([...geometry.index.array], [0, 2, 3, 0, 1, 2]);
+  assert.deepEqual([...original], [0, 1, 2, 0, 2, 3]);
+  assert.deepEqual(geometry.groups, [{ start: 0, count: 3, materialIndex: 0 }, { start: 3, count: 3, materialIndex: 1 }]);
+  materials.forEach(material => material.dispose()); geometry.dispose();
+});
+
+test('published interface assembly leaves sockets uncovered and keeps ordinary dynamic parts', async () => {
+  const manifest = JSON.parse(readFileSync(new URL('../public/assets/manifests/mesh-manifest.json', import.meta.url)));
+  for (const id of ['electrical_interface_straight', 'data_interface_angle', 'gas_interface_straight',
+    'liquid_interface_angle', 'mechanical_interface_in_straight', 'torque_interface_straight', 'wheel']) {
+    const definition = JSON.parse(readFileSync(new URL('../public/data/definitions/' + id + '.json', import.meta.url)));
+    definition.meshBinding = JSON.parse(readFileSync(new URL('../public/data/bindings/' + id + '.json', import.meta.url)));
+    const library = new PublishedAssetLibrary('./'); library.manifestPromise = Promise.resolve(manifest);
+    const requested = [];
+    library.parse = async source => {
+      requested.push(source);
+      const payload = JSON.parse(gunzipSync(readFileSync(new URL('../public/' + manifest.entries[source].url, import.meta.url))));
+      return { ...payload, parts: payload.parts.map(part => ({ ...part,
+        positions: new Float32Array(part.positions), normals: new Float32Array(part.normals),
+        uv: new Float32Array(part.uv), colors: new Uint8Array(part.colors), indices: new Uint32Array(part.indices),
+      })) };
+    };
+    const object = await library.instantiate(definition);
+    assert.ok(requested.includes(definition.meshBinding.staticMesh));
+    assert.ok(requested.every(path => !path.includes('/cable_end_')), 'unconnected sockets are not covered by a cable plug');
+    if (id === 'wheel') {
+      assert.ok(object.children.length > 10, 'ordinary dynamics with default-false flags are not globally filtered');
+      assert.ok(requested.includes('meshes/components/wheel_hub_a_pivot.mesh'));
+    } else assert.equal(object.children.length, 1);
+    disposeObject(object);
+  }
 });
 
 test('model shell discards enclosed geometry and small protrusions before budgeted quad lofting', () => {

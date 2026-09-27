@@ -965,7 +965,7 @@ function subgridViewColor(gridId) {
   return SUBGRID_VIEW_COLORS[index];
 }
 function setSubgridMaterialColor(material, gridId) {
-  if (!material?.color) return;
+  if (!material?.color || material.userData.connectionInterface) return;
   material.color.set(subgridViewColor(gridId)); material.needsUpdate = true;
 }
 function applySubgridViewMaterials() {
@@ -1108,6 +1108,7 @@ function buildTopologyVisual(state, components = new Map(), changedKeys = null) 
       const depthKey = `edge:${edge.id}`;
       const mesh = createEdgeMesh(byId.get(edge.a).position, byId.get(edge.b).position, structureMaterial(edge.color, edge.col, topologyMaterials.edge, THREE.DoubleSide, { depthLayer: RENDER_DEPTH_LAYERS.edge, depthKey, gridId: edge.gridId }), { outlined: settings.edgeOutlinesVisible, size: edge.size });
       mesh.userData.topology = 'edge'; mesh.userData.edgeId = edge.id;
+      mesh.userData.nodeIds = [edge.a, edge.b];
       mesh.castShadow = true; mesh.receiveShadow = true;
       configureOpaqueDepthLayer(mesh, RENDER_DEPTH_LAYERS.edge, { key: depthKey });
       mesh.visible = !edge.hidden;
@@ -2692,8 +2693,9 @@ function applyComponentPaint(object, color) {
   object.traverse(child => {
     if (!child.isMesh) return;
     if (child.userData.source?.includes('/car_wheel')) return;
-    if (child.userData.connectionInterface) return;
-    for (const material of Array.isArray(child.material) ? child.material : [child.material]) material.color.set(value);
+    for (const material of Array.isArray(child.material) ? child.material : [child.material]) {
+      if (!material.userData.connectionInterface) material.color.set(value);
+    }
   });
   return true;
 }
@@ -2833,8 +2835,10 @@ async function updatePlacementPreview(point) {
     const preview = makePlacementPreview(reflectVisualBasis(await library.instantiate(definition), 'x'));
     if (request !== placementPreviewRequest || tool !== 'place' || type !== selectedType) { disposeObject(preview); return; }
     placementPreviewLoadingType = '';
-    placementPreview = preview; placementPreviewType = type; applyPendingPlacementOrientation(preview); scene.add(preview);
-    setPlacementPreviewPoint(placementPoint() || cursorPoint || point);
+    placementPreview = preview; placementPreviewType = type; preview.name = 'component-placement-preview';
+    applyPendingPlacementOrientation(preview); scene.add(preview);
+    if (pointerInCanvas) setPlacementPreviewPoint(placementPoint() || cursorPoint || point);
+    else preview.visible = false;
   } catch (error) {
     if (request === placementPreviewRequest) { placementPreviewLoadingType = ''; reportError('放置虚影加载失败：{error}', error); }
   }
@@ -2930,11 +2934,16 @@ async function place(point) {
   if (!catalog.has(selectedType)) throw new Error('请先选择组件');
   if (objects.length >= LIMIT) throw new Error('达到组件上限');
   if (mirrorMode.active && objects.length >= LIMIT - 1) throw new Error('镜像放置会超过组件上限');
+  // Loading the selected Mesh can outlive this pointer event. Keep the click
+  // ray so subsequent mouse movement or orbiting cannot move the commit.
+  const placementRaycaster = new THREE.Raycaster(raycaster.ray.origin.clone(), raycaster.ray.direction.clone(), raycaster.near, raycaster.far);
+  placementRaycaster.layers.mask = raycaster.layers.mask;
   const color = currentPaintColor();
   const colorIndex = nearestNativePaintIndex(color);
   const defaultAccessoryType = defaultAccessoryForPlacement(selectedType);
   const object = await createObject({ id: crypto.randomUUID(), type: selectedType, gridId: activeGridId, ...(defaultAccessoryType ? { nativeAccessory: createNativeAccessoryItem(defaultAccessoryType, nextNativeAccessoryItemId()), nativeAccessoryContainer: 'acc' } : {}), ...(selectedType === 'microcontroller' ? { nativeProperties: microcontrollerState() } : {}), ...(color ? { paintColor: color } : {}), ...(colorIndex !== null ? { colors: [colorIndex] } : {}), ...(pendingPlacementOrientation.localMirrorAxes.length ? { localMirrorAxes: [...pendingPlacementOrientation.localMirrorAxes] } : {}), position: { x: 0, y: 0, z: 0 }, rotation: { ...pendingPlacementOrientation.rotation }, scale: { x: 1, y: 1, z: 1 } });
-  const resolvedPoint = resolvePlacementPoint(raycaster, constructionHitTargets(), plane, {
+  const resolvedPoint = resolvePlacementPoint(placementRaycaster, constructionHitTargets(), plane, {
+    picker: placementPicker,
     adjacentTargets: objects.filter(candidate => candidate.visible),
     adjacentPadding: CELL_SIZE_WORLD / 2,
     placementBounds: relativePlacementBounds(object),
@@ -3909,6 +3918,9 @@ async function loadCatalog() {
 function pointerRay(event) {
   const rect = renderer.domElement.getBoundingClientRect();
   pointer.set((event.clientX - rect.left) / rect.width * 2 - 1, -(event.clientY - rect.top) / rect.height * 2 + 1);
+  // OrbitControls updates the pose before rendering updates camera matrices.
+  // Picking in that interval must use the same view as the upcoming frame.
+  camera.updateWorldMatrix(true, false);
   raycaster.setFromCamera(pointer, camera);
 }
 function relativePlacementBounds(object) {
@@ -3953,11 +3965,22 @@ function pick({ ignoreComponentFilter = false } = {}) {
   while (object && !objects.includes(object)) object = object.parent;
   return object || null;
 }
-function pickTopologyNode(includeHidden = false, maxPixels = 22) {
+function pickTopologyNode(includeHidden = false, maxPixels = 22, accept = null) {
   if (!selectableKinds.node && !includeHidden) return null;
   if ((!showNodes || !topologyHelpersVisible) && !includeHidden) return null;
   const rect = renderer.domElement.getBoundingClientRect();
-  return nodePicker.pick(topology.nodes, camera, pointer, rect.width, rect.height, maxPixels);
+  return nodePicker.pick(topology.nodes, camera, pointer, rect.width, rect.height, maxPixels, accept);
+}
+function pickConstructionNode(includeHidden = false) {
+  const targets = constructionHitTargets();
+  return pickTopologyNode(includeHidden, 22, node => {
+    if (!axes.every(axis => worldToCell(node.position[axis]) !== null)) return false;
+    const size = topology.edges.some(edge => edge.size === 3 && !edge.hidden && (edge.a === node.id || edge.b === node.id)) ? 3 : 1;
+    // A node is an anchor of its incident structure. Slanted bridge faces and
+    // panel offsets must not hide their own anchor; other solids still can.
+    return placementPicker.pointVisible(node.position, camera, targets, size * CELL_SIZE_WORLD / 2,
+      target => target.userData.nodeIds?.includes(node.id));
+  });
 }
 function pickSelectionTarget({ anchorFallback = true } = {}) {
   const roots = [
@@ -4392,7 +4415,7 @@ function saveTransparencyGroup() {
   status('已保存隐藏组 {name}', { name });
 }
 function edgePoint() {
-  const nodeId = pickTopologyNode(true);
+  const nodeId = pickConstructionNode(true);
   const node = topology.nodes.find(value => value.id === nodeId);
   // The endpoint node occupies a full grid cell, so keep its visible cube
   // outside the hit surface using the same bounds-aware rule as components.
@@ -4436,7 +4459,7 @@ function refreshConnectionPreview() {
   pointerRay(edgePointer); updateConnectionDraftPreview(connectionPoint());
 }
 function nodePoint() {
-  const nodeId = pickTopologyNode();
+  const nodeId = pickConstructionNode();
   const node = topology.nodes.find(value => value.id === nodeId);
   if (node) return new THREE.Vector3(node.position.x, node.position.y, node.position.z);
   return projectBuildPoint(raycaster.ray, nodeMoveFrame || cameraBuildFrame(camera, controls.target));
@@ -4690,7 +4713,7 @@ function addConnectionRoutePoint(point) {
 }
 function handleTopologyClick(point) {
   if (tool === 'node') {
-    const nodeId = pickTopologyNode();
+    const nodeId = pickConstructionNode();
     if (nodeId) {
       if (selectedTopologyNode && selectedTopologyNode !== nodeId) {
         try {
@@ -4799,7 +4822,12 @@ function processPointerMove(event) {
   void updatePlacementPreview(point);
   if (tool === 'subgrid-place') setImportedSubgridPreviewPoint(point);
 }
-renderer.domElement.addEventListener('pointermove', event => pointerMoveTask.schedule(event));
+renderer.domElement.addEventListener('pointermove', event => {
+  // Orbit damping emits camera changes before the queued pointer is flushed.
+  // Retain the raw position even while preview work is suspended for rotation.
+  edgePointer = { clientX: event.clientX, clientY: event.clientY };
+  pointerMoveTask.schedule(event);
+});
 renderer.domElement.addEventListener('pointercancel', () => pointerMoveTask.cancel());
 renderer.domElement.addEventListener('pointerleave', () => { pointerMoveTask.cancel(); pointerInCanvas = false; hoveredObject = null; hideConnectionPortTooltip(); updateInteractionHighlights(); edgePreview.visible = false; edgeAnchor.visible = false; edgeRuler.hide(); if (placementPreview) placementPreview.visible = false; placementIndicator.hidden = true; if (importedSubgridDraft?.preview) importedSubgridDraft.preview.visible = false; });
 renderer.domElement.addEventListener('pointerup', event => {
@@ -5491,7 +5519,14 @@ window.addEventListener('keydown', e => {
   if (tool === 'place' && PLACEMENT_ORIENTATION_KEYS[key]) {
     e.preventDefault();
     pendingPlacementOrientation = updatePlacementOrientation(pendingPlacementOrientation, key);
-    if (placementPreview && cursorPoint) setPlacementPreviewPoint(cursorPoint);
+    if (placementPreview && cursorPoint) {
+      applyPendingPlacementOrientation(placementPreview);
+      if (edgePointer) pointerRay(edgePointer);
+      const point = placementPoint();
+      if (point) { cursorPoint = point; setPlacementPreviewPoint(point); }
+      else { placementPreview.visible = false; updatePlacementIndicator(); }
+      if (pointerInCanvas && edgePointer) pointerMoveTask.schedule(edgePointer);
+    }
     else updatePlacementIndicator();
     return;
   }
@@ -5577,9 +5612,9 @@ function scheduleSettings() {
   if (!preferencesReady) return;
   clearTimeout(settingsTimer); settingsTimer = setTimeout(saveSettings, 180);
 }
-controls.addEventListener('change', () => { scheduleSettings(); if (!busy && pointerInCanvas && edgePointer) pointerMoveTask.schedule(edgePointer); });
+controls.addEventListener('change', () => { scheduleSettings(); if (!busy && pointerInCanvas && edgePointer) pointerMoveTask.scheduleIfIdle(edgePointer); });
 controls.addEventListener('start', () => { orbitInteracting = true; pointerMoveTask.cancel(); renderQuality.setInteraction(true); });
-controls.addEventListener('end', () => { orbitInteracting = false; renderQuality.setInteraction(dragRenderMode); if (pointerInCanvas && edgePointer) pointerMoveTask.schedule(edgePointer); });
+controls.addEventListener('end', () => { orbitInteracting = false; renderQuality.setInteraction(dragRenderMode); if (pointerInCanvas && edgePointer) pointerMoveTask.scheduleIfIdle(edgePointer); });
 window.addEventListener('pagehide', saveSettings);
 document.addEventListener('visibilitychange', () => { if (document.visibilityState === 'hidden') saveSettings(); });
 
