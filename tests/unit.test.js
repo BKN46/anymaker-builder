@@ -52,6 +52,177 @@ import { encodeProjectCode, decodeProjectCode } from '../src/editor/project-code
 import { createFrameTask, planVisualUpdate, topologyVisualRecords, visualSignature } from '../src/editor/visual-cache.js';
 import { normalizeRenderQuality, renderPixelRatio, renderQualityPreset, RENDER_QUALITY_DEFAULTS, RENDER_QUALITY_PRESETS, createRenderQualityController } from '../src/editor/render-quality.js';
 import { createPlacementPicker, createProjectedNodePicker } from '../src/editor/placement-picking.js';
+import { detectMechanicalConnections, reconcileMechanicalConnections, validateMechanicalConnections, NATIVE_MECHANICAL_MATE_RULES } from '../src/editor/mechanical-connections.js';
+import { MECHANICAL_MATE_PROFILES } from '../src/editor/mechanical-mate-profiles.js';
+import { hingeAssemblyFixture, mateObject } from './mechanical-fixtures.js';
+
+test('published mechanical profiles preserve every supported pair and its source fields', () => {
+  const types = [...new Set(NATIVE_MECHANICAL_MATE_RULES.flatMap(rule => [rule.a, rule.b]))].sort();
+  assert.deepEqual(Object.keys(MECHANICAL_MATE_PROFILES).sort(), types);
+  for (const type of types) {
+    const definition = JSON.parse(readFileSync(new URL(`../public/data/definitions/${type}.json`, import.meta.url)));
+    for (const [key, value] of Object.entries(MECHANICAL_MATE_PROFILES[type])) assert.deepEqual(value, definition[key], `${type}.${key}`);
+    assert.deepEqual(MECHANICAL_MATE_PROFILES[type].constraint_orientations, definition.constraint_orientations);
+  }
+});
+
+test('aligned mates rebuild after move, copy, deletion and history restoration', () => {
+  const objects = [mateObject('pin', 'hinge_pin'), mateObject('knuckle', 'hinge_knuckle', { x: 0, y: 0, z: .08 })];
+  const initial = reconcileMechanicalConnections({ nodes: [], edges: [], plates: [], links: [] }, objects);
+  assert.equal(initial.mechanicalConnections.length, 1);
+  const history = new History({ objects, topology: initial });
+  const moved = moveObjects(objects, ['knuckle'], { x: .08, y: 0, z: 0 }).objects;
+  const detached = reconcileMechanicalConnections(initial, moved);
+  history.commit({ objects: moved, topology: detached });
+  assert.equal(detached.mechanicalConnections.length, 0);
+  const undone = history.peekUndo();
+  assert.deepEqual(reconcileMechanicalConnections(undone.topology, undone.objects), initial);
+  const copied = copyObjects(objects, ['pin', 'knuckle'], { x: .8, y: 0, z: 0 });
+  const connections = reconcileMechanicalConnections(initial, copied.objects).mechanicalConnections;
+  assert.equal(connections.length, 2);
+  assert.ok(connections.some(connection => connection.from === copied.idMap.pin && connection.to === copied.idMap.knuckle));
+  assert.equal(reconcileMechanicalConnections(initial, removeObjects(objects, ['pin']).objects).mechanicalConnections.length, 0);
+  assert.equal(detectMechanicalConnections(objects.map(object => ({ ...object, hidden: true }))).connections.length, 1);
+  assert.equal(initial.mechanicalConnections.length, 1, 'original snapshot remains independent');
+});
+
+test('mate detection rejects wrong axes, excessive distance, scale and ambiguous sockets', () => {
+  const pin = mateObject('pin', 'hinge_pin');
+  const knuckle = mateObject('knuckle', 'hinge_knuckle', { x: 0, y: 0, z: .08 });
+  assert.equal(detectMechanicalConnections([pin, { ...knuckle, position: { x: .00001, y: 0, z: .08 } }]).connections.length, 0);
+  // Rotate about the anchor, keeping its position coincident but its axis wrong.
+  const wrongAxis = mateObject('knuckle', 'hinge_knuckle', { x: -.08, y: 0, z: 0 }, { x: 0, y: -Math.PI / 2, z: 0 });
+  assert.equal(detectMechanicalConnections([pin, wrongAxis]).connections.length, 0);
+  const scaled = detectMechanicalConnections([{ ...pin, scale: { x: 2, y: 2, z: 2 } }, knuckle]);
+  assert.equal(scaled.connections.length, 0);
+  assert.equal(scaled.diagnostics[0].code, 'scaled-mate');
+  const overlaps = [pin, knuckle, { ...knuckle, id: 'duplicate' }];
+  const ambiguous = detectMechanicalConnections(overlaps);
+  assert.equal(ambiguous.connections.length, 0);
+  assert.ok(ambiguous.diagnostics.every(value => value.code === 'ambiguous-mate'));
+  assert.throws(() => toNativePairFromEditor({ objects: overlaps }), /ambiguous/);
+  const malformed = { ...pin, definitionOverride: { id: 'hinge_pin', constraint_orientations: [[1, 2]] } };
+  assert.equal(detectMechanicalConnections([malformed, knuckle]).diagnostics[0].code, 'invalid-mate-definition');
+  assert.throws(() => toNativePairFromEditor({ objects: [malformed, knuckle] }), /invalid-mate-definition/);
+});
+
+test('mounting mates persist both orientation indices and reciprocal body references', () => {
+  // Native Ca = +90 degrees about Y; Cb = 180 degrees about X.
+  const native = { definitions: { components: ['mounting_pin', 'mounting_knuckle'] }, vehicles: { vehicles: [{ id: 1, grids: [{ components: [
+    { id: 1, def: 0, pos: [0, 0, 0], rot: [1, 0, 0, 0, 1, 0, 0, 0, 1] },
+    { id: 2, def: 1, pos: [0, 0, 0], rot: [0, 0, -1, 0, -1, 0, -1, 0, 0] },
+  ] }] }] } };
+  const document = toEditorDocument(parseNativePair(native, {}));
+  const connection = detectMechanicalConnections(document.objects).connections[0];
+  assert.deepEqual(connection.orientationIndices, [1, 1]);
+  assert.deepEqual(validateMechanicalConnections([connection])[0].orientationIndices, [1, 1]);
+  assert.throws(() => validateMechanicalConnections([{ ...connection, orientationIndices: [32, 0] }]), /orientation/);
+  const output = toNativePairFromEditor(document, { vehicleId: 7 });
+  const bodies = output.data.vehicles.vehicles;
+  assert.equal(bodies.length, 2);
+  const a = bodies[0].grids[0].components[0]; const b = bodies[1].grids[0].components[0];
+  assert.equal(a.con_orient_index, 1); assert.equal(b.con_orient_index, 1);
+  assert.deepEqual([a.connected_vehicle, a.connected_component], [8, b.id]);
+  assert.deepEqual([b.connected_vehicle, b.connected_component], [7, a.id]);
+  assert.equal(toEditorDocument(parseNativePair(output.data, output.meta), { vehicleIds: ['7'] }).objects.length, 2);
+});
+
+test('hinge export separates subgrids and preserves geometry, paint and reciprocal references', () => {
+  const source = hingeAssemblyFixture(); const original = structuredClone(source);
+  const document = toEditorDocument(parseNativePair(source, {}));
+  const before = structuredClone(document);
+  const pair = toNativePairFromEditor(document);
+  const bodies = pair.data.vehicles.vehicles;
+  assert.equal(bodies.length, 2);
+  assert.deepEqual(bodies.map(body => body.nodes.length), [2, 2]);
+  assert.deepEqual(bodies.map(body => body.edges.length), [1, 1]);
+  for (const body of bodies) {
+    assert.equal(body.grids[0].components.length, 1);
+    assert.equal(body.mechanical_links.length, 0);
+    const component = body.grids[0].components[0];
+    assert.notEqual(component.connected_vehicle, body.id);
+    const mate = bodies.find(candidate => candidate.id === component.connected_vehicle).grids[0].components.find(candidate => candidate.id === component.connected_component);
+    assert.equal(mate.connected_vehicle, body.id); assert.equal(mate.connected_component, component.id);
+    assert.ok(body.edges.every(edge => body.nodes.some(node => node.id === edge.n0) && body.nodes.some(node => node.id === edge.n1)));
+  }
+  const restored = toEditorDocument(parseNativePair(pair.data, pair.meta), { vehicleIds: ['1'] });
+  assert.equal(restored.topology.mechanicalConnections.length, 1);
+  for (const object of document.objects) {
+    const match = restored.objects.find(value => value.type === object.type);
+    assert.deepEqual(match.colors, object.colors);
+    for (const axis of ['x', 'y', 'z']) assert.ok(Math.abs(match.position[axis] - object.position[axis]) < 1e-10);
+  }
+  assert.deepEqual(document, before); assert.deepEqual(source, original);
+  pair.data.vehicles.vehicles[0].transform.t[0] = 5;
+  assert.equal(pair.data.vehicles.vehicles[1].transform.t[0], 0);
+});
+
+test('rail and ballscrew export multiple sliders and preserve travel when importing one root', () => {
+  for (const [railType, sliderType] of [['rail', 'rail_slider'], ['rail_ballscrew', 'rail_ballscrew_slider']]) {
+    const objects = [
+      { ...mateObject('rail', railType), nativeExtension: [0, 0, 8], nativeProperties: { connected_components: [{ connected_vehicle: 999, connected_component: 999 }] } },
+      mateObject('first', sliderType, { x: 0, y: 0, z: .16 }),
+      mateObject('last', sliderType, { x: 0, y: 0, z: .56 }),
+    ];
+    const found = detectMechanicalConnections(objects);
+    assert.equal(found.connections.length, 2); assert.equal(found.diagnostics.length, 0);
+    assert.equal(detectMechanicalConnections([objects[0], { ...objects[1], position: { x: .08, y: 0, z: .16 } }]).connections.length, 0);
+    assert.equal(detectMechanicalConnections([objects[0], { ...objects[1], position: { x: 0, y: 0, z: 1.6 } }]).connections.length, 0);
+    const pair = toNativePairFromEditor({ objects });
+    assert.equal(pair.data.vehicles.vehicles.length, 3);
+    const main = pair.data.vehicles.vehicles.find(body => body.grids[0].components.some(component => component.def === 0));
+    const rail = main.grids[0].components[0];
+    assert.equal(rail.connected_components.length, 2);
+    assert.equal(rail.connected_vehicle, undefined);
+    for (const ref of rail.connected_components) {
+      const body = pair.data.vehicles.vehicles.find(value => value.id === ref.connected_vehicle);
+      const slider = body.grids[0].components.find(value => value.id === ref.connected_component);
+      assert.equal(slider.connected_component, rail.id); assert.equal(slider.connected_vehicle, main.id);
+    }
+    const restored = toEditorDocument(parseNativePair(pair.data, pair.meta), { vehicleIds: [String(main.id)] });
+    assert.equal(restored.objects.length, 3); assert.equal(restored.topology.mechanicalConnections.length, 2);
+    assert.deepEqual(restored.objects.filter(value => value.type === sliderType).map(value => value.position.z), [.16, .56]);
+    const single = toNativePairFromEditor({ objects: [objects[0]] });
+    assert.equal(single.data.vehicles.vehicles[0].grids[0].components[0].connected_components, undefined);
+  }
+});
+
+test('latch handles and towing mates export distinct physical bodies without signal links', () => {
+  for (const [a, b, position, rotation] of [
+    ['latch_pin', 'latch_knuckle', { x: 0, y: 0, z: .08 }],
+    ['latch_handle', 'latch_knuckle', { x: 0, y: 0, z: .08 }],
+    ['tow_bar', 'tow_hitch', { x: 0, y: 0, z: 0 }],
+    ['truck_hitch_kingpin', 'truck_hitch', { x: 0, y: .16, z: 0 }, { x: 0, y: 0, z: Math.PI }],
+  ]) {
+    const objects = [mateObject('a', a), mateObject('b', b, position, rotation)];
+    assert.equal(detectMechanicalConnections(objects).connections.length, 1, a);
+    const pair = toNativePairFromEditor({ objects });
+    assert.equal(pair.data.vehicles.vehicles.length, 2, a);
+    assert.ok(pair.data.vehicles.vehicles.every(body => body.mechanical_links.length === 0));
+  }
+});
+
+test('physical export reports welded endpoints, cross-body cables and unrepresentable reflections', () => {
+  const document = toEditorDocument(parseNativePair(hingeAssemblyFixture(), {}));
+  const welded = structuredClone(document);
+  welded.topology.edges.push({ id: 'weld', a: welded.topology.nodes[0].id, b: welded.topology.nodes[2].id });
+  assert.throws(() => toNativePairFromEditor(welded), /same rigid structure/);
+  const cable = structuredClone(document);
+  cable.topology.links.push({ id: 'cable', kind: 'electric', from: { componentId: cable.objects[0].id }, to: { componentId: cable.objects[1].id } });
+  assert.throws(() => toNativePairFromEditor(cable), /network link crosses/);
+  const mirrored = { objects: [mateObject('a', 'hinge_pin'), mateObject('b', 'hinge_knuckle', { x: 0, y: 0, z: .08 })].map(object => ({ ...object, localMirrorAxes: ['x'] })) };
+  assert.throws(() => toNativePairFromEditor(mirrored), /reflected/);
+});
+
+test('towing uses the game default positive Y axis, free yaw and both directional limits', () => {
+  const bar = mateObject('bar', 'tow_bar');
+  const hitch = mateObject('hitch', 'tow_hitch', undefined, { x: 0, y: Math.PI * .7, z: 0 });
+  assert.equal(detectMechanicalConnections([bar, hitch]).connections.length, 1);
+  const tilted = { ...hitch, rotation: { x: Math.PI / 6, y: 0, z: 0 } };
+  assert.equal(detectMechanicalConnections([bar, tilted]).connections.length, 1);
+  assert.equal(detectMechanicalConnections([bar, { ...hitch, rotation: { x: Math.PI / 3, y: 0, z: 0 } }]).connections.length, 0);
+  assert.equal(detectMechanicalConnections([bar, { ...tilted, definitionOverride: { id: 'tow_hitch', tow_hitch_dot_min: .9 } }]).connections.length, 0);
+});
 
 test('placement picking caches world bounds and only raycasts the nearest solid candidates', () => {
   const picker = createPlacementPicker();
@@ -1235,7 +1406,7 @@ test('native export omits unreferenced editor nodes and keeps structural referen
   assert.deepEqual(vehicle.edges, [{ n0: 1, n1: 2 }]);
   assert.throws(() => toNativePairFromEditor({ objects: [], topology: { nodes: [], edges: [{ a: 'missing', b: 'also-missing' }], plates: [] } }), /missing node/);
 });
-test('native export removes a collinear isolated plate node before game island splitting', () => {
+test('native export removes a collinear isolated plate node before native subgrid partitioning', () => {
   const point = (x, y, z) => ({ id: `${x}-${y}-${z}`, nativeProjected: true, position: { x: cell(x), y: cell(y), z: cell(z) } });
   const left = point(-1, 0, 0); const isolated = point(0, 0, 0); const right = point(1, 0, 0);
   const top = point(1, 1, 0);
@@ -1598,8 +1769,8 @@ test('native component mates become physical connections for hinge and related c
     ['rail', [4, 0, 0]], ['rail_slider', [4, 0, 0]],
     ['rail_ballscrew', [6, 0, 0]], ['rail_ballscrew_slider', [6, 0, 0]],
     ['tow_bar', [8, 0, 0]], ['tow_hitch', [8, 0, 0]],
-    ['truck_hitch_kingpin', [10, 1, 0]], ['truck_hitch', [10, 1, 0]],
-  ].map(([type, pos], index) => ({ def: definitions.indexOf(type), id: index + 1, pos, rot: [1, 0, 0, 0, 1, 0, 0, 0, 1] }));
+    ['truck_hitch_kingpin', [10, 1, 0]], ['truck_hitch', [10, 3, 0]],
+  ].map(([type, pos], index) => ({ def: definitions.indexOf(type), id: index + 1, pos, rot: type === 'truck_hitch' ? [-1, 0, 0, 0, -1, 0, 0, 0, 1] : [1, 0, 0, 0, 1, 0, 0, 0, 1] }));
   const model = parseNativePair({ definitions: { components: definitions }, vehicles: { vehicles: [{ id: 1, grids: [{ components }] }] } }, {});
   const topology = toEditorTopology(model, { vehicleIds: ['1'] });
   assert.deepEqual(topology.mechanicalConnections.map(connection => connection.type), ['hinge', 'latch', 'mounting', 'rail', 'rail_ballscrew', 'tow', 'tow']);

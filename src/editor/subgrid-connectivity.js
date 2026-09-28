@@ -1,4 +1,4 @@
-// Renderer-independent structural island analysis.
+// Renderer-independent structural connectivity analysis for subgrids.
 //
 // The checker does not use a padded render AABB as a structural connection.
 // The observed game node representation is a one-cell cube (the eight
@@ -21,7 +21,7 @@ function intervalGap(aMin, aMax, bMin, bMax) { return Math.max(0, Math.max(aMin,
 // Two component volumes are connected only when their boxes touch at a face,
 // edge, or corner. Fully overlapping AABBs are deliberately not treated as a
 // structural connection: overlap is a placement/collision diagnostic, not a
-// editor island edge.
+// rigid connection within a subgrid.
 function boxesTouch(a, b, epsilon = EPSILON) {
   if (!validBounds(a) || !validBounds(b)) return false;
   const gaps = AXES.map(axis => intervalGap(a.min[axis], a.max[axis], b.min[axis], b.max[axis]));
@@ -162,10 +162,10 @@ function buildAnalysis({ components = [], topology = {}, cellSize = DEFAULT_CELL
     });
   }
   const structuralGroups = groups.filter(group => group.components.length || group.topology.length);
-  if (structuralGroups.length > 1) addDiagnostic(diagnostics, 'multiple-islands', 'info', structuralGroups.flatMap(group => [...group.components, ...group.topology.map(item => item.id)]), 'Vehicle contains multiple disconnected structural islands.');
+  if (structuralGroups.length > 1) addDiagnostic(diagnostics, 'multiple-islands', 'info', structuralGroups.flatMap(group => [...group.components, ...group.topology.map(item => item.id)]), 'Vehicle contains multiple independent subgrids.');
   for (const group of structuralGroups) {
     const gridIds = new Set(group.components.map(id => componentById.get(id)?.gridId).filter(Boolean));
-    if (gridIds.size > 1) addDiagnostic(diagnostics, 'mixed-grid-island', 'warning', group.components, 'One structural island contains multiple existing grid IDs.');
+    if (gridIds.size > 1) addDiagnostic(diagnostics, 'mixed-grid-island', 'warning', group.components, 'Connected structure uses multiple subgrid IDs.');
   }
   return { groups, diagnostics, isValid: diagnostics.every(item => item.severity !== 'error') };
 }
@@ -175,6 +175,6 @@ export function analyzeSubgridIntegrity(options = {}) { return buildAnalysis(opt
 /**
  * Partition records using the same strict game-evidence connection rules as
  * the integrity checker. `padding` is accepted for source compatibility but
- * intentionally ignored; padded AABBs caused false island merges.
+ * intentionally ignored; padded AABBs incorrectly merged separate subgrids.
  */
 export function partitionSubgrids(options = {}) { return buildAnalysis(options).groups; }

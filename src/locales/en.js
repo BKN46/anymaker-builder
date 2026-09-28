@@ -1,6 +1,13 @@
 import { operationMessages } from './operations-en.js';
 
 export const englishMessages = {
+  '自动机械配合：{count}': 'Automatic mechanical mates: {count}',
+  '机械配合位置存在多个候选，请移开重叠组件：{components}': 'Several parts compete for one mechanical mate. Move overlapping parts: {components}',
+  '机械配合需要原始尺寸，请将缩放恢复为 1：{components}': 'Mechanical mates require original dimensions. Restore scale to 1: {components}',
+  '机械配合定义无效：{components}': 'Invalid mechanical mate definition: {components}',
+  '配合两端已被结构刚性连在一起，请检查梁和安装面：{components}': 'Both mate ends belong to one rigid structure. Check beams and mounting faces: {components}',
+  '暂不支持导出跨机械刚体的网络连接：{components}': 'Export of network connections across mechanical bodies is not yet supported: {components}',
+  '暂不支持导出反射几何的机械配合：{components}': 'Export of mechanical mates with reflected geometry is not yet supported: {components}',
   ...operationMessages,
   '\u6700\u5927\u5bb9\u91cf\uff1a{liters} L\uff08{cells} \u683c \u00d7 0.5 L\uff09': 'Max capacity: {liters} L ({cells} cells \u00d7 0.5 L)',
   '\u955c\u5934\u8f85\u52a9\u706f': 'Camera fill light', '\u955c\u5934\u8f85\u52a9\u706f\u5f3a\u5ea6': 'Camera fill intensity',
@@ -28,8 +35,8 @@ export const englishMessages = {
   '放置方向': 'Placement orientation', 'J / K / L：X / Y / Z 旋转 90°': 'J / K / L: rotate X / Y / Z by 90°', 'U / I / O：X / Y / Z 镜像': 'U / I / O: mirror X / Y / Z',
   '显示放置方向提示': 'Show placement direction hints',
   '复制选中': 'Copy', '镜像 X': 'Mirror X', '拆分子网格': 'Split grid', '合并子网格': 'Merge grids', '子网格检查': 'Check subgrids', '子网格视图': 'Subgrid view', '子网格检查完成：{count} 个子网格': 'Subgrid check complete: {count} subgrids',
-  '子网格检查结果：{groups} 个结构岛；{errors} 个错误；{warnings} 个警告': 'Subgrid check: {groups} structural island(s); {errors} error(s); {warnings} warning(s)',
-  '子网格检查完成：{groups} 个结构岛；{errors} 个错误；{warnings} 个警告': 'Subgrid check complete: {groups} structural island(s); {errors} error(s); {warnings} warning(s)',
+  '子网格检查结果：{groups} 个子网格；{errors} 个错误；{warnings} 个警告': 'Subgrid check: {groups} subgrid(s); {errors} error(s); {warnings} warning(s)',
+  '子网格检查完成：{groups} 个子网格；{errors} 个错误；{warnings} 个警告': 'Subgrid check complete: {groups} subgrid(s); {errors} error(s); {warnings} warning(s)',
   '无法初始化 WebGL2。请启用硬件加速或更换浏览器。': 'WebGL2 could not start. Enable hardware acceleration or use another browser.',
   '{count} 个组件': '{count} components', '{nodes} 节点 · {edges} 梁 · {plates} 面板': '{nodes} nodes · {edges} edges · {plates} plates',
   '{count} 个组件没有真实 Mesh。': '{count} components have missing meshes.', '静态几何已加载。': 'Static geometry loaded.',

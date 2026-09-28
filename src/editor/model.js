@@ -2,7 +2,7 @@
 // this model to .data without importing Three.js or relying on scene objects.
 import { nativePropertiesFromState } from './component-properties.js';
 import { nativeAccessoryContainerFromState, nativeAccessoryFromState } from './native-accessories.js';
-import { createNativeMechanicalConnection, mechanicalMateRule, nativeMechanicalConnectionId, validateMechanicalConnections } from './mechanical-connections.js';
+import { detectMechanicalConnections, mechanicalMateRule, validateMechanicalConnections } from './mechanical-connections.js';
 import { reflectNativePoint, reflectNativeRotation } from '../native/coordinates.js';
 
 export const MODEL_FORMAT = 'anymaker-builder-domain';
@@ -186,6 +186,12 @@ export function fromEditorDocument(document) {
   return validateProject(model);
 }
 
+function nativeComponentConnections(component) {
+  const state = component.extras?.native?.state;
+  return [state, ...(Array.isArray(state?.connected_components) ? state.connected_components : [])]
+    .filter(value => value && value.connected_vehicle !== undefined && value.connected_component !== undefined);
+}
+
 function selectedVehicles(model, vehicleIds) {
   if (!vehicleIds) return model.vehicles;
   const byId = new Map(model.vehicles.map(vehicle => [vehicle.id, vehicle]));
@@ -196,8 +202,8 @@ function selectedVehicles(model, vehicleIds) {
   while (pending.length) {
     const id = pending.shift();
     const vehicle = byId.get(id);
-    for (const component of vehicle.grids.flatMap(grid => grid.components)) {
-      const childId = component.extras?.native?.state?.connected_vehicle;
+    for (const component of vehicle.grids.flatMap(grid => grid.components)) for (const connection of nativeComponentConnections(component)) {
+      const childId = connection.connected_vehicle;
       if (byId.has(String(childId)) && !ids.has(String(childId))) {
         ids.add(String(childId));
         pending.push(String(childId));
@@ -276,18 +282,8 @@ function nativeConstraintPosition(component, frame) {
   );
 }
 
-function nativeMechanicalAnchor(component, frame, rule) {
-  const local = rule.anchors[component.type];
-  if (!Array.isArray(local)) return null;
-  return add(
-    nativeCellPosition(component.transform.position, frame),
-    multiplyMatrixVector(frame.rotation, multiplyMatrixVector(nativeComponentRotation(component), { x: local[0], y: local[1], z: local[2] })),
-  );
-}
-
-// Native physical mates are not written to *_links. The game discovers them
-// from the paired component definitions and coincident constraint frames. Do
-// the same during import so a project retains the hinge/latch/etc. relation.
+// Use the same construction-frame rules for imports and subsequent edits.
+// Native post_load needs explicit references, generated separately on export.
 function nativeMechanicalConnections(vehicles, frames, offsets, componentIds) {
   const entries = [];
   for (const vehicle of vehicles) for (const grid of vehicle.grids) {
@@ -297,59 +293,23 @@ function nativeMechanicalConnections(vehicles, frames, offsets, componentIds) {
       const id = componentIds.get(component);
       if (!id) continue;
       entries.push({
-        component,
         id,
         type: component.type,
-        frame,
-        anchorOffset: offset,
-        vehicleId: vehicle.id,
-        gridId: grid.id,
+        position: nativePosition(component.transform.position, offset, frame),
+        rotation: matrixToEulerXYZ(reflectNativeRotation(multiplyMatrices(frame.rotation, nativeComponentRotation(component)))),
+        scale: component.transform.scale,
+        ...(nativeExtension(component) ? { nativeExtension: nativeExtension(component) } : {}),
       });
     }
   }
-  const explicitlyConnected = (left, right) => {
-    if (left.vehicleId === right.vehicleId) return true;
-    const linked = (entry, other) => {
-      const state = entry.component.extras?.native?.state;
-      return String(state?.connected_vehicle ?? '') === String(other.vehicleId)
-        && String(state?.connected_component ?? '') === String(other.component.id);
-    };
-    return linked(left, right) || linked(right, left);
-  };
-  const connections = [];
-  for (let index = 0; index < entries.length; index++) {
-    const left = entries[index];
-    for (let other = index + 1; other < entries.length; other++) {
-      const right = entries[other];
-      const rule = mechanicalMateRule(left.type, right.type);
-      if (!rule) continue;
-      if (!explicitlyConnected(left, right)) continue;
-      const leftAnchor = nativeMechanicalAnchor(left.component, left.frame, rule);
-      const rightAnchor = nativeMechanicalAnchor(right.component, right.frame, rule);
-      if (!leftAnchor || !rightAnchor) continue;
-      const leftWorld = add(leftAnchor, left.anchorOffset);
-      const rightWorld = add(rightAnchor, right.anchorOffset);
-      if (AXES.some(axis => Math.abs(leftWorld[axis] - rightWorld[axis]) > 1e-6)) continue;
-      const ordered = rule.a === left.type && rule.b === right.type ? [left, right] : rule.a === right.type && rule.b === left.type ? [right, left] : [left, right];
-      const anchor = reflectNativePoint(Object.fromEntries(AXES.map(axis => [axis, leftWorld[axis] * NATIVE_CELL_WORLD])));
-      connections.push(createNativeMechanicalConnection({
-        id: nativeMechanicalConnectionId(ordered[0].id, ordered[1].id, rule.type),
-        type: rule.type,
-        from: ordered[0].id,
-        to: ordered[1].id,
-        position: anchor,
-        ...(rule.limits ? { limits: rule.limits } : {}),
-      }));
-    }
-  }
-  return connections;
+  return detectMechanicalConnections(entries).connections;
 }
 
 function nativeVehicleOffsets(vehicles, roots, frames) {
   const byId = new Map(vehicles.map(vehicle => [vehicle.id, vehicle]));
   const attached = new Set();
-  for (const vehicle of vehicles) for (const component of vehicle.grids.flatMap(grid => grid.components)) {
-    const childId = String(component.extras?.native?.state?.connected_vehicle ?? '');
+  for (const vehicle of vehicles) for (const component of vehicle.grids.flatMap(grid => grid.components)) for (const connection of nativeComponentConnections(component)) {
+    const childId = String(connection.connected_vehicle);
     if (byId.has(childId)) attached.add(childId);
   }
   const rootIds = roots.length ? roots.filter(id => byId.has(id)) : vehicles.map(vehicle => vehicle.id).filter(id => !attached.has(id));
@@ -366,16 +326,23 @@ function nativeVehicleOffsets(vehicles, roots, frames) {
     const vehicle = byId.get(pending.shift());
     const parentOffset = offsets.get(vehicle.id);
     const candidates = new Map();
-    for (const grid of vehicle.grids) for (const parent of grid.components) {
-      const childId = String(parent.extras?.native?.state?.connected_vehicle ?? '');
+    for (const grid of vehicle.grids) for (const parent of grid.components) for (const connection of nativeComponentConnections(parent)) {
+      const childId = String(connection.connected_vehicle);
       const child = byId.get(childId);
-      const target = child && component(child, parent.extras?.native?.state?.connected_component);
+      const target = child && component(child, connection.connected_component);
       if (!target || offsets.has(childId) || !isNativeRigidAttachment(parent, target.component)) continue;
       const parentPosition = nativeConstraintPosition(parent, frames.get(`${vehicle.id}:${grid.id}`));
       const targetPosition = nativeConstraintPosition(target.component, frames.get(`${child.id}:${target.grid.id}`));
+      let delta = subtract(parentPosition, targetPosition);
+      if (['rail', 'rail_ballscrew'].includes(mechanicalMateRule(parent.type, target.component.type)?.type)) {
+        // The slider may sit anywhere on its travel. Align only perpendicular
+        // to the rail; collapsing the longitudinal difference loses its pose.
+        const axis = multiplyMatrixVector(frames.get(`${vehicle.id}:${grid.id}`).rotation, multiplyMatrixVector(nativeComponentRotation(parent), { x: 0, y: 0, z: 1 }));
+        delta = subtract(delta, scale(axis, AXES.reduce((sum, key) => sum + delta[key] * axis[key], 0)));
+      }
       const positions = candidates.get(childId) || [];
       positions.push({
-        position: add(parentOffset, subtract(parentPosition, targetPosition)),
+        position: add(parentOffset, delta),
         priority: nativeAttachmentPriority(parent, target.component),
       });
       candidates.set(childId, positions);

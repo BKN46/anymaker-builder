@@ -41,7 +41,7 @@
 
 工程 JSON 的 `topology.links` 为编辑器连接模型：每项包含 `id`、六类之一的 `kind`、`from/to` 组件端点（可选 0–255 `port`）及最多 256 个整数格路径点。该模型用于可撤销编辑与诊断渲染，不等同于游戏端口兼容校验；原生 `p0/p1` 的完整语义仍待实际游戏验证。
 
-工程 JSON 的 `topology.mechanicalConnections` 单独保存物理配合件：每项包含 `id`、`type`（`hinge`、`latch`、`mounting`、`rail`、`rail_ballscrew` 或 `tow`）、`from/to` 组件实例 ID、共同约束锚点 `position`，以及可选的铰链 `limits`。原生导入依据已发布定义中的配对关系和约束锚点自动生成；它不属于六类网络 `links`，保存原生 `.data` 时仍由游戏按组件定义重新发现。
+工程 JSON 的 `topology.mechanicalConnections` 单独保存物理配合件：每项包含 `id`、`type`（`hinge`、`latch`、`mounting`、`rail`、`rail_ballscrew` 或 `tow`）、`from/to` 组件实例 ID、共同约束锚点 `position`，以及可选的 `axis`、铰链 `limits`、安装销双方的 `orientationIndices: [a, b]`（各为 0–31 的整数）。这些可选字段保持 v1 兼容；没有方向编号的旧记录会按当前几何重算。关系在导入和编辑提交时按定义及配合帧自动重建，不属于六类网络 `links`。原生导出把实际配合的刚性两端分开，写入双向 `connected_vehicle / connected_component`、安装方向编号或导轨滑块列表；游戏的 `post_load` 依赖这些显式引用，并不会仅凭 Mesh 重叠恢复所有关系。实现与验证边界见 [自动机械配合](10_MECHANICAL_MATES.md)。
 
 可选的 `visibilityGroups` 是编辑器内的透明化组。每组有稳定 `id`、用户名称以及 `components`、`edges`、`plates` 三类实例 ID；它只保存可见性批量操作，不写入中间 XML 或原生 `.data/.meta`。组内引用必须存在，删除对象后编辑器会在下一次提交时剔除失效引用。
 

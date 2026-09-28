@@ -5,6 +5,8 @@ import { reflectNativePoint, reflectNativeRotation } from './coordinates.js';
 import { nearestNativePaintIndex } from '../editor/native-paint.js';
 import { logicNodePort, orientMechanicalLink } from '../editor/connection-ports.js';
 import { nativeMechanicalPortRole } from '../editor/connection-port-colors.js';
+import { detectMechanicalConnections, mechanicalMateRule, mechanicalMateError, NATIVE_MECHANICAL_MATE_RULES } from '../editor/mechanical-connections.js';
+import { partitionMechanicalBodies } from '../editor/mechanical-bodies.js';
 
 const vector = value => ({ x: Number(value?.[0] ?? 0), y: Number(value?.[1] ?? 0), z: Number(value?.[2] ?? 0) });
 const matrix = value => Array.isArray(value) && value.length === 9 && value.every(number => Number.isFinite(number)) ? [...value] : null;
@@ -358,6 +360,10 @@ export function toNativePairFromEditor(document, { vehicleId = 1, componentDefin
   if (!document || !Array.isArray(document.objects) || !Number.isInteger(vehicleId)) throw new Error('Native export requires a valid editor project');
   const topology = document.topology || { nodes: [], edges: [], plates: [], links: [] };
   const hostObjects = document.objects;
+  const { connections, diagnostics } = detectMechanicalConnections(hostObjects, componentDefinitions);
+  if (diagnostics.length) throw mechanicalMateError(diagnostics[0].code, 'Cannot export physical mates (' + diagnostics[0].code + ')', diagnostics[0].components.join(' / '));
+  const partition = connections.length ? partitionMechanicalBodies(document, connections, componentDefinitions) : null;
+  const bodyId = id => vehicleId + (partition?.componentBody.get(id) ?? 0);
   const objectsById = new Map(hostObjects.map(object => [object.id, object]));
   const definitions = [...new Set(hostObjects.map(object => object.type))];
   const definitionIndex = new Map(definitions.map((id, index) => [id, index]));
@@ -385,6 +391,11 @@ export function toNativePairFromEditor(document, { vehicleId = 1, componentDefin
     if (Array.isArray(object.nativeExtension) && object.nativeExtension.length === 3 && object.nativeExtension.every(Number.isInteger)) result.ext = [...object.nativeExtension];
     const nativeProperties = validateNativeProperties(object.nativeProperties);
     if (nativeProperties) Object.assign(result, nativeProperties);
+    if (NATIVE_MECHANICAL_MATE_RULES.some(rule => rule.a === object.type || rule.b === object.type)) {
+      // Relationship IDs are derived from the current snapshot, never copied
+      // from imported simulation state or a previous rail slider list.
+      delete result.connected_components; delete result.con_orient_index;
+    }
     const accessory = object.nativeAccessory;
     if (accessory) {
       // Batteries and filter media use top-level `acc.item`; wheel tyres use
@@ -402,6 +413,19 @@ export function toNativePairFromEditor(document, { vehicleId = 1, componentDefin
     if (object.scale && nativeAxes.every(axis => Number.isFinite(object.scale[axis])) && Math.abs(object.scale.x - object.scale.y) < 1e-9 && Math.abs(object.scale.x - object.scale.z) < 1e-9 && Math.abs(object.scale.x - 1) > 1e-9) result.scale = object.scale.x;
     return result;
   });
+  for (const connection of connections) {
+    const from = objectsById.get(connection.from); const to = objectsById.get(connection.to);
+    if ([from, to].some(object => object.mirror || object.localMirrorAxes?.length)) throw mechanicalMateError('reflected-mate', 'Native physical mate export cannot represent reflected component geometry', connection.from + ' / ' + connection.to);
+    const a = components[componentIds.get(from.id) - 1]; const b = components[componentIds.get(to.id) - 1];
+    const toRef = { connected_vehicle: bodyId(to.id), connected_component: b.id };
+    const fromRef = { connected_vehicle: bodyId(from.id), connected_component: a.id };
+    if (['rail', 'rail_ballscrew'].includes(mechanicalMateRule(from.type, to.type).type)) {
+      (a.connected_components ||= []).push(toRef); Object.assign(b, fromRef);
+    } else {
+      Object.assign(a, toRef); Object.assign(b, fromRef);
+      if (connection.type === 'mounting') { a.con_orient_index = connection.orientationIndices[0]; b.con_orient_index = connection.orientationIndices[1]; }
+    }
+  }
   const nodes = exportNodes.map(node => ({ id: nodeIds.get(node.id), pos: nativeCells(node.position) }));
   const edges = (topology.edges || []).map(edge => {
     const result = { n0: nodeIds.get(edge.a), n1: nodeIds.get(edge.b) };
@@ -440,9 +464,21 @@ export function toNativePairFromEditor(document, { vehicleId = 1, componentDefin
     creature_locations: [],
     buoyancy_fill: [0],
   };
-  const points = [...components.map(component => component.pos.map(value => value * CELL_SIZE_WORLD)), ...nodes.map(node => node.pos.map(value => value * CELL_SIZE_WORLD))];
+  const vehicles = partition ? partition.bodies.map((body, index) => ({
+    ...vehicle, id: vehicleId + index,
+    transform: structuredClone(vehicle.transform),
+    plate_paint: [], loot_locations: [], creature_locations: [], buoyancy_fill: [0],
+    nodes: nodes.filter((node, i) => partition.nodeBody.get(exportNodes[i].id) === index),
+    edges: edges.filter((edge, i) => partition.nodeBody.get(topology.edges[i].a) === index),
+    plates: plates.filter((plate, i) => partition.nodeBody.get(topology.plates[i].nodeIds[0]) === index),
+    grids: [{ components: components.filter((component, i) => partition.componentBody.get(hostObjects[i].id) === index) }],
+    ...Object.fromEntries(Object.entries(links).map(([kind, values]) => [kind, values.filter(link => partition.componentBody.get(hostObjects[link.p0.comp - 1].id) === index)])),
+  })) : [vehicle];
   return {
-    data: { definitions: { components: definitions }, vehicles: { vehicles: [vehicle] } },
-    meta: { vehicles: { vehicles: [{ id: vehicleId, transform: structuredClone(vehicle.transform), bounds: nativeBounds(points) }] } },
+    data: { definitions: { components: definitions }, vehicles: { vehicles } },
+    meta: { vehicles: { vehicles: vehicles.map(body => {
+      const points = [...body.grids.flatMap(grid => grid.components).map(component => component.pos.map(value => value * CELL_SIZE_WORLD)), ...body.nodes.map(node => node.pos.map(value => value * CELL_SIZE_WORLD))];
+      return { id: body.id, transform: structuredClone(body.transform), bounds: nativeBounds(points) };
+    }) } },
   };
 }

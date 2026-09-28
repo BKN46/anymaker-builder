@@ -1,5 +1,7 @@
 # 本地反编译分析
 
+机械配合的后续研究见 [自动机械配合](10_MECHANICAL_MATES.md) 和 [函数/样本指纹](evidence/mechanical-mates.json)。该证据记录了独立的 GCL 哈希、37 个函数范围、保存引用字段以及拖钩默认方向；与不同版本二进制相关的旧偏移不能混用。可用 `node scripts/check-mechanical-mate-evidence.mjs <game.gcl>` 做只读核对，未执行游戏加载验收。
+
 `game.exe` 和完整游戏目录都是本地只读输入，绝不提交、复制到 `public/`，也不成为网页运行时依赖。
 
 本仓库通过 `scripts/Invoke-AnymakerGhidraAnalysis.ps1` 调用已安装的 Ghidra 分析工作台。该工作台负责保存大型反编译产物；本仓库只保留经过筛选、可复查的结论和小型证据摘要。

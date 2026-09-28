@@ -13,6 +13,7 @@ import { CELL_SIZE_WORLD, assertGridVector, cellToWorld, quantizeWorldVector, wo
 import { GRID_SIZE, GRID_DIVISIONS, STRUCTURE_COLOR, NODE_PLACEMENT_BOUNDS, cameraBuildFrame, projectBuildPoint, resolveEdgePoint, resolvePlacementPoint, createEdgeMesh, createEdgeJointMesh, createConnectionRoute, createDashedConnection, updateEdgeMesh, setEdgeOutline, plateSurfaceBoundary, plateSurfaceVertices, cameraFacingPlateOffset, cameraFacingPlateDirection, rayFacingPlateSide } from './editor/construction-view.js';
 import { createEdgeRuler, createEdgeLengthLabels } from './editor/edge-ruler.js';
 import { parseNativePair, nativeStats, toNativePairFromEditor, verifyNativePairRoundTrip } from './native/anymaker-data.js';
+import { NATIVE_MECHANICAL_MATE_RULES, reconcileMechanicalConnections } from './editor/mechanical-connections.js';
 import { toEditorDocument, toEditorTopology } from './editor/model.js';
 import { componentPropertyDescriptors, updateNativeProperty } from './editor/component-properties.js';
 import { ComponentCatalog } from './catalog/component-catalog.js';
@@ -1137,9 +1138,7 @@ function sanitizeConnectionTopology(nextTopology, items) {
   const components = componentEntries(items);
   const links = pruneInvalidConnections(nextTopology?.links || [], componentIds)
     .filter(link => connectionRouteWorldIsSafe(link, components));
-  const mechanicalConnections = (nextTopology?.mechanicalConnections || [])
-    .filter(connection => componentIds.has(connection.from) && componentIds.has(connection.to));
-  return { ...nextTopology, links, ...(nextTopology?.mechanicalConnections !== undefined ? { mechanicalConnections } : {}) };
+  return reconcileMechanicalConnections({ ...nextTopology, links }, items, definitions);
 }
 function componentEntries(items = snapshot()) {
   return new Map(items.map(item => [item.id, item]));
@@ -1410,7 +1409,17 @@ function cancelTopologyDraft() {
 }
 
 function status(message, params = {}) { setText($('#save-status'), message, params); }
-function reportError(message, error) { status(message, () => ({ error: t(error.message) })); }
+const mechanicalMateErrorMessages = {
+  'ambiguous-mate': '机械配合位置存在多个候选，请移开重叠组件：{components}',
+  'scaled-mate': '机械配合需要原始尺寸，请将缩放恢复为 1：{components}',
+  'invalid-mate-definition': '机械配合定义无效：{components}',
+  'same-body': '配合两端已被结构刚性连在一起，请检查梁和安装面：{components}',
+  'cross-body-link': '暂不支持导出跨机械刚体的网络连接：{components}',
+  'reflected-mate': '暂不支持导出反射几何的机械配合：{components}',
+};
+function reportError(message, error) {
+  status(message, () => ({ error: t(mechanicalMateErrorMessages[error.mechanicalMateCode] || error.message, { components: error.components }) }));
+}
 function componentName(def) {
   if (!def) return '';
   return getLocale() === 'zh' ? def.name_zh || def.name || def.id : def.name || def.id;
@@ -2167,7 +2176,7 @@ const subgridDiagnosticReasons = {
   'cross-grid-link': '连接跨越了现有子网格。',
   'cross-grid-edge': '梁跨越了现有子网格。',
   'cross-grid-plate': '面板跨越了现有子网格。',
-  'mixed-grid-island': '同一结构岛包含多个现有子网格。',
+  'mixed-grid-island': '相连结构使用了多个子网格编号。',
 };
 function syncSubgridErrorMarkers() {
   if (renderedSubgridAnalysis !== lastSubgridAnalysis) {
@@ -2365,7 +2374,7 @@ function renderSubgridList() {
   if (lastSubgridAnalysis) {
     const errors = lastSubgridAnalysis.diagnostics.filter(item => item.severity === 'error').length;
     const warnings = lastSubgridAnalysis.diagnostics.filter(item => item.severity === 'warning').length;
-    setText(summary, '子网格检查结果：{groups} 个结构岛；{errors} 个错误；{warnings} 个警告', { groups: lastSubgridAnalysis.groups.length, errors, warnings });
+    setText(summary, '子网格检查结果：{groups} 个子网格；{errors} 个错误；{warnings} 个警告', { groups: lastSubgridAnalysis.groups.length, errors, warnings });
     summary.dataset.subgridDiagnostics = String(lastSubgridAnalysis.diagnostics.length);
     summary.dataset.subgridValid = String(lastSubgridAnalysis.isValid);
   } else {
@@ -2666,7 +2675,7 @@ function checkSubgrids() {
   const errors = lastSubgridAnalysis.diagnostics.filter(item => item.severity === 'error').length;
   const warnings = lastSubgridAnalysis.diagnostics.filter(item => item.severity === 'warning').length;
   renderSubgridList();
-  status('子网格检查完成：{groups} 个结构岛；{errors} 个错误；{warnings} 个警告', { groups: lastSubgridAnalysis.groups.length, errors, warnings });
+  status('子网格检查完成：{groups} 个子网格；{errors} 个错误；{warnings} 个警告', { groups: lastSubgridAnalysis.groups.length, errors, warnings });
 }
 async function setGridVisibility(gridId, hidden) {
   if (busy) return;
@@ -3499,6 +3508,13 @@ function inspect() {
   const metadata = document.createElement('p'); metadata.className = 'status';
   metadata.textContent = def.id + ' · ' + t('资源诊断：{reason}', { reason: t(object.userData.reason || '') }) + (object.userData.vertices ? ' · ' + t('{vertices} 顶点 / {triangles} 三角形', { vertices: object.userData.vertices, triangles: object.userData.triangles }) : '') + ' · ' + t('子网格 {gridId} · 动态部件 {count}（按需装配）', { gridId: object.userData.gridId || t('未分配'), count: def.meshes_dynamic?.length || 0 });
   host.append(metadata);
+  if (NATIVE_MECHANICAL_MATE_RULES.some(rule => rule.a === def.id || rule.b === def.id)) {
+    const mates = (topology.mechanicalConnections || []).filter(connection => connection.from === object.userData.id || connection.to === object.userData.id);
+    const summary = document.createElement('p'); summary.className = 'status'; summary.id = 'mechanical-mate-status';
+    summary.setAttribute('role', 'status');
+    summary.textContent = t('自动机械配合：{count}', { count: mates.length });
+    host.append(summary);
+  }
   for (const [field, label] of [['position', '位置（格；1 格 = 8 cm）'], ['rotation', '旋转 °'], ['scale', '缩放比例']]) {
     const row = document.createElement('div'); row.className = 'property';
     const heading = document.createElement('span'); heading.textContent = t(label); row.append(heading);
@@ -5487,7 +5503,9 @@ function download(content, name, type) {
 const downloadExportFile = file => download(file.content, file.name, file.type);
 function currentProject() {
   transparencyGroups = pruneTransparencyGroups();
-  return validateDocument(project(snapshot(), topology, transparencyGroups, subgrids, projectName), catalog.index);
+  const items = snapshot();
+  const connections = sanitizeConnectionTopology(topology, items);
+  return validateDocument(project(items, connections, transparencyGroups, subgrids, projectName), catalog.index);
 }
 // Project snapshots remain the local recovery representation. This hidden
 // hook is intentionally not a user action: the visible save control operates

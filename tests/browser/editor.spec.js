@@ -1,7 +1,61 @@
 import { test, expect } from '@playwright/test';
 import { meshFixture, modelGlbFixture } from '../fixtures.js';
 import { readFileSync } from 'node:fs';
+import { hingeAssemblyFixture } from '../mechanical-fixtures.js';
+import { parseNativePair } from '../../src/native/anymaker-data.js';
+import { toEditorDocument } from '../../src/editor/model.js';
 import { observeRendering, observePointerRay, renderedIdentities, renderedInterfaceSamples, projectWorldPoint, renderedPlacementState } from './render-observer.js';
+
+test('mechanical mates update on edits and history and save reciprocal native hinge bodies', async ({ page }) => {
+  await observeRendering(page);
+  const errors = []; page.on('pageerror', error => errors.push(error.message));
+  await page.goto('./'); await expect(page.locator('#viewport')).toHaveAttribute('data-ready', 'true');
+  const document = toEditorDocument(parseNativePair(hingeAssemblyFixture(), {}));
+  await page.locator('#file-input').setInputFiles({ name: 'hinge-assembly.json', mimeType: 'application/json', buffer: Buffer.from(JSON.stringify(document)) });
+  await expect(page.locator('#object-count')).toHaveText('2 个组件');
+  expect((await saveProject(page)).topology.mechanicalConnections).toHaveLength(1);
+  await page.locator('#fit-btn').click(); await page.locator('[data-view="right"]').click();
+  await openRightSidebar(page); await page.locator('#right-tab-inspector').click();
+  await page.locator('#selection-filter-toggle').click();
+  await page.locator('[data-selectable-kind="structure"]').uncheck();
+  await page.locator('#selection-filter-toggle').click();
+  const knuckle = document.objects.find(object => object.type === 'hinge_knuckle');
+  const point = await projectWorldPoint(page, knuckle.position);
+  await page.mouse.click(point.x, point.y);
+  await expect(page.locator('#mechanical-mate-status')).toHaveText('自动机械配合：1');
+  await page.locator('#language-select').selectOption('en');
+  await expect(page.locator('#mechanical-mate-status')).toHaveText('Automatic mechanical mates: 1');
+  const x = page.getByRole('spinbutton', { name: 'position-x', exact: true });
+  const originalX = Number(await x.inputValue());
+  await x.fill(String(originalX + 2)); await x.press('Enter');
+  await expect(page.locator('#mechanical-mate-status')).toHaveText('Automatic mechanical mates: 0');
+  expect((await saveProject(page)).topology.mechanicalConnections).toHaveLength(0);
+  await page.locator('#undo-btn').click();
+  expect((await saveProject(page)).topology.mechanicalConnections).toHaveLength(1);
+  await page.locator('#redo-btn').click();
+  expect((await saveProject(page)).topology.mechanicalConnections).toHaveLength(0);
+  await page.locator('#undo-btn').click();
+  const downloads = []; const onDownload = download => downloads.push(download);
+  page.on('download', onDownload); await page.locator('#save-btn').click();
+  await expect.poll(() => downloads.length).toBe(2); page.off('download', onDownload);
+  const files = await Promise.all(downloads.map(async download => {
+    const stream = await download.createReadStream(); let content = '';
+    for await (const chunk of stream) content += chunk;
+    return { name: download.suggestedFilename(), content: JSON.parse(content) };
+  }));
+  const data = files.find(file => file.name.endsWith('.data')).content;
+  const bodies = data.vehicles.vehicles; expect(bodies).toHaveLength(2);
+  expect(bodies.map(body => body.nodes.length)).toEqual([2, 2]);
+  for (const body of bodies) {
+    const component = body.grids[0].components[0];
+    const mateBody = bodies.find(value => value.id === component.connected_vehicle);
+    expect(mateBody.id).not.toBe(body.id);
+    const mate = mateBody.grids[0].components.find(value => value.id === component.connected_component);
+    expect(mate.connected_vehicle).toBe(body.id); expect(mate.connected_component).toBe(component.id);
+    expect(body.mechanical_links).toHaveLength(0);
+  }
+  expect(errors).toEqual([]);
+});
 
 for (const projection of ['perspective', 'orthographic']) test('overlapping beams select visible nodes and split the front beam in ' + projection, async ({ page }) => {
   await observeRendering(page);
@@ -1137,7 +1191,8 @@ test('native import centers a half-cell-wide structure without moving nodes off 
   await page.locator('#left-tab-subgrids').click();
   await page.locator('#subgrid-check-btn').click();
   await expect(page.locator('#subgrid-summary')).toHaveAttribute('data-subgrid-valid', 'true');
-  await expect(page.locator('#subgrid-summary')).toContainText('0 个错误');
+  await expect(page.locator('#subgrid-summary')).toHaveText('子网格检查结果：1 个子网格；0 个错误；0 个警告');
+  await expect(page.locator('#save-status')).toHaveText('子网格检查完成：1 个子网格；0 个错误；0 个警告');
   await expect(page.locator('#viewport')).toHaveAttribute('data-subgrid-error-marker-count', '0');
   await expect(page.locator('#subgrid-error-markers .subgrid-error-marker')).toHaveCount(0);
   await expect(page.locator('#subgrid-diagnostics')).toBeHidden();
@@ -1146,7 +1201,9 @@ test('native import centers a half-cell-wide structure without moving nodes off 
   await page.locator('#subgrid-error-toggle').check();
   await expect(page.locator('#subgrid-error-markers .subgrid-error-marker')).toHaveCount(0);
   await page.locator('#language-select').selectOption('en');
-  await expect(page.locator('#subgrid-summary')).toContainText('0 error(s)');
+  await expect(page.locator('#subgrid-summary')).toHaveText('Subgrid check: 1 subgrid(s); 0 error(s); 0 warning(s)');
+  await page.locator('#subgrid-check-btn').click();
+  await expect(page.locator('#save-status')).toHaveText('Subgrid check complete: 1 subgrid(s); 0 error(s); 0 warning(s)');
   await page.locator('#new-btn').click();
   await expect(page.locator('#subgrid-diagnostics')).toBeHidden();
   await expect(page.locator('#subgrid-error-markers .subgrid-error-marker')).toHaveCount(0);

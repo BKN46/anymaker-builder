@@ -1,0 +1,431 @@
+{
+  "scope": "Static game implementation and local editor round-trip; no in-game loading or dynamics acceptance.",
+  "source": {
+    "file": "Anymaker/bin/game.gcl",
+    "bytes": 81870449,
+    "sha256": "d9725681f1b0bff321c58fcadc0d2e12104919a541eef074cf12945b283edb75"
+  },
+  "tool": "Ghidra 12.0.3, raw x86 LE 64 / Windows compiler specification; function records and relocation names inspected from the matching binary.",
+  "functions": [
+    {
+      "name": "client_scene.vehicle_component.can_connect_multibody",
+      "signature": "(bool) client_scene.vehicle_component.can_connect_multibody (const client_scene.vehicle_component, const string, const vehicle_component_definition, const vec3, s32, s32, vehicle_util.grid_origin_dir, vec3_s32, mat33_s32)",
+      "signatureOffset": "0x10349d1",
+      "codeOffset": "0x1034f4c",
+      "codeSize": "0x9d8",
+      "codeSha256": "14a96d9b80d87d45065ea238f76271dc145e6e8e6e1f93d77583315f33f97e87"
+    },
+    {
+      "name": "client_scene.vehicle_component.rail.can_connect_multibody",
+      "signature": "(bool) client_scene.vehicle_component.rail.can_connect_multibody (const client_scene.vehicle_component.rail, const string, const vehicle_component_definition, const vec3, s32, s32, vehicle_util.grid_origin_dir, vec3_s32, mat33_s32)",
+      "signatureOffset": "0x1151587",
+      "codeOffset": "0x1151bb8",
+      "codeSize": "0xc00",
+      "codeSha256": "246a53f2cd439bfa117ea934dfb8106fe57af3c2b2ca3d8a0a1e67d21f6e6e68"
+    },
+    {
+      "name": "server_scene.vehicle_component.hinge_pin.can_connect",
+      "signature": "(bool) server_scene.vehicle_component.hinge_pin.can_connect (const server_scene.vehicle_component.hinge_pin)",
+      "signatureOffset": "0x344303b",
+      "codeOffset": "0x34430bb",
+      "codeSize": "0x22",
+      "codeSha256": "4753d6949ff38927d0619008ae13ac3a97543362e3db5238c826ead20571b94b"
+    },
+    {
+      "name": "server_scene.vehicle_component.hinge_pin.connect_multibody",
+      "signature": "() server_scene.vehicle_component.hinge_pin.connect_multibody (server_scene.vehicle_component.hinge_pin, physics.scene, const ptr<server_scene.vehicle_component>, server_scene.vehicle, server_scene.vehicle)",
+      "signatureOffset": "0x3443199",
+      "codeOffset": "0x3443a1a",
+      "codeSize": "0x18e8",
+      "codeSha256": "2c53e5b0d232a713fddf740b1adae511b9cda638304f9d1af6ceffee9b79abd4"
+    },
+    {
+      "name": "server_scene.vehicle_component.hinge_pin.parse_save_data",
+      "signature": "() server_scene.vehicle_component.hinge_pin.parse_save_data (server_scene.vehicle_component.hinge_pin, server_scene.save_data.parser)",
+      "signatureOffset": "0x344ae4d",
+      "codeOffset": "0x344b094",
+      "codeSize": "0x328",
+      "codeSha256": "fb1873452da99ee948fe845eedd0caee4789ea6072bd9b374ca58054d80cae2a"
+    },
+    {
+      "name": "server_scene.vehicle_component.hinge_pin.post_load",
+      "signature": "() server_scene.vehicle_component.hinge_pin.post_load (server_scene.vehicle_component.hinge_pin, server_scene)",
+      "signatureOffset": "0x344b513",
+      "codeOffset": "0x344b7fe",
+      "codeSize": "0x238",
+      "codeSha256": "efddaf35b77447436216a7c3681f5bf608324f66f4f600abdb26b3d52ff22cc1"
+    },
+    {
+      "name": "server_scene.vehicle_component.latch_pin.can_connect",
+      "signature": "(bool) server_scene.vehicle_component.latch_pin.can_connect (const server_scene.vehicle_component.latch_pin)",
+      "signatureOffset": "0x35250b0",
+      "codeOffset": "0x3525130",
+      "codeSize": "0x22",
+      "codeSha256": "8301b50eab608691a2056ffc03d7b4eef2f0eda27e4f7e074cc0a6080037ef6c"
+    },
+    {
+      "name": "server_scene.vehicle_component.latch_pin.connect_multibody",
+      "signature": "() server_scene.vehicle_component.latch_pin.connect_multibody (server_scene.vehicle_component.latch_pin, physics.scene, const ptr<server_scene.vehicle_component>, server_scene.vehicle, server_scene.vehicle)",
+      "signatureOffset": "0x352520e",
+      "codeOffset": "0x35257c1",
+      "codeSize": "0xa00",
+      "codeSha256": "ca5a95e88fa983634f322d815b2ddd790ec75f8cff1ad856ab8fd70102c02079"
+    },
+    {
+      "name": "server_scene.vehicle_component.latch_pin.parse_save_data",
+      "signature": "() server_scene.vehicle_component.latch_pin.parse_save_data (server_scene.vehicle_component.latch_pin, server_scene.save_data.parser)",
+      "signatureOffset": "0x3528d65",
+      "codeOffset": "0x3528fb2",
+      "codeSize": "0x2e0",
+      "codeSha256": "26767a4d4800dc4c2862b4ffc6d9f31b088e183f81e258f40a627787c6c10a34"
+    },
+    {
+      "name": "server_scene.vehicle_component.latch_pin.post_load",
+      "signature": "() server_scene.vehicle_component.latch_pin.post_load (server_scene.vehicle_component.latch_pin, server_scene)",
+      "signatureOffset": "0x35293d9",
+      "codeOffset": "0x35296c4",
+      "codeSize": "0x238",
+      "codeSha256": "708e7b4472494c1462c60dc6f21d496b17d33386567e557cef902d4af06d5d03"
+    },
+    {
+      "name": "server_scene.vehicle_component.mounting_knuckle.can_connect",
+      "signature": "(bool) server_scene.vehicle_component.mounting_knuckle.can_connect (const server_scene.vehicle_component.mounting_knuckle)",
+      "signatureOffset": "0x35f13d9",
+      "codeOffset": "0x35f1467",
+      "codeSize": "0x22",
+      "codeSha256": "c78fb1ee400ff69169e51a1747356d28df01e34558d2c03e2a96595eb3c15b6e"
+    },
+    {
+      "name": "server_scene.vehicle_component.mounting_knuckle.connect_multibody",
+      "signature": "() server_scene.vehicle_component.mounting_knuckle.connect_multibody (server_scene.vehicle_component.mounting_knuckle, physics.scene, const ptr<server_scene.vehicle_component>, server_scene.vehicle, server_scene.vehicle)",
+      "signatureOffset": "0x35f1553",
+      "codeOffset": "0x35f1705",
+      "codeSize": "0x88",
+      "codeSha256": "ebc7e42380b43ee27e87be3f61989356f78c1f32014c5a002081945cce5e06f9"
+    },
+    {
+      "name": "server_scene.vehicle_component.mounting_knuckle.parse_save_data",
+      "signature": "() server_scene.vehicle_component.mounting_knuckle.parse_save_data (server_scene.vehicle_component.mounting_knuckle, server_scene.save_data.parser)",
+      "signatureOffset": "0x35f5e7b",
+      "codeOffset": "0x35f605e",
+      "codeSize": "0x270",
+      "codeSha256": "c0a85433224c6e97e1184a66e47874586c897b25dfb690fe91294ac9d422d4a3"
+    },
+    {
+      "name": "server_scene.vehicle_component.mounting_knuckle.post_load",
+      "signature": "() server_scene.vehicle_component.mounting_knuckle.post_load (server_scene.vehicle_component.mounting_knuckle, server_scene)",
+      "signatureOffset": "0x35f641b",
+      "codeOffset": "0x35f6722",
+      "codeSize": "0x238",
+      "codeSha256": "baea231ebc789616e5f2bf046a4ed54251d7f825afb63f25ab5313fbdb7c367d"
+    },
+    {
+      "name": "server_scene.vehicle_component.mounting_pin.can_connect",
+      "signature": "(bool) server_scene.vehicle_component.mounting_pin.can_connect (const server_scene.vehicle_component.mounting_pin)",
+      "signatureOffset": "0x35f8958",
+      "codeOffset": "0x35f89de",
+      "codeSize": "0x22",
+      "codeSha256": "c78fb1ee400ff69169e51a1747356d28df01e34558d2c03e2a96595eb3c15b6e"
+    },
+    {
+      "name": "server_scene.vehicle_component.mounting_pin.connect_multibody",
+      "signature": "() server_scene.vehicle_component.mounting_pin.connect_multibody (server_scene.vehicle_component.mounting_pin, physics.scene, const ptr<server_scene.vehicle_component>, server_scene.vehicle, server_scene.vehicle)",
+      "signatureOffset": "0x35f8ac2",
+      "codeOffset": "0x35f90d0",
+      "codeSize": "0xba0",
+      "codeSha256": "ede919a65189c4279799eb68f8a4451c96343e73391daa0bd32b08b4243dd0a6"
+    },
+    {
+      "name": "server_scene.vehicle_component.mounting_pin.parse_save_data",
+      "signature": "() server_scene.vehicle_component.mounting_pin.parse_save_data (server_scene.vehicle_component.mounting_pin, server_scene.save_data.parser)",
+      "signatureOffset": "0x35fed75",
+      "codeOffset": "0x35fef50",
+      "codeSize": "0x270",
+      "codeSha256": "c0a85433224c6e97e1184a66e47874586c897b25dfb690fe91294ac9d422d4a3"
+    },
+    {
+      "name": "server_scene.vehicle_component.mounting_pin.post_load",
+      "signature": "() server_scene.vehicle_component.mounting_pin.post_load (server_scene.vehicle_component.mounting_pin, server_scene)",
+      "signatureOffset": "0x35ff305",
+      "codeOffset": "0x35ff5fc",
+      "codeSize": "0x238",
+      "codeSha256": "baea231ebc789616e5f2bf046a4ed54251d7f825afb63f25ab5313fbdb7c367d"
+    },
+    {
+      "name": "server_scene.vehicle_component.rail.can_connect",
+      "signature": "(bool) server_scene.vehicle_component.rail.can_connect (const server_scene.vehicle_component.rail)",
+      "signatureOffset": "0x361f915",
+      "codeOffset": "0x361faa2",
+      "codeSize": "0xb0",
+      "codeSha256": "2a7ddd4be7c2a5d262df6ac3f005f8b8dd6b5c34e709d406ac624e5785b7ca52"
+    },
+    {
+      "name": "server_scene.vehicle_component.rail.connect_multibody",
+      "signature": "() server_scene.vehicle_component.rail.connect_multibody (server_scene.vehicle_component.rail, physics.scene, const ptr<server_scene.vehicle_component>, server_scene.vehicle, server_scene.vehicle)",
+      "signatureOffset": "0x361fc18",
+      "codeOffset": "0x361fdb2",
+      "codeSize": "0x88",
+      "codeSha256": "ebc7e42380b43ee27e87be3f61989356f78c1f32014c5a002081945cce5e06f9"
+    },
+    {
+      "name": "server_scene.vehicle_component.rail.parse_save_data",
+      "signature": "() server_scene.vehicle_component.rail.parse_save_data (server_scene.vehicle_component.rail, server_scene.save_data.parser)",
+      "signatureOffset": "0x362189e",
+      "codeOffset": "0x3621acf",
+      "codeSize": "0xc8",
+      "codeSha256": "3669be4096da385fee4916a988a7ba2a9aa275f90dc9b05da17a131a9f340def"
+    },
+    {
+      "name": "server_scene.vehicle_component.rail.post_load",
+      "signature": "() server_scene.vehicle_component.rail.post_load (server_scene.vehicle_component.rail, server_scene)",
+      "signatureOffset": "0x3621cac",
+      "codeOffset": "0x362223f",
+      "codeSize": "0x2a0",
+      "codeSha256": "3a51d2ebb16bc92bac29897de28cbe684cef2b975ca623f1414656e547d1fa01"
+    },
+    {
+      "name": "server_scene.vehicle_component.rail.slider_data.parse_save_data",
+      "signature": "() server_scene.vehicle_component.rail.slider_data.parse_save_data (server_scene.vehicle_component.rail.slider_data, server_scene.save_data.parser)",
+      "signatureOffset": "0x3624efd",
+      "codeOffset": "0x3625067",
+      "codeSize": "0x158",
+      "codeSha256": "095c241bdc04ccb9720e094ce53d0553d8951a532300d8f789239678256a390c"
+    },
+    {
+      "name": "server_scene.vehicle_component.rail_ballscrew.parse_save_data",
+      "signature": "() server_scene.vehicle_component.rail_ballscrew.parse_save_data (server_scene.vehicle_component.rail_ballscrew, server_scene.save_data.parser)",
+      "signatureOffset": "0x362aba9",
+      "codeOffset": "0x362ae02",
+      "codeSize": "0xc8",
+      "codeSha256": "81a99dd3bf48a6310875943926bf6b738c903a56f17d5edeb6e4fb82a3b9ba2b"
+    },
+    {
+      "name": "server_scene.vehicle_component.rail_ballscrew.slider_data.parse_save_data",
+      "signature": "() server_scene.vehicle_component.rail_ballscrew.slider_data.parse_save_data (server_scene.vehicle_component.rail_ballscrew.slider_data, server_scene.save_data.parser)",
+      "signatureOffset": "0x362e43c",
+      "codeOffset": "0x362e5ba",
+      "codeSize": "0x158",
+      "codeSha256": "095c241bdc04ccb9720e094ce53d0553d8951a532300d8f789239678256a390c"
+    },
+    {
+      "name": "server_scene.vehicle_component.rail_ballscrew_slider.connect_multibody",
+      "signature": "() server_scene.vehicle_component.rail_ballscrew_slider.connect_multibody (server_scene.vehicle_component.rail_ballscrew_slider, physics.scene, const ptr<server_scene.vehicle_component>, server_scene.vehicle, server_scene.vehicle)",
+      "signatureOffset": "0x363051f",
+      "codeOffset": "0x3630b2f",
+      "codeSize": "0xa68",
+      "codeSha256": "b539b0ada20c7c97b91a8df76d19fe351e0244ff8c621647324ae8d9d824592a"
+    },
+    {
+      "name": "server_scene.vehicle_component.rail_ballscrew_slider.parse_save_data",
+      "signature": "() server_scene.vehicle_component.rail_ballscrew_slider.parse_save_data (server_scene.vehicle_component.rail_ballscrew_slider, server_scene.save_data.parser)",
+      "signatureOffset": "0x3632d75",
+      "codeOffset": "0x3632f62",
+      "codeSize": "0x198",
+      "codeSha256": "3719a0312269a057f59712722256b2f0599c098d5faeecca6de0e017edf44e04"
+    },
+    {
+      "name": "server_scene.vehicle_component.rail_slider.can_connect",
+      "signature": "(bool) server_scene.vehicle_component.rail_slider.can_connect (const server_scene.vehicle_component.rail_slider)",
+      "signatureOffset": "0x363611c",
+      "codeOffset": "0x36361a0",
+      "codeSize": "0x22",
+      "codeSha256": "98fa0f82c61c3bd0fff1ea5462c53c3d656390605dca2fb2d2d032bd1502bf3b"
+    },
+    {
+      "name": "server_scene.vehicle_component.rail_slider.connect_multibody",
+      "signature": "() server_scene.vehicle_component.rail_slider.connect_multibody (server_scene.vehicle_component.rail_slider, physics.scene, const ptr<server_scene.vehicle_component>, server_scene.vehicle, server_scene.vehicle)",
+      "signatureOffset": "0x3636282",
+      "codeOffset": "0x36367bc",
+      "codeSize": "0xa88",
+      "codeSha256": "115f511b2986ba95e5443fb3afaebc1e10d45be94392a0658c56121dc5f4017d"
+    },
+    {
+      "name": "server_scene.vehicle_component.rail_slider.parse_save_data",
+      "signature": "() server_scene.vehicle_component.rail_slider.parse_save_data (server_scene.vehicle_component.rail_slider, server_scene.save_data.parser)",
+      "signatureOffset": "0x363afdc",
+      "codeOffset": "0x363b1b5",
+      "codeSize": "0x198",
+      "codeSha256": "4cd04561f8cf50cd5bd97429ebf58de76005c2280d814787cef60842409f1413"
+    },
+    {
+      "name": "server_scene.vehicle_component.rail_slider.post_load",
+      "signature": "() server_scene.vehicle_component.rail_slider.post_load (server_scene.vehicle_component.rail_slider, server_scene)",
+      "signatureOffset": "0x363b480",
+      "codeOffset": "0x363b773",
+      "codeSize": "0x238",
+      "codeSha256": "755c17a2a2dadd9657b55073ad0bb7ba91ebed259690095ae06392d18c29fb44"
+    },
+    {
+      "name": "server_scene.vehicle_component.tow_bar.can_connect",
+      "signature": "(bool) server_scene.vehicle_component.tow_bar.can_connect (const server_scene.vehicle_component.tow_bar)",
+      "signatureOffset": "0x36bd771",
+      "codeOffset": "0x36bd7ed",
+      "codeSize": "0x22",
+      "codeSha256": "f2a482533299e3277f3ea06c8563240e416cfdc308f9376f1585650a3adcf4f2"
+    },
+    {
+      "name": "server_scene.vehicle_component.tow_bar.connect_multibody",
+      "signature": "() server_scene.vehicle_component.tow_bar.connect_multibody (server_scene.vehicle_component.tow_bar, physics.scene, const ptr<server_scene.vehicle_component>, server_scene.vehicle, server_scene.vehicle)",
+      "signatureOffset": "0x36bd8c7",
+      "codeOffset": "0x36bdd4e",
+      "codeSize": "0x788",
+      "codeSha256": "d273f250c232c836d45279f59399edd297ae683a4c236665f7612d1e9f4fbe01"
+    },
+    {
+      "name": "server_scene.vehicle_component.tow_bar.parse_save_data",
+      "signature": "() server_scene.vehicle_component.tow_bar.parse_save_data (server_scene.vehicle_component.tow_bar, server_scene.save_data.parser)",
+      "signatureOffset": "0x36c1155",
+      "codeOffset": "0x36c139e",
+      "codeSize": "0x3a8",
+      "codeSha256": "3fc4bc685b4730ea58c2a4c360857becb6327011d16f8f6c7657163a9a5f8ad5"
+    },
+    {
+      "name": "server_scene.vehicle_component.tow_bar.post_load",
+      "signature": "() server_scene.vehicle_component.tow_bar.post_load (server_scene.vehicle_component.tow_bar, server_scene)",
+      "signatureOffset": "0x36c1899",
+      "codeOffset": "0x36c1b7c",
+      "codeSize": "0x238",
+      "codeSha256": "c1b593a4930a022b7aa0184267b1849d39134aa461a07a8ec052b7d655a05cb2"
+    },
+    {
+      "name": "server_scene.vehicle_component.tow_bar.tick_multibody",
+      "signature": "() server_scene.vehicle_component.tow_bar.tick_multibody (server_scene.vehicle_component.tow_bar, server_scene.vehicle, server_scene)",
+      "signatureOffset": "0x36c3f66",
+      "codeOffset": "0x36c4a31",
+      "codeSize": "0x12d8",
+      "codeSha256": "2ce00e8769b75c763809df69f5bcf8f82bac7d04dbd6f900a5fad72f775cde50"
+    },
+    {
+      "name": "vehicle_component_definition.parse_json",
+      "signature": "() vehicle_component_definition.parse_json (vehicle_component_definition, json.parser, json.node)",
+      "signatureOffset": "0x3b5f90f",
+      "codeOffset": "0x3b606fe",
+      "codeSize": "0x7260",
+      "codeSha256": "1d9f63f59c043bbef2c2ce895373eb7100e841adb62c5abc69d7ae142d792c5d"
+    }
+  ],
+  "verifiedDefaults": {
+    "tow_hitch_dir": {
+      "value": 3,
+      "meaning": "+Y",
+      "address": "0x3b673a6",
+      "encoding": "s32 little endian"
+    },
+    "tow_hitch_dot_min": {
+      "value": 0,
+      "address": "0x3b671de",
+      "encoding": "f64 little endian"
+    }
+  },
+  "nativeFields": {
+    "hinge_latch_mounting_tow": [
+      "connected_vehicle",
+      "connected_component"
+    ],
+    "mounting": [
+      "con_orient_index on both components"
+    ],
+    "rail_and_ballscrew": [
+      "connected_components array on rail",
+      "connected_vehicle / connected_component on each slider"
+    ]
+  },
+  "sample": {
+    "inputs": [
+      {
+        "file": "981.1.data",
+        "bytes": 44743,
+        "sha256": "4cf16dc0535588b425c5107f7c56a9378e3e241b30b199c3955f52c3ed326c7c"
+      },
+      {
+        "file": "981.1.meta",
+        "bytes": 552,
+        "sha256": "758bf5658d6364c2ca86a8d33f3a621fdbe281b2566c3eadebf50388478a3ada"
+      }
+    ],
+    "before": {
+      "components": 6,
+      "nodes": 91,
+      "edges": 161,
+      "plates": 56
+    },
+    "bodies": [
+      {
+        "id": 1,
+        "nodes": 84,
+        "edges": 153,
+        "plates": 54,
+        "components": [
+          {
+            "id": 1,
+            "type": "high_back_car_seat"
+          },
+          {
+            "id": 2,
+            "type": "high_back_car_seat"
+          },
+          {
+            "id": 3,
+            "type": "steering_wheel"
+          },
+          {
+            "id": 4,
+            "type": "hinge_pin",
+            "connected_vehicle": 2,
+            "connected_component": 5
+          }
+        ]
+      },
+      {
+        "id": 2,
+        "nodes": 7,
+        "edges": 8,
+        "plates": 2,
+        "components": [
+          {
+            "id": 5,
+            "type": "hinge_knuckle",
+            "connected_vehicle": 1,
+            "connected_component": 4
+          },
+          {
+            "id": 6,
+            "type": "mechanical_handle"
+          }
+        ]
+      }
+    ],
+    "roundTrip": {
+      "selectedRoot": "1",
+      "componentPositionsUnchanged": true,
+      "structuralCountsUnchanged": true,
+      "hingeConnections": 1,
+      "originalInputsUnchanged": true
+    },
+    "gameLoadVerified": false
+  },
+  "verification": {
+    "unitTests": {
+      "passed": 157,
+      "command": "npm run check"
+    },
+    "browserSuite": {
+      "passed": 68,
+      "failed": 1,
+      "failure": "preferences.spec.js:146 leftCollapsed false instead of true"
+    },
+    "baseline": {
+      "commit": "9b3c13f558c0fc751f6cffad66d0fbcc8d27f64a",
+      "samePreferencesFailureReproduced": true
+    },
+    "gameLoadVerified": false,
+    "productionBuildPassed": true,
+    "assetCheck": {
+      "passed": true,
+      "referencedMeshes": 797,
+      "manifestEntries": 865,
+      "opaqueAssets": 1
+    },
+    "finalMechanicalBrowserRegressionPassed": true
+  }
+}
