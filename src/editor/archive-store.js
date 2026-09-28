@@ -33,6 +33,27 @@ export function createArchiveStore(indexedDB = globalThis.indexedDB, scope = '/'
   });
 
   return {
+    async get(id) {
+      const db = await database;
+      const transaction = db.transaction(STORE_NAME, 'readonly');
+      const done = transactionDone(transaction);
+      const record = await requestValue(transaction.objectStore(STORE_NAME).get(id));
+      await done;
+      return record;
+    },
+    async ensureCloudId(id, createId) {
+      const db = await database;
+      const transaction = db.transaction(STORE_NAME, 'readwrite');
+      const done = transactionDone(transaction);
+      const store = transaction.objectStore(STORE_NAME);
+      const record = await requestValue(store.get(id));
+      if (record && !record.cloudArchiveId) {
+        record.cloudArchiveId = record.kind === 'auto' ? createId() : record.id;
+        store.put(record);
+      }
+      await done;
+      return record;
+    },
     async list() {
       const db = await database;
       const transaction = db.transaction(STORE_NAME, 'readonly');
@@ -45,9 +66,15 @@ export function createArchiveStore(indexedDB = globalThis.indexedDB, scope = '/'
       if (!record || typeof record.id !== 'string' || !record.id) throw new Error('Archive ID is invalid');
       const db = await database;
       const transaction = db.transaction(STORE_NAME, 'readwrite');
-      transaction.objectStore(STORE_NAME).put(structuredClone(record));
-      await transactionDone(transaction);
-      return record;
+      const done = transactionDone(transaction);
+      const store = transaction.objectStore(STORE_NAME);
+      const previous = await requestValue(store.get(record.id));
+      const next = structuredClone(record);
+      // Preserve sync identity atomically, including saves racing an upload.
+      if (previous?.cloudArchiveId) next.cloudArchiveId = previous.cloudArchiveId;
+      store.put(next);
+      await done;
+      return next;
     },
     async remove(id) {
       const db = await database;

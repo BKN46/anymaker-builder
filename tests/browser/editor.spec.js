@@ -9,6 +9,7 @@ import { beltFixture, sampleBeltData } from '../belt-fixtures.js';
 import { disconnectedSubgridsFixture } from '../subgrid-fixtures.js';
 import { structureTransformFixture } from '../selection-transform-fixtures.js';
 import { nonplanarNativeFixture } from '../native-import-fixtures.js';
+import { unsupportedPlateCorners, crossIslandPlate } from '../native-export-fixtures.js';
 import { parseNativePair, toNativePairFromEditor } from '../../src/native/anymaker-data.js';
 import { toEditorDocument } from '../../src/editor/model.js';
 import { decodeProjectCode } from '../../src/editor/project-code.js';
@@ -72,6 +73,49 @@ test('node overlay remains movable behind a body plate with beam selection disab
   expect(moved.topology.nodes[0].position.x).toBeLessThan(before.topology.nodes[0].position.x);
   expect(moved.topology.edges).toEqual(before.topology.edges); expect(moved.topology.plates).toEqual(before.topology.plates);
   await page.locator('#undo-btn').click(); expect((await saveProject(page)).topology).toEqual(before.topology);
+});
+
+for (const helpersVisible of [true, false]) test('node movement obeys selection filters with helpers ' + (helpersVisible ? 'shown' : 'hidden'), async ({ page }) => {
+  const errors = []; page.on('pageerror', error => errors.push(error.message));
+  await openStructureTransformFixture(page, coveredNodeFixture());
+  const before = await saveProject(page); const node = before.topology.nodes[0];
+  const selectedNode = () => page.evaluate(() => window.__renderTestState.scene.children.find(object => object.isTransformControlsRoot).controls.object?.userData.nodeId || null);
+  const filter = async (kind, checked) => {
+    await page.locator('#selection-filter-toggle').click();
+    await page.locator('[data-selectable-kind="' + kind + '"]').setChecked(checked);
+    await page.locator('#selection-filter-toggle').click();
+  };
+  await filter('edge', false); await filter('plate', false);
+  if (!helpersVisible) await page.locator('#nodes-btn').click();
+  await page.locator('[data-tool="translate"]').click();
+  const visibleNodes = () => page.evaluate(() => window.__renderTestState.scene.getObjectByName('topology-overlay').children.filter(object => object.userData.topology === 'node' && object.visible).length);
+  await expect.poll(visibleNodes).toBe(helpersVisible ? before.topology.nodes.length : 0);
+  await clickStructurePoint(page, node.position); await expect.poll(selectedNode).toBe(node.id);
+  // Changing display must retain the selected node and its movement gizmo.
+  await page.locator('#nodes-btn').click(); await expect.poll(selectedNode).toBe(node.id);
+  await expect.poll(visibleNodes).toBe(helpersVisible ? 0 : before.topology.nodes.length);
+  await page.locator('#nodes-btn').click(); await expect.poll(selectedNode).toBe(node.id);
+  for (const kind of ['node', 'structure']) {
+    await filter(kind, false); await expect.poll(selectedNode).toBeNull();
+    await clickStructurePoint(page, node.position); await expect.poll(selectedNode).toBeNull();
+    expect((await saveProject(page)).topology).toEqual(before.topology);
+    await filter(kind, true);
+    await clickStructurePoint(page, node.position); await expect.poll(selectedNode).toBe(node.id);
+  }
+  const count = await page.locator('#history-list button').count();
+  const drag = await structureGizmoDrag(page, 'translate');
+  await page.mouse.move(drag.x, drag.y); await page.mouse.down();
+  await page.mouse.move(drag.x - 85, drag.y, { steps: 20 }); await page.mouse.up();
+  await expect(page.locator('#save-status')).toContainText('已移动节点');
+  await expect(page.locator('#history-list button')).toHaveCount(count + 1);
+  const after = await saveProject(page);
+  expect(after.topology.nodes.find(value => value.id === node.id).position.x).toBeLessThan(node.position.x);
+  expect(after.topology.nodes.filter(value => value.id !== node.id)).toEqual(before.topology.nodes.filter(value => value.id !== node.id));
+  expect(after.topology.edges).toEqual(before.topology.edges); expect(after.topology.plates).toEqual(before.topology.plates);
+  await expect.poll(visibleNodes).toBe(helpersVisible ? before.topology.nodes.length : 0);
+  await page.locator('#undo-btn').click(); expect((await saveProject(page)).topology).toEqual(before.topology);
+  await page.locator('#redo-btn').click(); expect((await saveProject(page)).topology).toEqual(after.topology);
+  expect(errors).toEqual([]);
 });
 
 test('node editing keeps helpers selectable beyond the passive distance limit', async ({ page }) => {
@@ -2010,6 +2054,53 @@ test('native import removes noncoplanar plates and retains the visible vehicle t
   await expect(page.locator('#native-import-notice')).toBeHidden(); expect(errors).toEqual([]);
 });
 
+test('native island checks locate unsupported plate nodes in both languages and verify repaired downloads', async ({ page }) => {
+  const errors = []; page.on('pageerror', error => errors.push(error.message));
+  const fixture = toEditorDocument(parseNativePair(unsupportedPlateCorners(), {}));
+  await page.goto('./'); await expect(page.locator('#viewport')).toHaveAttribute('data-ready', 'true');
+  await page.locator('#file-input').setInputFiles({ name: 'unsupported-corners.json', mimeType: 'application/json', buffer: Buffer.from(JSON.stringify(fixture)) });
+  await expect(page.locator('#topology-count')).toHaveText('5 节点 · 2 梁 · 3 面板');
+  await page.locator('#left-tab-subgrids').click(); await page.locator('#subgrid-check-btn').click();
+  await expect(page.locator('#subgrid-summary')).toHaveAttribute('data-subgrid-valid', 'false');
+  const diagnostics = page.locator('#subgrid-diagnostics [data-code="plate-node-without-beam"]');
+  await expect(diagnostics).toHaveCount(2);
+  await expect(diagnostics.first()).toContainText('面板节点没有相连的梁');
+  await expect(page.locator('#viewport')).toHaveAttribute('data-subgrid-error-marker-count', '2');
+  await page.locator('#language-select').selectOption('en');
+  await expect(diagnostics.first()).toContainText('A plate node has no incident beam');
+  const downloads = []; page.on('download', value => downloads.push(value));
+  await page.locator('#save-btn').click(); await expect.poll(() => downloads.length).toBe(2);
+  const files = await Promise.all(downloads.map(async download => ({ name: download.suggestedFilename(), mimeType: 'application/json', buffer: readFileSync(await download.path()) })));
+  const body = JSON.parse(files.find(file => file.name.endsWith('.data')).buffer).vehicles.vehicles[0];
+  expect(body.edges).toHaveLength(7); expect(body.plates).toHaveLength(3);
+  const incident = new Set(body.edges.flatMap(edge => [edge.n0, edge.n1]));
+  expect(body.nodes.every(node => incident.has(node.id))).toBe(true);
+  await expect(page.locator('#topology-count')).toHaveText('5 nodes · 2 edges · 3 plates');
+  await page.locator('#native-input').setInputFiles(files);
+  await expect(page.locator('#topology-count')).toHaveText('5 nodes · 7 edges · 3 plates');
+  await page.locator('#subgrid-check-btn').click();
+  await expect(page.locator('#subgrid-summary')).toHaveAttribute('data-subgrid-valid', 'true');
+  await expect(page.locator('#subgrid-diagnostics')).toBeHidden();
+  await expect(page.locator('#viewport')).toHaveAttribute('data-subgrid-error-marker-count', '0');
+  expect(errors).toEqual([]);
+});
+
+test('native export blocks plates crossing beam islands and retains the current project', async ({ page }) => {
+  await page.goto('./'); await expect(page.locator('#viewport')).toHaveAttribute('data-ready', 'true');
+  await page.locator('#file-input').setInputFiles({ name: 'cross-island.json', mimeType: 'application/json', buffer: Buffer.from(JSON.stringify(crossIslandPlate())) });
+  await expect(page.locator('#topology-count')).toHaveText('4 节点 · 2 梁 · 1 面板');
+  await page.locator('#left-tab-subgrids').click(); await page.locator('#subgrid-check-btn').click();
+  await expect(page.locator('#subgrid-diagnostics [data-code="plate-crosses-islands"]')).toHaveCount(1);
+  const downloads = []; page.on('download', value => downloads.push(value));
+  await page.locator('#save-btn').click();
+  await expect(page.locator('#save-status')).toContainText('面板引用了其他结构岛的节点');
+  expect(downloads).toHaveLength(0);
+  await page.locator('#language-select').selectOption('en'); await page.locator('#save-btn').click();
+  await expect(page.locator('#save-status')).toContainText('The plate references nodes in another structural island');
+  expect(downloads).toHaveLength(0);
+  await expect(page.locator('#topology-count')).toHaveText('4 nodes · 2 edges · 1 plates');
+});
+
 test('native import failures are visible with the sidebar closed and preserve the loaded project', async ({ page }) => {
   await page.goto('./'); await expect(page.locator('#viewport')).toHaveAttribute('data-ready', 'true');
   const files = data => ['data', 'meta'].map(extension => ({ name: 'native-error.' + extension, mimeType: 'application/json', buffer: Buffer.from(JSON.stringify(extension === 'data' ? data : {})) }));
@@ -2650,6 +2741,62 @@ test('topology tools create nodes and an edge in the viewport', async ({ page })
   await expect(page.locator('#edge-length-labels')).toBeHidden();
   await page.locator('#undo-btn').click();
   await expect(page.locator('#topology-count')).toHaveText('2 节点 · 0 梁 · 0 面板');
+});
+
+test('hide by type filters every scene kind without changing the project or selection filters', async ({ page }, testInfo) => {
+  const errors = []; page.on('pageerror', error => errors.push(error.message));
+  const fixture = structureTransformFixture();
+  fixture.topology.nodes[4].hidden = true; fixture.topology.edges[4].hidden = true;
+  fixture.objects = [0, 1, 2].map(index => ({ id: 'port-' + index, type: 'electric_port_straight', position: { x: 1.28 + index * .8, y: 0, z: 0 }, rotation: { x: 0, y: 0, z: 0 }, scale: { x: 1, y: 1, z: 1 }, ...(index === 2 ? { hidden: true } : {}) }));
+  fixture.topology.links.push({ id: 'wire', kind: 'electric', from: { componentId: 'port-0', port: 0 }, to: { componentId: 'port-1', port: 0 }, points: [] });
+  await openStructureTransformFixture(page, fixture);
+  const before = await saveProject(page); const historyCount = await page.locator('#history-list button').count();
+  const visible = () => page.evaluate(() => {
+    const scene = window.__renderTestState.scene; const layer = scene.getObjectByName('topology-overlay');
+    return Object.fromEntries(['component', 'node', 'edge', 'plate', 'link'].map(kind => [kind, kind === 'component'
+      ? scene.children.filter(object => object.userData.id && object.visible).length
+      : layer.children.filter(object => object.userData.topology === kind && object.visible).length]));
+  });
+  const baseline = { component: 2, node: 4, edge: 4, plate: 1, link: 1 };
+  await expect.poll(visible).toEqual(baseline);
+  const toggle = page.locator('#type-visibility-toggle');
+  expect(await page.locator('#selection-filter-options').evaluate(element => element.nextElementSibling.id)).toBe('type-visibility-toggle');
+  await expect(toggle).toHaveText('按类型隐藏'); await expect(toggle).toHaveAttribute('aria-expanded', 'false');
+  await expect(page.locator('#type-visibility-options')).toBeHidden();
+  await toggle.click(); await expect(toggle).toHaveAttribute('aria-expanded', 'true');
+  await expect(page.locator('[data-hidden-kind]')).toHaveCount(6);
+  for (const kind of ['component', 'node', 'edge', 'plate', 'link', 'structure']) {
+    const input = page.locator('[data-hidden-kind="' + kind + '"]');
+    await input.check();
+    await expect.poll(visible).toEqual(kind === 'structure' ? { ...baseline, node: 0, edge: 0, plate: 0 } : { ...baseline, [kind]: 0 });
+    await expect(page.locator('[data-selectable-kind="' + kind + '"]')).toBeChecked();
+    await input.uncheck(); await expect.poll(visible).toEqual(baseline);
+  }
+  expect(await saveProject(page)).toEqual(before);
+  await expect(page.locator('#history-list button')).toHaveCount(historyCount);
+  await page.locator('[data-hidden-kind="edge"]').check();
+  page.once('dialog', dialog => dialog.accept()); await page.locator('#new-btn').click();
+  await page.locator('#undo-btn').click(); await expect.poll(visible).toEqual({ ...baseline, edge: 0 });
+  await page.locator('#redo-btn').click(); await expect.poll(visible).toEqual({ component: 0, node: 0, edge: 0, plate: 0, link: 0 });
+  await page.locator('#undo-btn').click();
+  await page.locator('#language-select').selectOption('en');
+  await expect(toggle).toHaveText('Hide by type'); await expect(toggle).toHaveAttribute('aria-label', 'Collapse hide by type');
+  await expect(page.locator('#type-visibility-options').getByRole('checkbox', { name: 'Edges', exact: true })).toBeChecked();
+  await page.locator('#viewport').screenshot({ path: testInfo.outputPath('hide-by-type.png') });
+  expect(errors).toEqual([]);
+});
+
+test('hide by type keeps hidden node helpers selectable in the move tool', async ({ page }) => {
+  await openStructureTransformFixture(page);
+  const node = (await saveProject(page)).topology.nodes[0];
+  await page.locator('#type-visibility-toggle').click(); await page.locator('[data-hidden-kind="node"]').check();
+  await page.locator('#type-visibility-toggle').click(); await page.locator('[data-tool="translate"]').click();
+  const selectedNode = () => page.evaluate(() => window.__renderTestState.scene.children.find(object => object.isTransformControlsRoot).controls.object?.userData.nodeId || null);
+  await clickStructurePoint(page, node.position); await expect.poll(selectedNode).toBe(node.id);
+  expect(await page.evaluate(() => window.__renderTestState.scene.getObjectByName('topology-overlay').children.some(object => object.userData.topology === 'node' && object.visible))).toBe(false);
+  await page.locator('#selection-filter-toggle').click(); await page.locator('[data-selectable-kind="node"]').uncheck();
+  await page.locator('#selection-filter-toggle').click(); await clickStructurePoint(page, node.position);
+  await expect.poll(selectedNode).toBeNull();
 });
 
 test('hide tool persists component and edge visibility and restores all hidden objects', async ({ page }) => {

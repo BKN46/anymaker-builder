@@ -6,6 +6,7 @@
 // evidence that other valid structural nodes must be mounted to a component.
 import { structuralFaces, segmentTouchesFace, faceTouchesPlate, facesTouch } from './mechanical-bodies.js';
 import { vectorArray } from './component-frame.js';
+import { analyzeStructuralTopology } from './structural-topology.js';
 
 const entityKey = (kind, id) => `${kind}:${id}`;
 const EPSILON = 1e-6;
@@ -58,8 +59,8 @@ function connect(graph, a, b) {
   if (!graph.has(b)) graph.set(b, new Set());
   graph.get(a).add(b); graph.get(b).add(a);
 }
-function addDiagnostic(diagnostics, code, severity, entityIds, message) {
-  diagnostics.push({ code, severity, entityIds: [...new Set(entityIds.filter(Boolean))], message });
+function addDiagnostic(diagnostics, code, severity, entityIds, message, nodeIds) {
+  diagnostics.push({ code, severity, entityIds: [...new Set(entityIds.filter(Boolean))], message, ...(nodeIds ? { nodeIds } : {}) });
 }
 function entityFromKey(key) {
   const split = key.indexOf(':');
@@ -78,7 +79,8 @@ function buildAnalysis({ components = [], topology = {}, definitions = new Map()
   const edgeById = new Map();
   const plateById = new Map();
   const referencedNodeIds = new Set();
-  const diagnostics = [];
+  const structure = analyzeStructuralTopology(topology);
+  const diagnostics = [...structure.diagnostics];
   const facesById = new Map(components.map(component => [component.id, finitePoint(component.position) ? structuralFaces(component, definitions, { includeAttachments: true }) : []]));
   const hasDefinition = component => !!(component.definitionOverride || definitions.get(component.type));
   for (const component of components) {
@@ -96,10 +98,7 @@ function buildAnalysis({ components = [], topology = {}, definitions = new Map()
   for (const edge of topology.edges || []) {
     if (!edge?.id) continue;
     edgeById.set(edge.id, edge); graph.set(entityKey('edge', edge.id), new Set());
-    if (!nodeById.has(edge.a) || !nodeById.has(edge.b)) {
-      addDiagnostic(diagnostics, 'missing-edge-node', 'error', [edge.id, edge.a, edge.b], 'Edge references a missing node.');
-      continue;
-    }
+    if (!structure.validEdges.has(edge.id)) continue;
     connect(graph, entityKey('edge', edge.id), entityKey('node', edge.a));
     connect(graph, entityKey('edge', edge.id), entityKey('node', edge.b));
     referencedNodeIds.add(edge.a); referencedNodeIds.add(edge.b);
@@ -107,12 +106,9 @@ function buildAnalysis({ components = [], topology = {}, definitions = new Map()
   for (const plate of topology.plates || []) {
     if (!plate?.id) continue;
     plateById.set(plate.id, plate); graph.set(entityKey('plate', plate.id), new Set());
-    const nodeIds = [...new Set(plate.nodeIds || [])];
-    if (nodeIds.length < 3) addDiagnostic(diagnostics, 'invalid-plate', 'error', [plate.id], 'Plate has fewer than three distinct nodes.');
-    for (const nodeId of nodeIds) {
-      if (!nodeById.has(nodeId)) addDiagnostic(diagnostics, 'missing-plate-node', 'error', [plate.id, nodeId], 'Plate references a missing node.');
-      else { connect(graph, entityKey('plate', plate.id), entityKey('node', nodeId)); referencedNodeIds.add(nodeId); }
-    }
+    if (!structure.validPlates.has(plate.id)) continue;
+    for (const nodeId of plate.nodeIds) referencedNodeIds.add(nodeId);
+    for (const edgeId of structure.boundaryEdges.get(plate.id)) connect(graph, entityKey('plate', plate.id), entityKey('edge', edgeId));
   }
   const bounded = [...componentById.values()].filter(component => !hasDefinition(component) && structuralRegions(component).length);
   // Mounting surfaces can touch the interior of a beam or panel, far from
@@ -130,12 +126,13 @@ function buildAnalysis({ components = [], topology = {}, definitions = new Map()
   for (const face of faces) {
     if (face.type !== 'port') continue;
     const owner = entityKey('component', face.object.id);
-    for (const node of nodeById.values()) if (sameRigidSide(face.object, node) && finitePoint(node.position) && segmentTouchesFace(face, vectorArray(node.position), vectorArray(node.position))) connect(graph, owner, entityKey('node', node.id));
     for (const edge of edgeById.values()) {
+      if (!structure.validEdges.has(edge.id)) continue;
       const a = nodeById.get(edge.a); const b = nodeById.get(edge.b);
       if (sameRigidSide(face.object, edge) && finitePoint(a?.position) && finitePoint(b?.position) && segmentTouchesFace(face, vectorArray(a.position), vectorArray(b.position))) connect(graph, owner, entityKey('edge', edge.id));
     }
     for (const plate of plateById.values()) {
+      if (!structure.validPlates.has(plate.id)) continue;
       const points = (plate.nodeIds || []).map(id => nodeById.get(id)?.position);
       if (sameRigidSide(face.object, plate) && points.every(finitePoint) && faceTouchesPlate(face, points.map(vectorArray))) connect(graph, owner, entityKey('plate', plate.id));
     }
@@ -183,8 +180,9 @@ function buildAnalysis({ components = [], topology = {}, definitions = new Map()
     if (aGrid && bGrid && aGrid !== bGrid) addDiagnostic(diagnostics, 'cross-grid-edge', 'warning', [edge.id, edge.a, edge.b], 'Edge crosses existing subgrid ownership.');
   }
   for (const plate of plateById.values()) {
-    const grids = new Set((plate.nodeIds || []).map(id => nodeById.get(id)?.gridId).filter(Boolean));
-    if (grids.size > 1) addDiagnostic(diagnostics, 'cross-grid-plate', 'warning', [plate.id, ...(plate.nodeIds || [])], 'Plate crosses existing subgrid ownership.');
+    const nodeIds = Array.isArray(plate.nodeIds) ? plate.nodeIds : [];
+    const grids = new Set(nodeIds.map(id => nodeById.get(id)?.gridId).filter(Boolean));
+    if (grids.size > 1) addDiagnostic(diagnostics, 'cross-grid-plate', 'warning', [plate.id, ...nodeIds], 'Plate crosses existing subgrid ownership.');
   }
   const visited = new Set(); const groups = [];
   for (const start of graph.keys()) {
@@ -200,6 +198,12 @@ function buildAnalysis({ components = [], topology = {}, definitions = new Map()
     });
   }
   const structuralGroups = groups.filter(group => group.components.length || group.topology.length);
+  const memberships = new Map(groups.flatMap((group, index) => group.topology.map(item => [entityKey(item.kind, item.id), index])));
+  for (const plate of plateById.values()) {
+    if (!structure.validPlates.has(plate.id)) continue;
+    const outside = plate.nodeIds.filter(id => structure.incidentEdges.get(id)?.length && memberships.get(entityKey('node', id)) !== memberships.get(entityKey('plate', plate.id)));
+    if (outside.length) addDiagnostic(diagnostics, 'plate-crosses-islands', 'error', [plate.id, ...outside], 'Plate references nodes whose beams belong to another structural island.', outside);
+  }
   if (structuralGroups.length > 1) addDiagnostic(diagnostics, 'multiple-islands', 'info', structuralGroups.flatMap(group => [...group.components, ...group.topology.map(item => item.id)]), 'Vehicle contains multiple independent subgrids.');
   for (const group of structuralGroups) {
     const gridIds = new Set(group.components.map(id => componentById.get(id)?.gridId).filter(Boolean));

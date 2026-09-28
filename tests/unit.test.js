@@ -1,5 +1,6 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
+import { normalizeHiddenKinds, isKindVisible } from '../src/editor/type-visibility.js';
 import { readFileSync, readdirSync } from 'node:fs';
 import { createHash } from 'node:crypto';
 import { gunzipSync } from 'node:zlib';
@@ -12,6 +13,8 @@ import './selection-transform.test.js';
 import './subgrids.test.js';
 import './plates.test.js';
 import './native-import.test.js';
+import './native-export.test.js';
+import './google-drive.test.js';
 import { parseModel } from '../src/assets/model-import.js';
 import { simplifyModel, convertModel, modelBounds, MODEL_VERTEX_TARGETS } from '../src/editor/model-conversion.js';
 import { prepareModelShell } from '../src/assets/model-shell.js';
@@ -1066,6 +1069,15 @@ test('local backup validates data, restores previous valid record and survives q
   assert.equal(store.saveProject({ format: 'untrusted' }, validate).ok, false);
 });
 
+test('type visibility validates preferences and composes structural and connection filters', () => {
+  assert.deepEqual(normalizeHiddenKinds({ node: true, edge: 'true', plate: 1, component: null }), { component: false, structure: false, node: true, edge: false, plate: false, link: false });
+  const hidden = normalizeHiddenKinds({ structure: true, link: true });
+  for (const kind of ['node', 'edge', 'plate', 'link', 'belt', 'track']) assert.equal(isKindVisible(kind, hidden), false);
+  assert.equal(isKindVisible('component', hidden), true);
+  assert.deepEqual(normalizeSettings({ version: 1, hiddenKinds: { plate: true } }).hiddenKinds, normalizeHiddenKinds({ plate: true }));
+  assert.deepEqual(normalizeSettings().hiddenKinds, normalizeHiddenKinds());
+});
+
 test('settings storage fails safely and scopes records to the app path', () => {
   const blocked = createLocalStore(() => { throw new Error('SecurityError'); });
   assert.equal(blocked.loadSettings().settings.language, 'en');
@@ -1351,7 +1363,7 @@ test('editor projects export a self-contained observed native data and meta pair
   assert.deepEqual(pair.meta.vehicles.vehicles[0].transform, { m: [1, 0, 0, 0, 1, 0, 0, 0, 1], t: [0, 0, 0] });
   const restored = toEditorDocument(parseNativePair(pair.data, pair.meta));
   assert.deepEqual(restored.objects[0].position, object.position);
-  assert.equal(restored.topology.edges.length, 1);
+  assert.equal(restored.topology.edges.length, 3, 'export completes the two beams at the unsupported plate corner');
   assert.equal(restored.topology.plates.length, 1);
 });
 test('native mechanical export reverses input-first links and omits default port zero', () => {

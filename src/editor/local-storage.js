@@ -1,5 +1,7 @@
 import { nativePaintColor } from './native-paint.js';
 import { normalizeRenderQuality } from './render-quality.js';
+import { normalizeHiddenKinds } from './type-visibility.js';
+import { validGoogleClientId } from './google-drive-auth.js';
 
 const finite = (value, min, max, fallback) => Number.isFinite(value) && value >= min && value <= max ? value : fallback;
 const bool = (value, fallback) => typeof value === 'boolean' ? value : fallback;
@@ -29,6 +31,7 @@ export function normalizeSettings(input = {}) {
     version: 1,
     renderQuality: normalizeRenderQuality(s.renderQuality),
     language: s.language === 'zh' ? 'zh' : 'en',
+    googleClientId: validGoogleClientId(s.googleClientId) ? s.googleClientId : '',
     leftWidth: finite(s.leftWidth, 240, 720, 304),
     rightWidth: finite(s.rightWidth, 240, 720, 304),
     leftCollapsed: bool(s.leftCollapsed, false),
@@ -38,6 +41,7 @@ export function normalizeSettings(input = {}) {
     gridStyle: s.gridStyle === 'dashed' ? 'dashed' : 'solid',
     gridVisible: bool(s.gridVisible, true),
     nodesVisible: bool(s.nodesVisible, true),
+    hiddenKinds: normalizeHiddenKinds(s.hiddenKinds),
     nodeColor: typeof s.nodeColor === 'string' && /^#[\da-f]{6}$/i.test(s.nodeColor) ? s.nodeColor : '#246bce',
     nodeSize: finite(s.nodeSize, .02, .25, .055),
     nodeOpacity: finite(s.nodeOpacity, 0, 1, 1),

@@ -12,6 +12,8 @@ import { HYDRAULIC_PROFILES } from '../editor/hydraulic-profiles.js';
 import { validateLinks } from '../editor/connections.js';
 import { nativeSurfaceMount } from '../editor/surface-mount.js';
 import { isTrackLink } from '../editor/track-profiles.js';
+import { completeNativePlateEdges } from './structural-edges.js';
+import { analyzeSubgridIntegrity } from '../editor/subgrid-connectivity.js';
 
 const vector = value => ({ x: Number(value?.[0] ?? 0), y: Number(value?.[1] ?? 0), z: Number(value?.[2] ?? 0) });
 const matrix = value => Array.isArray(value) && value.length === 9 && value.every(number => Number.isFinite(number)) ? [...value] : null;
@@ -256,8 +258,8 @@ function nativePlateNodeOrderForExport(plate, nativePoints, edgeNodeIds) {
   // A panel boundary in the game is a loop of structural edges. Older editor
   // snapshots can retain a standalone node in that loop; remove it only when
   // it is exactly collinear and lies between its two neighbouring boundary
-  // points. Other isolated nodes are left intact because their semantics is
-  // ambiguous in older native samples.
+  // points. Non-collinear corners retain their geometry; their missing
+  // boundary beams are completed before partitioning and checked per body.
   let changed = true;
   while (changed) {
     changed = false;
@@ -363,15 +365,13 @@ function nativePlateNormal(points) {
 // saving a new vehicle must not require users to supply a template first.
 export function toNativePairFromEditor(document, { vehicleId = 1, componentDefinitions = new Map() } = {}) {
   if (!document || !Array.isArray(document.objects) || !Number.isInteger(vehicleId)) throw new Error('Native export requires a valid editor project');
-  const topology = document.topology || { nodes: [], edges: [], plates: [], links: [] };
+  let topology = document.topology || { nodes: [], edges: [], plates: [], links: [] };
   const hostObjects = document.objects;
   const objectsById = new Map(hostObjects.map(object => [object.id, object]));
   const hydraulicLinks = validateLinks((topology.links || []).filter(link => link.kind === 'hydraulic'), new Set(objectsById.keys())).map(link => orientHydraulicLink(link, objectsById, componentDefinitions));
   const { connections, diagnostics } = detectMechanicalConnections(hostObjects, componentDefinitions);
   if (diagnostics.length) throw mechanicalMateError(diagnostics[0].code, 'Cannot export physical mates (' + diagnostics[0].code + ')', diagnostics[0].components.join(' / '));
   const physicalConnections = [...connections, ...hydraulicLinks.map(link => ({ from: link.from.componentId, to: link.to.componentId }))];
-  const partition = physicalConnections.length ? partitionMechanicalBodies(document, physicalConnections, componentDefinitions) : null;
-  const bodyId = id => vehicleId + (partition?.componentBody.get(id) ?? 0);
   const definitions = [...new Set(hostObjects.map(object => object.type))];
   const definitionIndex = new Map(definitions.map((id, index) => [id, index]));
   const componentIds = new Map(hostObjects.map((object, index) => [object.id, index + 1]));
@@ -384,6 +384,32 @@ export function toNativePairFromEditor(document, { vehicleId = 1, componentDefin
   const exportNodes = (topology.nodes || []).filter(node => referencedNodeIds.has(node.id));
   if (exportNodes.length !== referencedNodeIds.size) throw new Error('Native export has a structural reference to a missing node');
   const nodeIds = new Map(exportNodes.map((node, index) => [node.id, index + 1]));
+  const sourceEdges = topology.edges || [];
+  const completedEdges = completeNativePlateEdges({
+    nodes: exportNodes.map(node => ({ id: nodeIds.get(node.id) })),
+    edges: sourceEdges.map(edge => ({ n0: nodeIds.get(edge.a), n1: nodeIds.get(edge.b) })),
+    plates: (topology.plates || []).map((plate, index) => ({
+      nodes: exportPlateOrders[index].map(id => nodeIds.get(id)),
+      col_front: nativePaintIndex(plate.color_front, plate.col_front, 'plate front paint'),
+      col_back: nativePaintIndex(plate.color_back, plate.col_back, 'plate back paint'),
+    })),
+  });
+  const usedEdgeIds = new Set(sourceEdges.map(edge => edge.id)); let edgeSequence = 1;
+  const addedEdges = completedEdges.slice(sourceEdges.length).map(edge => {
+    while (usedEdgeIds.has('native-boundary-' + edgeSequence)) edgeSequence++;
+    const id = 'native-boundary-' + edgeSequence++; usedEdgeIds.add(id);
+    const a = exportNodes[edge.n0 - 1]; const b = exportNodes[edge.n1 - 1];
+    return { id, a: a.id, b: b.id, ...(a.gridId ? { gridId: a.gridId } : {}), ...(edge.col !== undefined ? { col: edge.col } : {}) };
+  });
+  topology = {
+    ...topology, nodes: exportNodes, edges: [...sourceEdges, ...addedEdges],
+    plates: (topology.plates || []).map((plate, index) => ({ ...plate, nodeIds: exportPlateOrders[index] })),
+    mechanicalConnections: connections,
+  };
+  const partition = physicalConnections.length ? partitionMechanicalBodies({ ...document, topology }, physicalConnections, componentDefinitions) : null;
+  const analysis = analyzeSubgridIntegrity({ components: hostObjects, topology, definitions: componentDefinitions });
+  if (!analysis.isValid) throw Object.assign(new Error('Native export structural island check failed: ' + analysis.diagnostics.filter(item => item.severity === 'error').map(item => item.code + ' (' + item.entityIds.join(', ') + ')').join('; ')), { structuralDiagnostics: analysis.diagnostics.filter(item => item.severity === 'error') });
+  const bodyId = id => vehicleId + (partition?.componentBody.get(id) ?? 0);
   const nativePoints = new Map(exportNodes.map(node => [node.id, nativeCells(node.position)]));
   const mounted = new Map();
   const components = hostObjects.map(object => {
@@ -469,7 +495,7 @@ export function toNativePairFromEditor(document, { vehicleId = 1, componentDefin
     if (kind === 'mechanical') link = normalizeMechanicalExportLink(link, objectsById, componentDefinitions);
     if (!link) return [];
     const first = componentIds.get(link.from?.componentId); const second = componentIds.get(link.to?.componentId);
-    if (!first || !second) return [];
+    if (!first || !second) throw new Error('Native export connection references a missing component');
     const endpoint = (value, id) => ({ comp: id, ...(Number.isInteger(value?.port) && value.port !== 0 ? { pos: value.port } : {}) });
     // Tracks are generated from wheel endpoint links in the game; no sampled
     // track pieces, route points or diagnostic colors belong in their save.
@@ -511,6 +537,7 @@ export function toNativePairFromEditor(document, { vehicleId = 1, componentDefin
     grids: componentGrids(components.filter((component, i) => partition.componentBody.get(hostObjects[i].id) === index)),
     ...Object.fromEntries(Object.entries(links).map(([kind, values]) => [kind, values.filter(link => partition.componentBody.get(hostObjects[link.p0.comp - 1].id) === index)])),
   })) : [vehicle];
+  for (const body of vehicles) body.edges = completeNativePlateEdges(body);
   return {
     data: { definitions: { components: definitions }, vehicles: { vehicles } },
     meta: { vehicles: { vehicles: vehicles.map(body => {

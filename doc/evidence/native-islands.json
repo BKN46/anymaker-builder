@@ -1,0 +1,1492 @@
+{
+  "version": 1,
+  "analyzedOn": "2026-09-28",
+  "source": {
+    "path": "Anymaker/bin/game.gcl",
+    "bytes": 81870449,
+    "sha256": "d9725681f1b0bff321c58fcadc0d2e12104919a541eef074cf12945b283edb75"
+  },
+  "functions": [
+    {
+      "name": "server_scene.vehicle._flood_island",
+      "signature": "() server_scene.vehicle._flood_island (server_scene.vehicle, const s32, s32, vector<ptr<server_scene.vehicle_plate>>, vector<ptr<server_scene.vehicle_edge>>, vector<ptr<server_scene.vehicle_component>>)",
+      "signatureOffset": "0x31aab61",
+      "codeOffset": "0x31ab338",
+      "codeSize": "0x5f0",
+      "allocationSize": "0x650",
+      "codeSha256": "466932ffdd183fd72fc7f9f86593840ae7d0a25d0759e517dfc0bf4c60911331",
+      "references": [
+        {
+          "address": "0x31ab928",
+          "name": "(bool) vector<ptr<server_scene.vehicle_plate>>.empty (const vector<ptr<server_scene.vehicle_plate>>)"
+        },
+        {
+          "address": "0x31ab930",
+          "name": "(bool) vector<ptr<server_scene.vehicle_edge>>.empty (const vector<ptr<server_scene.vehicle_edge>>)"
+        },
+        {
+          "address": "0x31ab938",
+          "name": "(bool) vector<ptr<server_scene.vehicle_component>>.empty (const vector<ptr<server_scene.vehicle_component>>)"
+        },
+        {
+          "address": "0x31ab940",
+          "name": "(ptr<ptr<server_scene.vehicle_plate>>) vector<ptr<server_scene.vehicle_plate>>.back (const vector<ptr<server_scene.vehicle_plate>>)"
+        },
+        {
+          "address": "0x31ab948",
+          "name": "() vector<ptr<server_scene.vehicle_plate>>.pop_back (vector<ptr<server_scene.vehicle_plate>>)"
+        },
+        {
+          "address": "0x31ab950",
+          "name": "() server_scene.vehicle._flood_islands (server_scene.vehicle, server_scene.vehicle_plate, const s32, s32, vector<ptr<server_scene.vehicle_plate>>, vector<ptr<server_scene.vehicle_edge>>, vector<ptr<server_scene.vehicle_component>>)"
+        },
+        {
+          "address": "0x31ab958",
+          "name": "(ptr<ptr<server_scene.vehicle_edge>>) vector<ptr<server_scene.vehicle_edge>>.back (const vector<ptr<server_scene.vehicle_edge>>)"
+        },
+        {
+          "address": "0x31ab960",
+          "name": "() vector<ptr<server_scene.vehicle_edge>>.pop_back (vector<ptr<server_scene.vehicle_edge>>)"
+        },
+        {
+          "address": "0x31ab968",
+          "name": "() server_scene.vehicle._flood_islands (server_scene.vehicle, server_scene.vehicle_edge, const s32, s32, vector<ptr<server_scene.vehicle_plate>>, vector<ptr<server_scene.vehicle_edge>>, vector<ptr<server_scene.vehicle_component>>)"
+        },
+        {
+          "address": "0x31ab970",
+          "name": "(ptr<ptr<server_scene.vehicle_component>>) vector<ptr<server_scene.vehicle_component>>.back (const vector<ptr<server_scene.vehicle_component>>)"
+        },
+        {
+          "address": "0x31ab978",
+          "name": "() vector<ptr<server_scene.vehicle_component>>.pop_back (vector<ptr<server_scene.vehicle_component>>)"
+        },
+        {
+          "address": "0x31ab980",
+          "name": "() server_scene.vehicle._flood_islands (server_scene.vehicle, server_scene.vehicle_component, const s32, s32, vector<ptr<server_scene.vehicle_plate>>, vector<ptr<server_scene.vehicle_edge>>, vector<ptr<server_scene.vehicle_component>>)"
+        }
+      ]
+    },
+    {
+      "name": "server_scene.vehicle._flood_islands",
+      "signature": "() server_scene.vehicle._flood_islands (server_scene.vehicle)",
+      "signatureOffset": "0x31abca0",
+      "codeOffset": "0x31ace8a",
+      "codeSize": "0x790",
+      "allocationSize": "0x870",
+      "codeSha256": "da110ba7f6eb84ef1d9c7178f1a0f6ce4da52815acb0b34e9eabaf4eea89ce58",
+      "references": [
+        {
+          "address": "0x31ad61a",
+          "name": "(uptr) replication.master.container_vector_ref_virtual<server_scene.vehicle_edge>.begin (const replication.master.container_vector_ref_virtual<server_scene.vehicle_edge>)"
+        },
+        {
+          "address": "0x31ad622",
+          "name": "(uptr) replication.master.container_vector_ref_virtual<server_scene.vehicle_edge>.end (const replication.master.container_vector_ref_virtual<server_scene.vehicle_edge>)"
+        },
+        {
+          "address": "0x31ad62a",
+          "name": "(ptr<server_scene.vehicle_edge>) replication.master.container_vector_ref_virtual<server_scene.vehicle_edge>.value (const replication.master.container_vector_ref_virtual<server_scene.vehicle_edge>, const uptr)"
+        },
+        {
+          "address": "0x31ad632",
+          "name": "(bool) server_scene.vehicle.get_is_removed (const server_scene.vehicle, const server_scene.vehicle_edge)"
+        },
+        {
+          "address": "0x31ad63a",
+          "name": "(ptr<s32>) vector<s32>.push_back (vector<s32>)"
+        },
+        {
+          "address": "0x31ad642",
+          "name": "(s32) vector<s32>.size (const vector<s32>)"
+        },
+        {
+          "address": "0x31ad64a",
+          "name": "(ptr<s32>) vector<s32>.back (const vector<s32>)"
+        },
+        {
+          "address": "0x31ad652",
+          "name": "() server_scene.vehicle._flood_islands_edge (server_scene.vehicle, server_scene.vehicle_edge, const s32, s32)"
+        },
+        {
+          "address": "0x31ad65a",
+          "name": "(uptr) replication.master.container_vector_ref_virtual<server_scene.vehicle_edge>.next (const replication.master.container_vector_ref_virtual<server_scene.vehicle_edge>, const uptr)"
+        },
+        {
+          "address": "0x31ad662",
+          "name": "(uptr) replication.master.container_vector_ref_virtual<server_scene.vehicle_edge>.erase (replication.master.container_vector_ref_virtual<server_scene.vehicle_edge>, const uptr)"
+        },
+        {
+          "address": "0x31ad66a",
+          "name": "(uptr) replication.master.container_vector_ref_virtual<server_scene.vehicle_plate>.begin (const replication.master.container_vector_ref_virtual<server_scene.vehicle_plate>)"
+        },
+        {
+          "address": "0x31ad672",
+          "name": "(uptr) replication.master.container_vector_ref_virtual<server_scene.vehicle_plate>.end (const replication.master.container_vector_ref_virtual<server_scene.vehicle_plate>)"
+        },
+        {
+          "address": "0x31ad67a",
+          "name": "(ptr<server_scene.vehicle_plate>) replication.master.container_vector_ref_virtual<server_scene.vehicle_plate>.value (const replication.master.container_vector_ref_virtual<server_scene.vehicle_plate>, const uptr)"
+        },
+        {
+          "address": "0x31ad682",
+          "name": "(bool) server_scene.vehicle.get_is_removed (const server_scene.vehicle, const server_scene.vehicle_plate)"
+        },
+        {
+          "address": "0x31ad68a",
+          "name": "() server_scene.vehicle._flood_islands_plate (server_scene.vehicle, server_scene.vehicle_plate, const s32, s32)"
+        },
+        {
+          "address": "0x31ad692",
+          "name": "(uptr) replication.master.container_vector_ref_virtual<server_scene.vehicle_plate>.next (const replication.master.container_vector_ref_virtual<server_scene.vehicle_plate>, const uptr)"
+        },
+        {
+          "address": "0x31ad69a",
+          "name": "(uptr) replication.master.container_vector_ref_virtual<server_scene.vehicle_plate>.erase (replication.master.container_vector_ref_virtual<server_scene.vehicle_plate>, const uptr)"
+        },
+        {
+          "address": "0x31ad6a2",
+          "name": "(uptr) replication.master.container_vector_ref<server_scene.vehicle_grid>.begin (const replication.master.container_vector_ref<server_scene.vehicle_grid>)"
+        },
+        {
+          "address": "0x31ad6aa",
+          "name": "(uptr) replication.master.container_vector_ref<server_scene.vehicle_grid>.end (const replication.master.container_vector_ref<server_scene.vehicle_grid>)"
+        },
+        {
+          "address": "0x31ad6b2",
+          "name": "(ptr<server_scene.vehicle_grid>) replication.master.container_vector_ref<server_scene.vehicle_grid>.value (const replication.master.container_vector_ref<server_scene.vehicle_grid>, const uptr)"
+        },
+        {
+          "address": "0x31ad6ba",
+          "name": "(uptr) replication.master.container_vector_ref_virtual<server_scene.vehicle_component>.begin (const replication.master.container_vector_ref_virtual<server_scene.vehicle_component>)"
+        },
+        {
+          "address": "0x31ad6c2",
+          "name": "(uptr) replication.master.container_vector_ref_virtual<server_scene.vehicle_component>.end (const replication.master.container_vector_ref_virtual<server_scene.vehicle_component>)"
+        },
+        {
+          "address": "0x31ad6ca",
+          "name": "(ptr<server_scene.vehicle_component>) replication.master.container_vector_ref_virtual<server_scene.vehicle_component>.value (const replication.master.container_vector_ref_virtual<server_scene.vehicle_component>, const uptr)"
+        },
+        {
+          "address": "0x31ad6d2",
+          "name": "() server_scene.vehicle._flood_islands_component (server_scene.vehicle, server_scene.vehicle_component, const s32, s32)"
+        },
+        {
+          "address": "0x31ad6da",
+          "name": "(uptr) replication.master.container_vector_ref_virtual<server_scene.vehicle_component>.next (const replication.master.container_vector_ref_virtual<server_scene.vehicle_component>, const uptr)"
+        },
+        {
+          "address": "0x31ad6e2",
+          "name": "(uptr) replication.master.container_vector_ref_virtual<server_scene.vehicle_component>.erase (replication.master.container_vector_ref_virtual<server_scene.vehicle_component>, const uptr)"
+        },
+        {
+          "address": "0x31ad6ea",
+          "name": "(uptr) replication.master.container_vector_ref<server_scene.vehicle_grid>.next (const replication.master.container_vector_ref<server_scene.vehicle_grid>, const uptr)"
+        },
+        {
+          "address": "0x31ad6f2",
+          "name": "(uptr) replication.master.container_vector_ref<server_scene.vehicle_grid>.erase (replication.master.container_vector_ref<server_scene.vehicle_grid>, const uptr)"
+        }
+      ]
+    },
+    {
+      "name": "server_scene.vehicle._flood_islands",
+      "signature": "() server_scene.vehicle._flood_islands (server_scene.vehicle, server_scene.vehicle_edge, const s32, s32, vector<ptr<server_scene.vehicle_plate>>, vector<ptr<server_scene.vehicle_edge>>, vector<ptr<server_scene.vehicle_component>>)",
+      "signatureOffset": "0x31ad961",
+      "codeOffset": "0x31ae328",
+      "codeSize": "0x590",
+      "allocationSize": "0x620",
+      "codeSha256": "cafe184f0af9420802d0c6071cf9f5965233ea71dc1c0c91c9c27187d31fd5b1",
+      "references": [
+        {
+          "address": "0x31ae8b8",
+          "name": "(uptr) vector<ptr<server_scene.vehicle_edge>>.begin (const vector<ptr<server_scene.vehicle_edge>>)"
+        },
+        {
+          "address": "0x31ae8c0",
+          "name": "(uptr) vector<ptr<server_scene.vehicle_edge>>.end (const vector<ptr<server_scene.vehicle_edge>>)"
+        },
+        {
+          "address": "0x31ae8c8",
+          "name": "(ptr<ptr<server_scene.vehicle_edge>>) vector<ptr<server_scene.vehicle_edge>>.value (const vector<ptr<server_scene.vehicle_edge>>, const uptr)"
+        },
+        {
+          "address": "0x31ae8d0",
+          "name": "(ptr<ptr<server_scene.vehicle_edge>>) vector<ptr<server_scene.vehicle_edge>>.push_back (vector<ptr<server_scene.vehicle_edge>>)"
+        },
+        {
+          "address": "0x31ae8d8",
+          "name": "(uptr) vector<ptr<server_scene.vehicle_edge>>.next (const vector<ptr<server_scene.vehicle_edge>>, const uptr)"
+        },
+        {
+          "address": "0x31ae8e0",
+          "name": "(uptr) vector<ptr<server_scene.vehicle_edge>>.erase (vector<ptr<server_scene.vehicle_edge>>, const uptr)"
+        },
+        {
+          "address": "0x31ae8e8",
+          "name": "(uptr) vector<ptr<server_scene.vehicle_plate>>.begin (const vector<ptr<server_scene.vehicle_plate>>)"
+        },
+        {
+          "address": "0x31ae8f0",
+          "name": "(uptr) vector<ptr<server_scene.vehicle_plate>>.end (const vector<ptr<server_scene.vehicle_plate>>)"
+        },
+        {
+          "address": "0x31ae8f8",
+          "name": "(ptr<ptr<server_scene.vehicle_plate>>) vector<ptr<server_scene.vehicle_plate>>.value (const vector<ptr<server_scene.vehicle_plate>>, const uptr)"
+        },
+        {
+          "address": "0x31ae900",
+          "name": "(ptr<ptr<server_scene.vehicle_plate>>) vector<ptr<server_scene.vehicle_plate>>.push_back (vector<ptr<server_scene.vehicle_plate>>)"
+        },
+        {
+          "address": "0x31ae908",
+          "name": "(uptr) vector<ptr<server_scene.vehicle_plate>>.next (const vector<ptr<server_scene.vehicle_plate>>, const uptr)"
+        },
+        {
+          "address": "0x31ae910",
+          "name": "(uptr) vector<ptr<server_scene.vehicle_plate>>.erase (vector<ptr<server_scene.vehicle_plate>>, const uptr)"
+        },
+        {
+          "address": "0x31ae918",
+          "name": "(uptr) vector<ptr<server_scene.vehicle_component>>.begin (const vector<ptr<server_scene.vehicle_component>>)"
+        },
+        {
+          "address": "0x31ae920",
+          "name": "(uptr) vector<ptr<server_scene.vehicle_component>>.end (const vector<ptr<server_scene.vehicle_component>>)"
+        },
+        {
+          "address": "0x31ae928",
+          "name": "(ptr<ptr<server_scene.vehicle_component>>) vector<ptr<server_scene.vehicle_component>>.value (const vector<ptr<server_scene.vehicle_component>>, const uptr)"
+        },
+        {
+          "address": "0x31ae930",
+          "name": "(ptr<ptr<server_scene.vehicle_component>>) vector<ptr<server_scene.vehicle_component>>.push_back (vector<ptr<server_scene.vehicle_component>>)"
+        },
+        {
+          "address": "0x31ae938",
+          "name": "(uptr) vector<ptr<server_scene.vehicle_component>>.next (const vector<ptr<server_scene.vehicle_component>>, const uptr)"
+        },
+        {
+          "address": "0x31ae940",
+          "name": "(uptr) vector<ptr<server_scene.vehicle_component>>.erase (vector<ptr<server_scene.vehicle_component>>, const uptr)"
+        }
+      ]
+    },
+    {
+      "name": "server_scene.vehicle._flood_islands",
+      "signature": "() server_scene.vehicle._flood_islands (server_scene.vehicle, server_scene.vehicle_plate, const s32, s32, vector<ptr<server_scene.vehicle_plate>>, vector<ptr<server_scene.vehicle_edge>>, vector<ptr<server_scene.vehicle_component>>)",
+      "signatureOffset": "0x31aece2",
+      "codeOffset": "0x31af51e",
+      "codeSize": "0x2b0",
+      "allocationSize": "0x310",
+      "codeSha256": "3d1a92e1f56de92bf71b13bfaf4bf2e8d34c199a1b422bbf404c183e90ac1438",
+      "references": [
+        {
+          "address": "0x31af7ce",
+          "name": "(uptr) replication.master.container_vector_ref<server_scene.vehicle_plate_edge>.begin (const replication.master.container_vector_ref<server_scene.vehicle_plate_edge>)"
+        },
+        {
+          "address": "0x31af7d6",
+          "name": "(uptr) replication.master.container_vector_ref<server_scene.vehicle_plate_edge>.end (const replication.master.container_vector_ref<server_scene.vehicle_plate_edge>)"
+        },
+        {
+          "address": "0x31af7de",
+          "name": "(ptr<server_scene.vehicle_plate_edge>) replication.master.container_vector_ref<server_scene.vehicle_plate_edge>.value (const replication.master.container_vector_ref<server_scene.vehicle_plate_edge>, const uptr)"
+        },
+        {
+          "address": "0x31af7e6",
+          "name": "(ptr<ptr<server_scene.vehicle_edge>>) vector<ptr<server_scene.vehicle_edge>>.push_back (vector<ptr<server_scene.vehicle_edge>>)"
+        },
+        {
+          "address": "0x31af7ee",
+          "name": "(uptr) replication.master.container_vector_ref<server_scene.vehicle_plate_edge>.next (const replication.master.container_vector_ref<server_scene.vehicle_plate_edge>, const uptr)"
+        },
+        {
+          "address": "0x31af7f6",
+          "name": "(uptr) replication.master.container_vector_ref<server_scene.vehicle_plate_edge>.erase (replication.master.container_vector_ref<server_scene.vehicle_plate_edge>, const uptr)"
+        },
+        {
+          "address": "0x31af7fe",
+          "name": "(uptr) vector<ptr<server_scene.vehicle_component>>.begin (const vector<ptr<server_scene.vehicle_component>>)"
+        },
+        {
+          "address": "0x31af806",
+          "name": "(uptr) vector<ptr<server_scene.vehicle_component>>.end (const vector<ptr<server_scene.vehicle_component>>)"
+        },
+        {
+          "address": "0x31af80e",
+          "name": "(ptr<ptr<server_scene.vehicle_component>>) vector<ptr<server_scene.vehicle_component>>.value (const vector<ptr<server_scene.vehicle_component>>, const uptr)"
+        },
+        {
+          "address": "0x31af816",
+          "name": "(ptr<ptr<server_scene.vehicle_component>>) vector<ptr<server_scene.vehicle_component>>.push_back (vector<ptr<server_scene.vehicle_component>>)"
+        },
+        {
+          "address": "0x31af81e",
+          "name": "(uptr) vector<ptr<server_scene.vehicle_component>>.next (const vector<ptr<server_scene.vehicle_component>>, const uptr)"
+        },
+        {
+          "address": "0x31af826",
+          "name": "(uptr) vector<ptr<server_scene.vehicle_component>>.erase (vector<ptr<server_scene.vehicle_component>>, const uptr)"
+        }
+      ]
+    },
+    {
+      "name": "server_scene.vehicle._flood_islands",
+      "signature": "() server_scene.vehicle._flood_islands (server_scene.vehicle, server_scene.vehicle_component, const s32, s32, vector<ptr<server_scene.vehicle_plate>>, vector<ptr<server_scene.vehicle_edge>>, vector<ptr<server_scene.vehicle_component>>)",
+      "signatureOffset": "0x31afacf",
+      "codeOffset": "0x31b049b",
+      "codeSize": "0x3b0",
+      "allocationSize": "0x440",
+      "codeSha256": "49f1f7b99a938e7baebea4298d2589294861e46d787204081faf1a7f74eec807",
+      "references": [
+        {
+          "address": "0x31b084b",
+          "name": "(uptr) vector<ptr<server_scene.vehicle_edge>>.begin (const vector<ptr<server_scene.vehicle_edge>>)"
+        },
+        {
+          "address": "0x31b0853",
+          "name": "(uptr) vector<ptr<server_scene.vehicle_edge>>.end (const vector<ptr<server_scene.vehicle_edge>>)"
+        },
+        {
+          "address": "0x31b085b",
+          "name": "(ptr<ptr<server_scene.vehicle_edge>>) vector<ptr<server_scene.vehicle_edge>>.value (const vector<ptr<server_scene.vehicle_edge>>, const uptr)"
+        },
+        {
+          "address": "0x31b0863",
+          "name": "(ptr<ptr<server_scene.vehicle_edge>>) vector<ptr<server_scene.vehicle_edge>>.push_back (vector<ptr<server_scene.vehicle_edge>>)"
+        },
+        {
+          "address": "0x31b086b",
+          "name": "(uptr) vector<ptr<server_scene.vehicle_edge>>.next (const vector<ptr<server_scene.vehicle_edge>>, const uptr)"
+        },
+        {
+          "address": "0x31b0873",
+          "name": "(uptr) vector<ptr<server_scene.vehicle_edge>>.erase (vector<ptr<server_scene.vehicle_edge>>, const uptr)"
+        },
+        {
+          "address": "0x31b087b",
+          "name": "(uptr) vector<ptr<server_scene.vehicle_plate>>.begin (const vector<ptr<server_scene.vehicle_plate>>)"
+        },
+        {
+          "address": "0x31b0883",
+          "name": "(uptr) vector<ptr<server_scene.vehicle_plate>>.end (const vector<ptr<server_scene.vehicle_plate>>)"
+        },
+        {
+          "address": "0x31b088b",
+          "name": "(ptr<ptr<server_scene.vehicle_plate>>) vector<ptr<server_scene.vehicle_plate>>.value (const vector<ptr<server_scene.vehicle_plate>>, const uptr)"
+        },
+        {
+          "address": "0x31b0893",
+          "name": "(ptr<ptr<server_scene.vehicle_plate>>) vector<ptr<server_scene.vehicle_plate>>.push_back (vector<ptr<server_scene.vehicle_plate>>)"
+        },
+        {
+          "address": "0x31b089b",
+          "name": "(uptr) vector<ptr<server_scene.vehicle_plate>>.next (const vector<ptr<server_scene.vehicle_plate>>, const uptr)"
+        },
+        {
+          "address": "0x31b08a3",
+          "name": "(uptr) vector<ptr<server_scene.vehicle_plate>>.erase (vector<ptr<server_scene.vehicle_plate>>, const uptr)"
+        },
+        {
+          "address": "0x31b08ab",
+          "name": "(uptr) vector<ptr<server_scene.vehicle_component>>.begin (const vector<ptr<server_scene.vehicle_component>>)"
+        },
+        {
+          "address": "0x31b08b3",
+          "name": "(uptr) vector<ptr<server_scene.vehicle_component>>.end (const vector<ptr<server_scene.vehicle_component>>)"
+        },
+        {
+          "address": "0x31b08bb",
+          "name": "(ptr<ptr<server_scene.vehicle_component>>) vector<ptr<server_scene.vehicle_component>>.value (const vector<ptr<server_scene.vehicle_component>>, const uptr)"
+        },
+        {
+          "address": "0x31b08c3",
+          "name": "(ptr<ptr<server_scene.vehicle_component>>) vector<ptr<server_scene.vehicle_component>>.push_back (vector<ptr<server_scene.vehicle_component>>)"
+        },
+        {
+          "address": "0x31b08cb",
+          "name": "(uptr) vector<ptr<server_scene.vehicle_component>>.next (const vector<ptr<server_scene.vehicle_component>>, const uptr)"
+        },
+        {
+          "address": "0x31b08d3",
+          "name": "(uptr) vector<ptr<server_scene.vehicle_component>>.erase (vector<ptr<server_scene.vehicle_component>>, const uptr)"
+        }
+      ]
+    },
+    {
+      "name": "server_scene.vehicle._rebuild_islands",
+      "signature": "() server_scene.vehicle._rebuild_islands (server_scene.vehicle, server_scene, const bool)",
+      "signatureOffset": "0x31b7d64",
+      "codeOffset": "0x31b80c7",
+      "codeSize": "0x970",
+      "allocationSize": "0x9e8",
+      "codeSha256": "182a017421d43e661fefb392d9138ed93ef5d27e71c540471f22bcf39c3b49e6",
+      "references": [
+        {
+          "address": "0x31b8a37",
+          "name": "g_is_debug_server_scene_island"
+        },
+        {
+          "address": "0x31b8a3f",
+          "name": "() $string_ctor_cstr (string, const uptr)"
+        },
+        {
+          "address": "0x31b8a47",
+          "name": "() $string_ctor (string)"
+        },
+        {
+          "address": "0x31b8a4f",
+          "name": "() $string_assign_s32 (string, const s32)"
+        },
+        {
+          "address": "0x31b8a57",
+          "name": "() $string_add (string, const string, const string)"
+        },
+        {
+          "address": "0x31b8a5f",
+          "name": "() log (const string)"
+        },
+        {
+          "address": "0x31b8a67",
+          "name": "() $string_dtor (string)"
+        },
+        {
+          "address": "0x31b8a6f",
+          "name": "(f64) time.get_nanosec ()"
+        },
+        {
+          "address": "0x31b8a77",
+          "name": "() vector<s32>.clear (vector<s32>)"
+        },
+        {
+          "address": "0x31b8a7f",
+          "name": "() server_scene.vehicle._reset_island_indices (server_scene.vehicle)"
+        },
+        {
+          "address": "0x31b8a87",
+          "name": "() server_scene.vehicle._flood_islands (server_scene.vehicle)"
+        },
+        {
+          "address": "0x31b8a8f",
+          "name": "(s32) vector<s32>.size (const vector<s32>)"
+        },
+        {
+          "address": "0x31b8a97",
+          "name": "() server_scene.vehicle._split_islands (server_scene.vehicle, server_scene)"
+        },
+        {
+          "address": "0x31b8a9f",
+          "name": "() server_scene.vehicle.clean_removed (server_scene.vehicle)"
+        },
+        {
+          "address": "0x31b8aa7",
+          "name": "() $string_assign_f64 (string, const f64)"
+        }
+      ]
+    },
+    {
+      "name": "server_scene.vehicle._reset_island_indices",
+      "signature": "() server_scene.vehicle._reset_island_indices (server_scene.vehicle)",
+      "signatureOffset": "0x31b96d4",
+      "codeOffset": "0x31ba6bb",
+      "codeSize": "0x448",
+      "allocationSize": "0x4f8",
+      "codeSha256": "289e55622344be45890d9a75bdce64d4291e84f41ff6f1fdf2c0128e55262471",
+      "references": [
+        {
+          "address": "0x31bab03",
+          "name": "(uptr) replication.master.container_vector_ref_virtual<server_scene.vehicle_edge>.begin (const replication.master.container_vector_ref_virtual<server_scene.vehicle_edge>)"
+        },
+        {
+          "address": "0x31bab0b",
+          "name": "(uptr) replication.master.container_vector_ref_virtual<server_scene.vehicle_edge>.end (const replication.master.container_vector_ref_virtual<server_scene.vehicle_edge>)"
+        },
+        {
+          "address": "0x31bab13",
+          "name": "(ptr<server_scene.vehicle_edge>) replication.master.container_vector_ref_virtual<server_scene.vehicle_edge>.value (const replication.master.container_vector_ref_virtual<server_scene.vehicle_edge>, const uptr)"
+        },
+        {
+          "address": "0x31bab1b",
+          "name": "(bool) server_scene.vehicle.get_is_removed (const server_scene.vehicle, const server_scene.vehicle_edge)"
+        },
+        {
+          "address": "0x31bab23",
+          "name": "(uptr) replication.master.container_vector_ref_virtual<server_scene.vehicle_edge>.next (const replication.master.container_vector_ref_virtual<server_scene.vehicle_edge>, const uptr)"
+        },
+        {
+          "address": "0x31bab2b",
+          "name": "(uptr) replication.master.container_vector_ref_virtual<server_scene.vehicle_edge>.erase (replication.master.container_vector_ref_virtual<server_scene.vehicle_edge>, const uptr)"
+        },
+        {
+          "address": "0x31bab33",
+          "name": "(uptr) replication.master.container_vector_ref_virtual<server_scene.vehicle_plate>.begin (const replication.master.container_vector_ref_virtual<server_scene.vehicle_plate>)"
+        },
+        {
+          "address": "0x31bab3b",
+          "name": "(uptr) replication.master.container_vector_ref_virtual<server_scene.vehicle_plate>.end (const replication.master.container_vector_ref_virtual<server_scene.vehicle_plate>)"
+        },
+        {
+          "address": "0x31bab43",
+          "name": "(ptr<server_scene.vehicle_plate>) replication.master.container_vector_ref_virtual<server_scene.vehicle_plate>.value (const replication.master.container_vector_ref_virtual<server_scene.vehicle_plate>, const uptr)"
+        },
+        {
+          "address": "0x31bab4b",
+          "name": "(bool) server_scene.vehicle.get_is_removed (const server_scene.vehicle, const server_scene.vehicle_plate)"
+        },
+        {
+          "address": "0x31bab53",
+          "name": "(uptr) replication.master.container_vector_ref_virtual<server_scene.vehicle_plate>.next (const replication.master.container_vector_ref_virtual<server_scene.vehicle_plate>, const uptr)"
+        },
+        {
+          "address": "0x31bab5b",
+          "name": "(uptr) replication.master.container_vector_ref_virtual<server_scene.vehicle_plate>.erase (replication.master.container_vector_ref_virtual<server_scene.vehicle_plate>, const uptr)"
+        },
+        {
+          "address": "0x31bab63",
+          "name": "(uptr) replication.master.container_vector_ref<server_scene.vehicle_grid>.begin (const replication.master.container_vector_ref<server_scene.vehicle_grid>)"
+        },
+        {
+          "address": "0x31bab6b",
+          "name": "(uptr) replication.master.container_vector_ref<server_scene.vehicle_grid>.end (const replication.master.container_vector_ref<server_scene.vehicle_grid>)"
+        },
+        {
+          "address": "0x31bab73",
+          "name": "(ptr<server_scene.vehicle_grid>) replication.master.container_vector_ref<server_scene.vehicle_grid>.value (const replication.master.container_vector_ref<server_scene.vehicle_grid>, const uptr)"
+        },
+        {
+          "address": "0x31bab7b",
+          "name": "(uptr) replication.master.container_vector_ref_virtual<server_scene.vehicle_component>.begin (const replication.master.container_vector_ref_virtual<server_scene.vehicle_component>)"
+        },
+        {
+          "address": "0x31bab83",
+          "name": "(uptr) replication.master.container_vector_ref_virtual<server_scene.vehicle_component>.end (const replication.master.container_vector_ref_virtual<server_scene.vehicle_component>)"
+        },
+        {
+          "address": "0x31bab8b",
+          "name": "(ptr<server_scene.vehicle_component>) replication.master.container_vector_ref_virtual<server_scene.vehicle_component>.value (const replication.master.container_vector_ref_virtual<server_scene.vehicle_component>, const uptr)"
+        },
+        {
+          "address": "0x31bab93",
+          "name": "(uptr) replication.master.container_vector_ref_virtual<server_scene.vehicle_component>.next (const replication.master.container_vector_ref_virtual<server_scene.vehicle_component>, const uptr)"
+        },
+        {
+          "address": "0x31bab9b",
+          "name": "(uptr) replication.master.container_vector_ref_virtual<server_scene.vehicle_component>.erase (replication.master.container_vector_ref_virtual<server_scene.vehicle_component>, const uptr)"
+        },
+        {
+          "address": "0x31baba3",
+          "name": "(uptr) replication.master.container_vector_ref<server_scene.vehicle_grid>.next (const replication.master.container_vector_ref<server_scene.vehicle_grid>, const uptr)"
+        },
+        {
+          "address": "0x31babab",
+          "name": "(uptr) replication.master.container_vector_ref<server_scene.vehicle_grid>.erase (replication.master.container_vector_ref<server_scene.vehicle_grid>, const uptr)"
+        }
+      ]
+    },
+    {
+      "name": "server_scene.vehicle._split_islands",
+      "signature": "() server_scene.vehicle._split_islands (server_scene.vehicle, server_scene)",
+      "signatureOffset": "0x31bc30d",
+      "codeOffset": "0x31c2dbe",
+      "codeSize": "0x67a0",
+      "allocationSize": "0x6dc8",
+      "codeSha256": "3ad021742c0e7214c9d14d83a4e4f7ce47c7fe8a404ca0b388ad610c80b4a9b3",
+      "references": [
+        {
+          "address": "0x31c955e",
+          "name": "(s32) vector<s32>.size (const vector<s32>)"
+        },
+        {
+          "address": "0x31c9566",
+          "name": "(uptr) vector<s32>.begin (const vector<s32>)"
+        },
+        {
+          "address": "0x31c956e",
+          "name": "(uptr) vector<s32>.end (const vector<s32>)"
+        },
+        {
+          "address": "0x31c9576",
+          "name": "(s32) vector<s32>.key (const vector<s32>, const uptr)"
+        },
+        {
+          "address": "0x31c957e",
+          "name": "(ptr<s32>) vector<s32>.value (const vector<s32>, const uptr)"
+        },
+        {
+          "address": "0x31c9586",
+          "name": "(uptr) vector<s32>.next (const vector<s32>, const uptr)"
+        },
+        {
+          "address": "0x31c958e",
+          "name": "(uptr) vector<s32>.erase (vector<s32>, const uptr)"
+        },
+        {
+          "address": "0x31c9596",
+          "name": "() ctor (array<ptr<server_scene.vehicle>>)"
+        },
+        {
+          "address": "0x31c959e",
+          "name": "() array<ptr<server_scene.vehicle>>.reset (array<ptr<server_scene.vehicle>>, const s32)"
+        },
+        {
+          "address": "0x31c95a6",
+          "name": "(s32) array<ptr<server_scene.vehicle>>.size (const array<ptr<server_scene.vehicle>>)"
+        },
+        {
+          "address": "0x31c95ae",
+          "name": "(ptr<ptr<server_scene.vehicle>>) operator_aa (const array<ptr<server_scene.vehicle>>, const s32)"
+        },
+        {
+          "address": "0x31c95b6",
+          "name": "(ptr<server_scene.vehicle>) server_scene.vehicle.container.create (server_scene.vehicle.container, physics.scene, server_scene.environment_tile_container, const mat34)"
+        },
+        {
+          "address": "0x31c95be",
+          "name": "(bool) bitset.get (const bitset, const s32)"
+        },
+        {
+          "address": "0x31c95c6",
+          "name": "() bitset.set (bitset, const s32, const bool)"
+        },
+        {
+          "address": "0x31c95ce",
+          "name": "() ctor (vector<ptr<server_scene.vehicle_node>>)"
+        },
+        {
+          "address": "0x31c95d6",
+          "name": "() ctor (vector<ptr<server_scene.vehicle_edge>>)"
+        },
+        {
+          "address": "0x31c95de",
+          "name": "() ctor (vector<ptr<server_scene.vehicle_plate>>)"
+        },
+        {
+          "address": "0x31c95e6",
+          "name": "() ctor (server_scene.vehicle_island.node_map)"
+        },
+        {
+          "address": "0x31c95ee",
+          "name": "(uptr) replication.master.container_vector_ref_virtual<server_scene.vehicle_node>.begin (const replication.master.container_vector_ref_virtual<server_scene.vehicle_node>)"
+        },
+        {
+          "address": "0x31c95f6",
+          "name": "(uptr) replication.master.container_vector_ref_virtual<server_scene.vehicle_node>.end (const replication.master.container_vector_ref_virtual<server_scene.vehicle_node>)"
+        },
+        {
+          "address": "0x31c95fe",
+          "name": "(ptr<server_scene.vehicle_node>) replication.master.container_vector_ref_virtual<server_scene.vehicle_node>.value (const replication.master.container_vector_ref_virtual<server_scene.vehicle_node>, const uptr)"
+        },
+        {
+          "address": "0x31c9606",
+          "name": "(ptr<ptr<server_scene.vehicle_edge>>) vector<ptr<server_scene.vehicle_edge>>.front (const vector<ptr<server_scene.vehicle_edge>>)"
+        },
+        {
+          "address": "0x31c960e",
+          "name": "(ptr<const vec3_s32>) replication.master.property_type_simple<vec3_s32>.get (const replication.master.property_type_simple<vec3_s32>)"
+        },
+        {
+          "address": "0x31c9616",
+          "name": "(ptr<server_scene.vehicle_node>) server_scene.vehicle.add_node (server_scene.vehicle, const vec3_s32)"
+        },
+        {
+          "address": "0x31c961e",
+          "name": "() server_scene.vehicle_island.node_map.set_node_mapping (server_scene.vehicle_island.node_map, const ptr<server_scene.vehicle_node>, const ptr<server_scene.vehicle_node>)"
+        },
+        {
+          "address": "0x31c9626",
+          "name": "(ptr<ptr<server_scene.vehicle_node>>) vector<ptr<server_scene.vehicle_node>>.push_back (vector<ptr<server_scene.vehicle_node>>)"
+        },
+        {
+          "address": "0x31c962e",
+          "name": "(uptr) replication.master.container_vector_ref_virtual<server_scene.vehicle_node>.next (const replication.master.container_vector_ref_virtual<server_scene.vehicle_node>, const uptr)"
+        },
+        {
+          "address": "0x31c9636",
+          "name": "(uptr) replication.master.container_vector_ref_virtual<server_scene.vehicle_node>.erase (replication.master.container_vector_ref_virtual<server_scene.vehicle_node>, const uptr)"
+        },
+        {
+          "address": "0x31c963e",
+          "name": "(uptr) replication.master.container_vector_ref_virtual<server_scene.vehicle_edge>.begin (const replication.master.container_vector_ref_virtual<server_scene.vehicle_edge>)"
+        },
+        {
+          "address": "0x31c9646",
+          "name": "(uptr) replication.master.container_vector_ref_virtual<server_scene.vehicle_edge>.end (const replication.master.container_vector_ref_virtual<server_scene.vehicle_edge>)"
+        },
+        {
+          "address": "0x31c964e",
+          "name": "(ptr<server_scene.vehicle_edge>) replication.master.container_vector_ref_virtual<server_scene.vehicle_edge>.value (const replication.master.container_vector_ref_virtual<server_scene.vehicle_edge>, const uptr)"
+        },
+        {
+          "address": "0x31c9656",
+          "name": "(ptr<server_scene.vehicle_node>) server_scene.vehicle_island.node_map.remap_node (const server_scene.vehicle_island.node_map, const ptr<server_scene.vehicle_node>)"
+        },
+        {
+          "address": "0x31c965e",
+          "name": "(ptr<const s32>) replication.master.property_type_simple<s32>.get (const replication.master.property_type_simple<s32>)"
+        },
+        {
+          "address": "0x31c9666",
+          "name": "(ptr<server_scene.vehicle_edge>) server_scene.vehicle.add_edge (server_scene.vehicle, server_scene.vehicle_node, server_scene.vehicle_node, const s32, const s32, const bool)"
+        },
+        {
+          "address": "0x31c966e",
+          "name": "(ptr<ptr<server_scene.vehicle_edge>>) vector<ptr<server_scene.vehicle_edge>>.push_back (vector<ptr<server_scene.vehicle_edge>>)"
+        },
+        {
+          "address": "0x31c9676",
+          "name": "(uptr) replication.master.container_vector_ref_virtual<server_scene.vehicle_edge>.next (const replication.master.container_vector_ref_virtual<server_scene.vehicle_edge>, const uptr)"
+        },
+        {
+          "address": "0x31c967e",
+          "name": "(uptr) replication.master.container_vector_ref_virtual<server_scene.vehicle_edge>.erase (replication.master.container_vector_ref_virtual<server_scene.vehicle_edge>, const uptr)"
+        },
+        {
+          "address": "0x31c9686",
+          "name": "(uptr) replication.master.container_vector_ref_virtual<server_scene.vehicle_plate>.begin (const replication.master.container_vector_ref_virtual<server_scene.vehicle_plate>)"
+        },
+        {
+          "address": "0x31c968e",
+          "name": "(uptr) replication.master.container_vector_ref_virtual<server_scene.vehicle_plate>.end (const replication.master.container_vector_ref_virtual<server_scene.vehicle_plate>)"
+        },
+        {
+          "address": "0x31c9696",
+          "name": "(ptr<server_scene.vehicle_plate>) replication.master.container_vector_ref_virtual<server_scene.vehicle_plate>.value (const replication.master.container_vector_ref_virtual<server_scene.vehicle_plate>, const uptr)"
+        },
+        {
+          "address": "0x31c969e",
+          "name": "(uptr) replication.master.container_vector_ref<server_scene.vehicle_plate_node>.begin (const replication.master.container_vector_ref<server_scene.vehicle_plate_node>)"
+        },
+        {
+          "address": "0x31c96a6",
+          "name": "(uptr) replication.master.container_vector_ref<server_scene.vehicle_plate_node>.end (const replication.master.container_vector_ref<server_scene.vehicle_plate_node>)"
+        },
+        {
+          "address": "0x31c96ae",
+          "name": "(ptr<server_scene.vehicle_plate_node>) replication.master.container_vector_ref<server_scene.vehicle_plate_node>.value (const replication.master.container_vector_ref<server_scene.vehicle_plate_node>, const uptr)"
+        },
+        {
+          "address": "0x31c96b6",
+          "name": "(uptr) replication.master.container_vector_ref<server_scene.vehicle_plate_node>.next (const replication.master.container_vector_ref<server_scene.vehicle_plate_node>, const uptr)"
+        },
+        {
+          "address": "0x31c96be",
+          "name": "(uptr) replication.master.container_vector_ref<server_scene.vehicle_plate_node>.erase (replication.master.container_vector_ref<server_scene.vehicle_plate_node>, const uptr)"
+        },
+        {
+          "address": "0x31c96c6",
+          "name": "(ptr<const vehicle_plate_util.e_plate_type>) replication.master.property_enum<vehicle_plate_util.e_plate_type>.get (const replication.master.property_enum<vehicle_plate_util.e_plate_type>)"
+        },
+        {
+          "address": "0x31c96ce",
+          "name": "(ptr<server_scene.vehicle_plate>) server_scene.vehicle.add_plate (server_scene.vehicle, const vector<ptr<server_scene.vehicle_node>>, const bool, const vehicle_plate_util.e_plate_type, const s32, const s32)"
+        },
+        {
+          "address": "0x31c96d6",
+          "name": "(ptr<const e_vehicle_glass_state>) replication.master.property_enum<e_vehicle_glass_state>.get (const replication.master.property_enum<e_vehicle_glass_state>)"
+        },
+        {
+          "address": "0x31c96de",
+          "name": "() replication.master.property_enum<e_vehicle_glass_state>.set (replication.master.property_enum<e_vehicle_glass_state>, const e_vehicle_glass_state)"
+        },
+        {
+          "address": "0x31c96e6",
+          "name": "() replication.master.property_type_simple<s32>.set (replication.master.property_type_simple<s32>, const s32)"
+        },
+        {
+          "address": "0x31c96ee",
+          "name": "(uptr) array<replication.master.property_vec3_s32>.begin (const array<replication.master.property_vec3_s32>)"
+        },
+        {
+          "address": "0x31c96f6",
+          "name": "(uptr) array<replication.master.property_vec3_s32>.end (const array<replication.master.property_vec3_s32>)"
+        },
+        {
+          "address": "0x31c96fe",
+          "name": "(s32) array<replication.master.property_vec3_s32>.key (const array<replication.master.property_vec3_s32>, const uptr)"
+        },
+        {
+          "address": "0x31c9706",
+          "name": "(ptr<replication.master.property_vec3_s32>) array<replication.master.property_vec3_s32>.value (const array<replication.master.property_vec3_s32>, const uptr)"
+        },
+        {
+          "address": "0x31c970e",
+          "name": "(ptr<replication.master.property_vec3_s32>) operator_aa (const array<replication.master.property_vec3_s32>, const s32)"
+        },
+        {
+          "address": "0x31c9716",
+          "name": "() replication.master.property_type_simple<vec3_s32>.set (replication.master.property_type_simple<vec3_s32>, const vec3_s32)"
+        },
+        {
+          "address": "0x31c971e",
+          "name": "(uptr) array<replication.master.property_vec3_s32>.next (const array<replication.master.property_vec3_s32>, const uptr)"
+        },
+        {
+          "address": "0x31c9726",
+          "name": "(uptr) replication.master.container_vector_ref_virtual<server_scene.vehicle_plate_paint>.begin (const replication.master.container_vector_ref_virtual<server_scene.vehicle_plate_paint>)"
+        },
+        {
+          "address": "0x31c972e",
+          "name": "(uptr) replication.master.container_vector_ref_virtual<server_scene.vehicle_plate_paint>.end (const replication.master.container_vector_ref_virtual<server_scene.vehicle_plate_paint>)"
+        },
+        {
+          "address": "0x31c9736",
+          "name": "(s32) replication.master.container_vector_ref_virtual<server_scene.vehicle_plate_paint>.key (const replication.master.container_vector_ref_virtual<server_scene.vehicle_plate_paint>, const uptr)"
+        },
+        {
+          "address": "0x31c973e",
+          "name": "(ptr<server_scene.vehicle_plate_paint>) replication.master.container_vector_ref_virtual<server_scene.vehicle_plate_paint>.value (const replication.master.container_vector_ref_virtual<server_scene.vehicle_plate_paint>, const uptr)"
+        },
+        {
+          "address": "0x31c9746",
+          "name": "(ref<server_scene.vehicle_plate_paint>) replication.master.container_vector_ref_virtual<server_scene.vehicle_plate_paint>.release_at (replication.master.container_vector_ref_virtual<server_scene.vehicle_plate_paint>, const s32)"
+        },
+        {
+          "address": "0x31c974e",
+          "name": "() replication.master.container_vector_ref_virtual<server_scene.vehicle_plate_paint>.push (replication.master.container_vector_ref_virtual<server_scene.vehicle_plate_paint>, ref<server_scene.vehicle_plate_paint>)"
+        },
+        {
+          "address": "0x31c9756",
+          "name": "() $ref_dtor (uptr)"
+        },
+        {
+          "address": "0x31c975e",
+          "name": "(uptr) replication.master.container_vector_ref_virtual<server_scene.vehicle_plate_paint>.next (const replication.master.container_vector_ref_virtual<server_scene.vehicle_plate_paint>, const uptr)"
+        },
+        {
+          "address": "0x31c9766",
+          "name": "(uptr) replication.master.container_vector_ref_virtual<server_scene.vehicle_plate_paint>.erase (replication.master.container_vector_ref_virtual<server_scene.vehicle_plate_paint>, const uptr)"
+        },
+        {
+          "address": "0x31c976e",
+          "name": "(ptr<ptr<server_scene.vehicle_plate>>) vector<ptr<server_scene.vehicle_plate>>.push_back (vector<ptr<server_scene.vehicle_plate>>)"
+        },
+        {
+          "address": "0x31c9776",
+          "name": "() dtor (vector<ptr<server_scene.vehicle_node>>)"
+        },
+        {
+          "address": "0x31c977e",
+          "name": "(uptr) replication.master.container_vector_ref_virtual<server_scene.vehicle_plate>.next (const replication.master.container_vector_ref_virtual<server_scene.vehicle_plate>, const uptr)"
+        },
+        {
+          "address": "0x31c9786",
+          "name": "(uptr) replication.master.container_vector_ref_virtual<server_scene.vehicle_plate>.erase (replication.master.container_vector_ref_virtual<server_scene.vehicle_plate>, const uptr)"
+        },
+        {
+          "address": "0x31c978e",
+          "name": "(uptr) vector<ptr<server_scene.vehicle_node>>.begin (const vector<ptr<server_scene.vehicle_node>>)"
+        },
+        {
+          "address": "0x31c9796",
+          "name": "(uptr) vector<ptr<server_scene.vehicle_node>>.end (const vector<ptr<server_scene.vehicle_node>>)"
+        },
+        {
+          "address": "0x31c979e",
+          "name": "(ptr<ptr<server_scene.vehicle_node>>) vector<ptr<server_scene.vehicle_node>>.value (const vector<ptr<server_scene.vehicle_node>>, const uptr)"
+        },
+        {
+          "address": "0x31c97a6",
+          "name": "() server_scene.vehicle.remove_node (server_scene.vehicle, server_scene.vehicle_node)"
+        },
+        {
+          "address": "0x31c97ae",
+          "name": "(uptr) vector<ptr<server_scene.vehicle_node>>.next (const vector<ptr<server_scene.vehicle_node>>, const uptr)"
+        },
+        {
+          "address": "0x31c97b6",
+          "name": "(uptr) vector<ptr<server_scene.vehicle_node>>.erase (vector<ptr<server_scene.vehicle_node>>, const uptr)"
+        },
+        {
+          "address": "0x31c97be",
+          "name": "(uptr) vector<ptr<server_scene.vehicle_edge>>.begin (const vector<ptr<server_scene.vehicle_edge>>)"
+        },
+        {
+          "address": "0x31c97c6",
+          "name": "(uptr) vector<ptr<server_scene.vehicle_edge>>.end (const vector<ptr<server_scene.vehicle_edge>>)"
+        },
+        {
+          "address": "0x31c97ce",
+          "name": "(ptr<ptr<server_scene.vehicle_edge>>) vector<ptr<server_scene.vehicle_edge>>.value (const vector<ptr<server_scene.vehicle_edge>>, const uptr)"
+        },
+        {
+          "address": "0x31c97d6",
+          "name": "() server_scene.vehicle.remove_edge (server_scene.vehicle, server_scene.vehicle_edge, s32, s32)"
+        },
+        {
+          "address": "0x31c97de",
+          "name": "(uptr) vector<ptr<server_scene.vehicle_edge>>.next (const vector<ptr<server_scene.vehicle_edge>>, const uptr)"
+        },
+        {
+          "address": "0x31c97e6",
+          "name": "(uptr) vector<ptr<server_scene.vehicle_edge>>.erase (vector<ptr<server_scene.vehicle_edge>>, const uptr)"
+        },
+        {
+          "address": "0x31c97ee",
+          "name": "(uptr) vector<ptr<server_scene.vehicle_plate>>.begin (const vector<ptr<server_scene.vehicle_plate>>)"
+        },
+        {
+          "address": "0x31c97f6",
+          "name": "(uptr) vector<ptr<server_scene.vehicle_plate>>.end (const vector<ptr<server_scene.vehicle_plate>>)"
+        },
+        {
+          "address": "0x31c97fe",
+          "name": "(ptr<ptr<server_scene.vehicle_plate>>) vector<ptr<server_scene.vehicle_plate>>.value (const vector<ptr<server_scene.vehicle_plate>>, const uptr)"
+        },
+        {
+          "address": "0x31c9806",
+          "name": "() server_scene.vehicle.remove_plate (server_scene.vehicle, server_scene.vehicle_plate, s32)"
+        },
+        {
+          "address": "0x31c980e",
+          "name": "(uptr) vector<ptr<server_scene.vehicle_plate>>.next (const vector<ptr<server_scene.vehicle_plate>>, const uptr)"
+        },
+        {
+          "address": "0x31c9816",
+          "name": "(uptr) vector<ptr<server_scene.vehicle_plate>>.erase (vector<ptr<server_scene.vehicle_plate>>, const uptr)"
+        },
+        {
+          "address": "0x31c981e",
+          "name": "() ctor (server_scene.vehicle_island.id_map)"
+        },
+        {
+          "address": "0x31c9826",
+          "name": "() ctor (vector<ptr<server_scene.vehicle_component>>)"
+        },
+        {
+          "address": "0x31c982e",
+          "name": "(uptr) replication.master.container_vector_ref<server_scene.vehicle_grid>.begin (const replication.master.container_vector_ref<server_scene.vehicle_grid>)"
+        },
+        {
+          "address": "0x31c9836",
+          "name": "(uptr) replication.master.container_vector_ref<server_scene.vehicle_grid>.end (const replication.master.container_vector_ref<server_scene.vehicle_grid>)"
+        },
+        {
+          "address": "0x31c983e",
+          "name": "(ptr<server_scene.vehicle_grid>) replication.master.container_vector_ref<server_scene.vehicle_grid>.value (const replication.master.container_vector_ref<server_scene.vehicle_grid>, const uptr)"
+        },
+        {
+          "address": "0x31c9846",
+          "name": "(uptr) replication.master.container_vector_ref_virtual<server_scene.vehicle_component>.begin (const replication.master.container_vector_ref_virtual<server_scene.vehicle_component>)"
+        },
+        {
+          "address": "0x31c984e",
+          "name": "(uptr) replication.master.container_vector_ref_virtual<server_scene.vehicle_component>.end (const replication.master.container_vector_ref_virtual<server_scene.vehicle_component>)"
+        },
+        {
+          "address": "0x31c9856",
+          "name": "(ptr<server_scene.vehicle_component>) replication.master.container_vector_ref_virtual<server_scene.vehicle_component>.value (const replication.master.container_vector_ref_virtual<server_scene.vehicle_component>, const uptr)"
+        },
+        {
+          "address": "0x31c985e",
+          "name": "(ptr<ptr<server_scene.vehicle_component>>) vector<ptr<server_scene.vehicle_component>>.push_back (vector<ptr<server_scene.vehicle_component>>)"
+        },
+        {
+          "address": "0x31c9866",
+          "name": "(uptr) replication.master.container_vector_ref_virtual<server_scene.vehicle_component>.next (const replication.master.container_vector_ref_virtual<server_scene.vehicle_component>, const uptr)"
+        },
+        {
+          "address": "0x31c986e",
+          "name": "(uptr) replication.master.container_vector_ref_virtual<server_scene.vehicle_component>.erase (replication.master.container_vector_ref_virtual<server_scene.vehicle_component>, const uptr)"
+        },
+        {
+          "address": "0x31c9876",
+          "name": "(uptr) replication.master.container_vector_ref<server_scene.vehicle_grid>.next (const replication.master.container_vector_ref<server_scene.vehicle_grid>, const uptr)"
+        },
+        {
+          "address": "0x31c987e",
+          "name": "(uptr) replication.master.container_vector_ref<server_scene.vehicle_grid>.erase (replication.master.container_vector_ref<server_scene.vehicle_grid>, const uptr)"
+        },
+        {
+          "address": "0x31c9886",
+          "name": "(uptr) vector<ptr<server_scene.vehicle_component>>.begin (const vector<ptr<server_scene.vehicle_component>>)"
+        },
+        {
+          "address": "0x31c988e",
+          "name": "(uptr) vector<ptr<server_scene.vehicle_component>>.end (const vector<ptr<server_scene.vehicle_component>>)"
+        },
+        {
+          "address": "0x31c9896",
+          "name": "(ptr<ptr<server_scene.vehicle_component>>) vector<ptr<server_scene.vehicle_component>>.value (const vector<ptr<server_scene.vehicle_component>>, const uptr)"
+        },
+        {
+          "address": "0x31c989e",
+          "name": "() server_scene.vehicle._move_component_to_vehicle (server_scene, server_scene.vehicle, server_scene.vehicle, server_scene.vehicle_component, server_scene.vehicle_island.id_map, vector<ptr<server_scene.vehicle_component>>)"
+        },
+        {
+          "address": "0x31c98a6",
+          "name": "(uptr) vector<ptr<server_scene.vehicle_component>>.next (const vector<ptr<server_scene.vehicle_component>>, const uptr)"
+        },
+        {
+          "address": "0x31c98ae",
+          "name": "(uptr) vector<ptr<server_scene.vehicle_component>>.erase (vector<ptr<server_scene.vehicle_component>>, const uptr)"
+        },
+        {
+          "address": "0x31c98b6",
+          "name": "() dtor (vector<ptr<server_scene.vehicle_component>>)"
+        },
+        {
+          "address": "0x31c98be",
+          "name": "(uptr) replication.master.container_vector_ref<server_scene.vehicle_electric_link>.begin (const replication.master.container_vector_ref<server_scene.vehicle_electric_link>)"
+        },
+        {
+          "address": "0x31c98c6",
+          "name": "(uptr) replication.master.container_vector_ref<server_scene.vehicle_electric_link>.end (const replication.master.container_vector_ref<server_scene.vehicle_electric_link>)"
+        },
+        {
+          "address": "0x31c98ce",
+          "name": "(ptr<server_scene.vehicle_electric_link>) replication.master.container_vector_ref<server_scene.vehicle_electric_link>.value (const replication.master.container_vector_ref<server_scene.vehicle_electric_link>, const uptr)"
+        },
+        {
+          "address": "0x31c98d6",
+          "name": "(bool) server_scene.vehicle_island.id_map.remap_ids (const server_scene.vehicle_island.id_map, s32, s32)"
+        },
+        {
+          "address": "0x31c98de",
+          "name": "() server_scene.vehicle_electric_node.container.rebuild (server_scene.vehicle_electric_node.container)"
+        },
+        {
+          "address": "0x31c98e6",
+          "name": "(uptr) array<ptr<server_scene.vehicle>>.begin (const array<ptr<server_scene.vehicle>>)"
+        },
+        {
+          "address": "0x31c98ee",
+          "name": "(uptr) array<ptr<server_scene.vehicle>>.end (const array<ptr<server_scene.vehicle>>)"
+        },
+        {
+          "address": "0x31c98f6",
+          "name": "(ptr<ptr<server_scene.vehicle>>) array<ptr<server_scene.vehicle>>.value (const array<ptr<server_scene.vehicle>>, const uptr)"
+        },
+        {
+          "address": "0x31c98fe",
+          "name": "(uptr) array<ptr<server_scene.vehicle>>.next (const array<ptr<server_scene.vehicle>>, const uptr)"
+        },
+        {
+          "address": "0x31c9906",
+          "name": "(const ptr<const vector<vec3_s32>>) replication.master.property_vector<vec3_s32>.get_values (const replication.master.property_vector<vec3_s32>)"
+        },
+        {
+          "address": "0x31c990e",
+          "name": "() server_scene.vehicle.add_electric_link (server_scene.vehicle, const s32, const s32, const s32, const s32, const vector<vec3_s32>, const s32)"
+        },
+        {
+          "address": "0x31c9916",
+          "name": "() $string_ctor_cstr (string, const uptr)"
+        },
+        {
+          "address": "0x31c991e",
+          "name": "() $string_ctor (string)"
+        },
+        {
+          "address": "0x31c9926",
+          "name": "() $string_assign_s32 (string, const s32)"
+        },
+        {
+          "address": "0x31c992e",
+          "name": "() $string_add (string, const string, const string)"
+        },
+        {
+          "address": "0x31c9936",
+          "name": "() error (const string)"
+        },
+        {
+          "address": "0x31c993e",
+          "name": "() $string_dtor (string)"
+        },
+        {
+          "address": "0x31c9946",
+          "name": "(uptr) replication.master.container_vector_ref<server_scene.vehicle_electric_link>.next (const replication.master.container_vector_ref<server_scene.vehicle_electric_link>, const uptr)"
+        },
+        {
+          "address": "0x31c994e",
+          "name": "(uptr) replication.master.container_vector_ref<server_scene.vehicle_electric_link>.erase (replication.master.container_vector_ref<server_scene.vehicle_electric_link>, const uptr)"
+        },
+        {
+          "address": "0x31c9956",
+          "name": "(uptr) replication.master.container_vector_ref<server_scene.vehicle_mechanical_link>.begin (const replication.master.container_vector_ref<server_scene.vehicle_mechanical_link>)"
+        },
+        {
+          "address": "0x31c995e",
+          "name": "(uptr) replication.master.container_vector_ref<server_scene.vehicle_mechanical_link>.end (const replication.master.container_vector_ref<server_scene.vehicle_mechanical_link>)"
+        },
+        {
+          "address": "0x31c9966",
+          "name": "(ptr<server_scene.vehicle_mechanical_link>) replication.master.container_vector_ref<server_scene.vehicle_mechanical_link>.value (const replication.master.container_vector_ref<server_scene.vehicle_mechanical_link>, const uptr)"
+        },
+        {
+          "address": "0x31c996e",
+          "name": "() server_scene.vehicle_logic_node.mechanical.container.rebuild (server_scene.vehicle_logic_node.mechanical.container)"
+        },
+        {
+          "address": "0x31c9976",
+          "name": "() server_scene.vehicle.add_mechanical_link (server_scene.vehicle, const s32, const s32, const s32, const s32, const vector<vec3_s32>, const s32)"
+        },
+        {
+          "address": "0x31c997e",
+          "name": "(uptr) replication.master.container_vector_ref<server_scene.vehicle_mechanical_link>.next (const replication.master.container_vector_ref<server_scene.vehicle_mechanical_link>, const uptr)"
+        },
+        {
+          "address": "0x31c9986",
+          "name": "(uptr) replication.master.container_vector_ref<server_scene.vehicle_mechanical_link>.erase (replication.master.container_vector_ref<server_scene.vehicle_mechanical_link>, const uptr)"
+        },
+        {
+          "address": "0x31c998e",
+          "name": "(uptr) replication.master.container_vector_ref<server_scene.vehicle_liquid_link>.begin (const replication.master.container_vector_ref<server_scene.vehicle_liquid_link>)"
+        },
+        {
+          "address": "0x31c9996",
+          "name": "(uptr) replication.master.container_vector_ref<server_scene.vehicle_liquid_link>.end (const replication.master.container_vector_ref<server_scene.vehicle_liquid_link>)"
+        },
+        {
+          "address": "0x31c999e",
+          "name": "(ptr<server_scene.vehicle_liquid_link>) replication.master.container_vector_ref<server_scene.vehicle_liquid_link>.value (const replication.master.container_vector_ref<server_scene.vehicle_liquid_link>, const uptr)"
+        },
+        {
+          "address": "0x31c99a6",
+          "name": "() server_scene.vehicle_liquid_node.container.rebuild (server_scene.vehicle_liquid_node.container)"
+        },
+        {
+          "address": "0x31c99ae",
+          "name": "() server_scene.vehicle.add_liquid_link (server_scene.vehicle, const s32, const s32, const s32, const s32, const vector<vec3_s32>, const s32)"
+        },
+        {
+          "address": "0x31c99b6",
+          "name": "(uptr) replication.master.container_vector_ref<server_scene.vehicle_liquid_link>.next (const replication.master.container_vector_ref<server_scene.vehicle_liquid_link>, const uptr)"
+        },
+        {
+          "address": "0x31c99be",
+          "name": "(uptr) replication.master.container_vector_ref<server_scene.vehicle_liquid_link>.erase (replication.master.container_vector_ref<server_scene.vehicle_liquid_link>, const uptr)"
+        },
+        {
+          "address": "0x31c99c6",
+          "name": "(uptr) replication.master.container_vector_ref<server_scene.vehicle_gas_link>.begin (const replication.master.container_vector_ref<server_scene.vehicle_gas_link>)"
+        },
+        {
+          "address": "0x31c99ce",
+          "name": "(uptr) replication.master.container_vector_ref<server_scene.vehicle_gas_link>.end (const replication.master.container_vector_ref<server_scene.vehicle_gas_link>)"
+        },
+        {
+          "address": "0x31c99d6",
+          "name": "(ptr<server_scene.vehicle_gas_link>) replication.master.container_vector_ref<server_scene.vehicle_gas_link>.value (const replication.master.container_vector_ref<server_scene.vehicle_gas_link>, const uptr)"
+        },
+        {
+          "address": "0x31c99de",
+          "name": "() server_scene.vehicle_gas_node.container.rebuild (server_scene.vehicle_gas_node.container)"
+        },
+        {
+          "address": "0x31c99e6",
+          "name": "() server_scene.vehicle.add_gas_link (server_scene.vehicle, const s32, const s32, const s32, const s32, const vector<vec3_s32>, const s32)"
+        },
+        {
+          "address": "0x31c99ee",
+          "name": "(uptr) replication.master.container_vector_ref<server_scene.vehicle_gas_link>.next (const replication.master.container_vector_ref<server_scene.vehicle_gas_link>, const uptr)"
+        },
+        {
+          "address": "0x31c99f6",
+          "name": "(uptr) replication.master.container_vector_ref<server_scene.vehicle_gas_link>.erase (replication.master.container_vector_ref<server_scene.vehicle_gas_link>, const uptr)"
+        },
+        {
+          "address": "0x31c99fe",
+          "name": "(uptr) replication.master.container_vector_ref<server_scene.vehicle_data_link>.begin (const replication.master.container_vector_ref<server_scene.vehicle_data_link>)"
+        },
+        {
+          "address": "0x31c9a06",
+          "name": "(uptr) replication.master.container_vector_ref<server_scene.vehicle_data_link>.end (const replication.master.container_vector_ref<server_scene.vehicle_data_link>)"
+        },
+        {
+          "address": "0x31c9a0e",
+          "name": "(ptr<server_scene.vehicle_data_link>) replication.master.container_vector_ref<server_scene.vehicle_data_link>.value (const replication.master.container_vector_ref<server_scene.vehicle_data_link>, const uptr)"
+        },
+        {
+          "address": "0x31c9a16",
+          "name": "() server_scene.vehicle_data_node.container.rebuild (server_scene.vehicle_data_node.container)"
+        },
+        {
+          "address": "0x31c9a1e",
+          "name": "() server_scene.vehicle.add_data_link (server_scene.vehicle, const s32, const s32, const s32, const s32, const vector<vec3_s32>, const s32)"
+        },
+        {
+          "address": "0x31c9a26",
+          "name": "(uptr) replication.master.container_vector_ref<server_scene.vehicle_data_link>.next (const replication.master.container_vector_ref<server_scene.vehicle_data_link>, const uptr)"
+        },
+        {
+          "address": "0x31c9a2e",
+          "name": "(uptr) replication.master.container_vector_ref<server_scene.vehicle_data_link>.erase (replication.master.container_vector_ref<server_scene.vehicle_data_link>, const uptr)"
+        },
+        {
+          "address": "0x31c9a36",
+          "name": "(uptr) replication.master.container_vector_ref<server_scene.vehicle_belt_link>.begin (const replication.master.container_vector_ref<server_scene.vehicle_belt_link>)"
+        },
+        {
+          "address": "0x31c9a3e",
+          "name": "(uptr) replication.master.container_vector_ref<server_scene.vehicle_belt_link>.end (const replication.master.container_vector_ref<server_scene.vehicle_belt_link>)"
+        },
+        {
+          "address": "0x31c9a46",
+          "name": "(ptr<server_scene.vehicle_belt_link>) replication.master.container_vector_ref<server_scene.vehicle_belt_link>.value (const replication.master.container_vector_ref<server_scene.vehicle_belt_link>, const uptr)"
+        },
+        {
+          "address": "0x31c9a4e",
+          "name": "() server_scene.vehicle_torque_node_container.rebuild (server_scene.vehicle_torque_node_container)"
+        },
+        {
+          "address": "0x31c9a56",
+          "name": "() server_scene.vehicle.add_belt_link (server_scene.vehicle, const s32, const s32, const s32, const s32)"
+        },
+        {
+          "address": "0x31c9a5e",
+          "name": "(uptr) replication.master.container_vector_ref<server_scene.vehicle_belt_link>.next (const replication.master.container_vector_ref<server_scene.vehicle_belt_link>, const uptr)"
+        },
+        {
+          "address": "0x31c9a66",
+          "name": "(uptr) replication.master.container_vector_ref<server_scene.vehicle_belt_link>.erase (replication.master.container_vector_ref<server_scene.vehicle_belt_link>, const uptr)"
+        },
+        {
+          "address": "0x31c9a6e",
+          "name": "() server_scene.vehicle_component.remap_ids (server_scene.vehicle_component, server_scene, const server_scene.vehicle_island.id_map)"
+        },
+        {
+          "address": "0x31c9a76",
+          "name": "(uptr) replication.master.container_vector_ref_virtual<server_scene.rope>.begin (const replication.master.container_vector_ref_virtual<server_scene.rope>)"
+        },
+        {
+          "address": "0x31c9a7e",
+          "name": "(uptr) replication.master.container_vector_ref_virtual<server_scene.rope>.end (const replication.master.container_vector_ref_virtual<server_scene.rope>)"
+        },
+        {
+          "address": "0x31c9a86",
+          "name": "(s32) replication.master.container_vector_ref_virtual<server_scene.rope>.key (const replication.master.container_vector_ref_virtual<server_scene.rope>, const uptr)"
+        },
+        {
+          "address": "0x31c9a8e",
+          "name": "(ptr<server_scene.rope>) replication.master.container_vector_ref_virtual<server_scene.rope>.value (const replication.master.container_vector_ref_virtual<server_scene.rope>, const uptr)"
+        },
+        {
+          "address": "0x31c9a96",
+          "name": "(bool) server_scene.rope.connection_point.is_connected (server_scene.rope.connection_point)"
+        },
+        {
+          "address": "0x31c9a9e",
+          "name": "(ptr<const f64>) replication.master.property_type_simple<f64>.get (const replication.master.property_type_simple<f64>)"
+        },
+        {
+          "address": "0x31c9aa6",
+          "name": "(ptr<server_scene.rope>) server_scene.rope.container.create_rope_vehicle_loose (server_scene.rope.container, server_scene, const s32, const s32, const s32, const f64, const s32)"
+        },
+        {
+          "address": "0x31c9aae",
+          "name": "(ref<server_scene.item_world>) replication.master.container_ref_virtual<server_scene.item_world>.release (replication.master.container_ref_virtual<server_scene.item_world>)"
+        },
+        {
+          "address": "0x31c9ab6",
+          "name": "() replication.master.container_ref_virtual<server_scene.item_world>.reset (replication.master.container_ref_virtual<server_scene.item_world>, const ref<server_scene.item_world>)"
+        },
+        {
+          "address": "0x31c9abe",
+          "name": "() server_scene.rope.container.destroy_rope (server_scene.rope.container, const s32, server_scene)"
+        },
+        {
+          "address": "0x31c9ac6",
+          "name": "(ptr<server_scene.rope>) server_scene.rope.container.create_rope_vehicle_vehicle (server_scene.rope.container, server_scene, const s32, const s32, const s32, const s32, const s32, const s32, const f64, const s32)"
+        },
+        {
+          "address": "0x31c9ace",
+          "name": "(ptr<server_scene.rope>) server_scene.rope.container.create_rope_vehicle_actor (server_scene.rope.container, server_scene, const s32, const s32, const s32, const s32, const f64, const s32)"
+        },
+        {
+          "address": "0x31c9ad6",
+          "name": "(ptr<server_scene.actor>) server_scene.actor.container.get_actor_by_id (server_scene.actor.container, const s32)"
+        },
+        {
+          "address": "0x31c9ade",
+          "name": "(ptr<server_scene.inventory>) server_scene.actor.get_inventory (server_scene.actor)"
+        },
+        {
+          "address": "0x31c9ae6",
+          "name": "() ctor (vector<ptr<server_scene.item_world>>)"
+        },
+        {
+          "address": "0x31c9aee",
+          "name": "() server_scene.inventory.get_items (server_scene.inventory, vector<ptr<server_scene.item_world>>)"
+        },
+        {
+          "address": "0x31c9af6",
+          "name": "(uptr) vector<ptr<server_scene.item_world>>.begin (const vector<ptr<server_scene.item_world>>)"
+        },
+        {
+          "address": "0x31c9afe",
+          "name": "(uptr) vector<ptr<server_scene.item_world>>.end (const vector<ptr<server_scene.item_world>>)"
+        },
+        {
+          "address": "0x31c9b06",
+          "name": "(ptr<ptr<server_scene.item_world>>) vector<ptr<server_scene.item_world>>.value (const vector<ptr<server_scene.item_world>>, const uptr)"
+        },
+        {
+          "address": "0x31c9b0e",
+          "name": "server_scene.item_world.rope_base"
+        },
+        {
+          "address": "0x31c9b16",
+          "name": ""
+        },
+        {
+          "address": "0x31c9b1e",
+          "name": "(uptr) vector<ptr<server_scene.item_world>>.next (const vector<ptr<server_scene.item_world>>, const uptr)"
+        },
+        {
+          "address": "0x31c9b26",
+          "name": "(uptr) vector<ptr<server_scene.item_world>>.erase (vector<ptr<server_scene.item_world>>, const uptr)"
+        },
+        {
+          "address": "0x31c9b2e",
+          "name": "() dtor (vector<ptr<server_scene.item_world>>)"
+        },
+        {
+          "address": "0x31c9b36",
+          "name": "(uptr) replication.master.container_vector_ref_virtual<server_scene.rope>.next (const replication.master.container_vector_ref_virtual<server_scene.rope>, const uptr)"
+        },
+        {
+          "address": "0x31c9b3e",
+          "name": "(uptr) replication.master.container_vector_ref_virtual<server_scene.rope>.erase (replication.master.container_vector_ref_virtual<server_scene.rope>, const uptr)"
+        },
+        {
+          "address": "0x31c9b46",
+          "name": "() server_scene.vehicle._rebuild_physics_motion_state (server_scene.vehicle)"
+        },
+        {
+          "address": "0x31c9b4e",
+          "name": "() server_scene.vehicle.push_event_pending_split_vehicle (server_scene.vehicle, const s32)"
+        },
+        {
+          "address": "0x31c9b56",
+          "name": "() server_scene.vehicle.post_load (server_scene.vehicle, server_scene)"
+        },
+        {
+          "address": "0x31c9b5e",
+          "name": "() dtor (server_scene.vehicle_island.id_map)"
+        },
+        {
+          "address": "0x31c9b66",
+          "name": "() dtor (server_scene.vehicle_island.node_map)"
+        },
+        {
+          "address": "0x31c9b6e",
+          "name": "() dtor (vector<ptr<server_scene.vehicle_plate>>)"
+        },
+        {
+          "address": "0x31c9b76",
+          "name": "() dtor (vector<ptr<server_scene.vehicle_edge>>)"
+        },
+        {
+          "address": "0x31c9b7e",
+          "name": "() dtor (array<ptr<server_scene.vehicle>>)"
+        }
+      ]
+    },
+    {
+      "name": "server_scene.vehicle.rebuild_plate_adjacencies",
+      "signature": "() server_scene.vehicle.rebuild_plate_adjacencies (server_scene.vehicle, server_scene.vehicle_plate, const ptr<server_scene.vehicle_plate>)",
+      "signatureOffset": "0x325810d",
+      "codeOffset": "0x3258245",
+      "codeSize": "0x30",
+      "allocationSize": "0x40",
+      "codeSha256": "5f0bc5ac2df626dd32104734851767762f84287721899e0889d01b5ced2f6e6d",
+      "references": [
+        {
+          "address": "0x3258275",
+          "name": "() vehicle_util.rebuild_plate_adjacencies<server_scene> (server_scene.vehicle, server_scene.vehicle_plate, const ptr<server_scene.vehicle_plate>)"
+        }
+      ]
+    },
+    {
+      "name": "vehicle_util.find_edge<server_scene>",
+      "signature": "(ptr<server_scene.vehicle_edge>) vehicle_util.find_edge<server_scene> (server_scene.vehicle, const s32, const s32)",
+      "signatureOffset": "0x3e1ed70",
+      "codeOffset": "0x3e1f293",
+      "codeSize": "0x308",
+      "allocationSize": "0x340",
+      "codeSha256": "2a4b8fccaefb8207fe04ba9dbe2c855d23f39e4edc59c57026007c9390212b0a",
+      "references": [
+        {
+          "address": "0x3e1f59b",
+          "name": "(uptr) replication.master.container_vector_ref_virtual<server_scene.vehicle_edge>.begin (const replication.master.container_vector_ref_virtual<server_scene.vehicle_edge>)"
+        },
+        {
+          "address": "0x3e1f5a3",
+          "name": "(uptr) replication.master.container_vector_ref_virtual<server_scene.vehicle_edge>.end (const replication.master.container_vector_ref_virtual<server_scene.vehicle_edge>)"
+        },
+        {
+          "address": "0x3e1f5ab",
+          "name": "(ptr<server_scene.vehicle_edge>) replication.master.container_vector_ref_virtual<server_scene.vehicle_edge>.value (const replication.master.container_vector_ref_virtual<server_scene.vehicle_edge>, const uptr)"
+        },
+        {
+          "address": "0x3e1f5b3",
+          "name": "(bool) server_scene.vehicle.get_is_removed (const server_scene.vehicle, const server_scene.vehicle_edge)"
+        },
+        {
+          "address": "0x3e1f5bb",
+          "name": "(ptr<const s32>) replication.master.property_type_simple<s32>.get (const replication.master.property_type_simple<s32>)"
+        },
+        {
+          "address": "0x3e1f5c3",
+          "name": "(uptr) replication.master.container_vector_ref_virtual<server_scene.vehicle_edge>.next (const replication.master.container_vector_ref_virtual<server_scene.vehicle_edge>, const uptr)"
+        },
+        {
+          "address": "0x3e1f5cb",
+          "name": "(uptr) replication.master.container_vector_ref_virtual<server_scene.vehicle_edge>.erase (replication.master.container_vector_ref_virtual<server_scene.vehicle_edge>, const uptr)"
+        }
+      ]
+    }
+  ],
+  "instructions": [
+    {
+      "address": "0x31c34d8",
+      "hex": "488d4060",
+      "meaning": "Address the node incident-beam vector at offset 0x60"
+    },
+    {
+      "address": "0x31c34dc",
+      "hex": "488b1523610000",
+      "meaning": "Load the relocation for vector<ptr<server_scene.vehicle_edge>>.front"
+    },
+    {
+      "address": "0x31c350d",
+      "hex": "488b00",
+      "meaning": "Dereference the first beam pointer; crash register rax is zero"
+    },
+    {
+      "address": "0x31c3510",
+      "hex": "8b8018010000",
+      "meaning": "Read the beam island index at offset 0x118"
+    }
+  ],
+  "incident": {
+    "crashFile": "crash-2026-09-28-153708-32024.json",
+    "crashSha256": "1e500ee35b076a56a90d19780fe68b701b28f8d852b8e7cdb8201e4d95e0052c",
+    "utc": "2026-09-28T15:37:09Z",
+    "function": "server_scene.vehicle._split_islands",
+    "functionOffset": "0x74f",
+    "instructionAddress": "0x31c350d",
+    "nullRegister": "rax",
+    "saveFile": "981.1.data",
+    "saveSha256": "f81f7a573638e221a7c22929d4d9fd338f1b4d3e4d8d31a0cd1d5a91d53250e6",
+    "vehicleId": 1,
+    "plateOnlyNodeIds": [
+      99,
+      100
+    ]
+  },
+  "rules": [
+    "Beam islands traverse beams sharing endpoint node IDs, registered plates and registered components.",
+    "Plate islands traverse actual boundary-beam references and registered components; missing boundaries are skipped.",
+    "Component islands traverse registered beams, plates and components.",
+    "Node island ownership is read from its first incident beam.",
+    "Signal links and physical mate constraints do not directly weld rigid islands.",
+    "Boundary lookup matches an unordered exact pair of node IDs."
+  ],
+  "limitations": [
+    "Function fingerprints and machine instructions establish static evidence for this GCL version only.",
+    "Component contact registration and runtime dirty/rebuild/split scheduling are not fully reproduced.",
+    "Synthetic fixtures and local sample round-trips do not establish game loading compatibility."
+  ]
+}

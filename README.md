@@ -19,6 +19,7 @@ The editor currently provides:
 - Continuous drive belts for pulley wheels and all three engine wheels, including mixed radii, reverse idlers, and the original belt texture. See [ordinary belts](doc/14_BELTS.md) for the six-wheel native sample and static-rendering limits.
 - Export of a paired native JSON `.data` / `.meta` representation, plus a clearly non-game-compatible debug XML export.
 - English UI by default, with a persisted Chinese language option.
+- Local archive overwrite and optional Google Drive sync, including sign-in, a dedicated `anymaker-builder-vehicles` folder, metadata listing, and on-demand downloads. A Web OAuth Client ID is required; see [Google Drive setup](doc/17_GOOGLE_DRIVE_ARCHIVES.md). Real-account acceptance remains pending.
 - A local GLB/OBJ/STL model tool under Resources & validation, with filtered outer shells, 13 simplification levels (30–250 target vertices, focused on 70–250), quad-first plates, optional X/Y/Z symmetry, uniform scale, footprint preview, and undoable beam/plate generation. See [model import](doc/07_MODEL_IMPORT.md) for supported geometry and limits.
 
 The published asset set and its source metadata are checked by repository scripts. Component geometry is rendered with neutral diagnostic materials; game materials, camera matching, lighting, dynamic assembly, and visual parity have not been verified.

@@ -29,6 +29,7 @@ import { ComponentCatalog } from './catalog/component-catalog.js';
 import { categoryInfo, createCategoryIcon } from './catalog/category-icons.js';
 import { getLocale, setLocale, t, applyTranslations, setText, addMessages } from './i18n.js';
 import { createLocalStore, normalizeSettings } from './editor/local-storage.js';
+import { TYPE_VISIBILITY_KINDS, isKindVisible } from './editor/type-visibility.js';
 import { startLocalSession } from './editor/local-session.js';
 import { createOrientationIndicator, orientCamera, applyGridStyle } from './editor/view-settings.js';
 import { RENDER_DEPTH_LAYERS, assignOpaqueDepthOrder, configureOpaqueDepth, configureOpaqueDepthLayer } from './editor/render-depth.js';
@@ -55,6 +56,7 @@ import { TANK_TYPES, tankCapacityCells, tankCapacityLiters } from './editor/tank
 import { stageImportedSubgrid, translateImportedSubgrid, translateSubgridTopology } from './editor/imported-subgrid.js';
 import { mountModelImportTool } from './editor/model-import-tool.js';
 import { createArchiveStore } from './editor/archive-store.js';
+import { mountGoogleDriveArchives } from './editor/google-drive-ui.js';
 import { createThumbnailStore } from './editor/thumbnail-store.js';
 import { encodeProjectCode, decodeProjectCode, MAX_PROJECT_CODE_LENGTH } from './editor/project-code.js';
 import { createFrameTask, planVisualUpdate, topologyVisualRecords, visualSignature } from './editor/visual-cache.js';
@@ -71,6 +73,7 @@ const thumbnailStore = window.indexedDB ? createThumbnailStore(window.indexedDB,
 const AUTO_ARCHIVE_ID = 'autosave-current';
 let archiveRecords = [];
 let archiveLoadError = null;
+let driveArchives = null;
 const storedSettings = localStore.loadSettings();
 const settings = storedSettings.settings;
 setLocale(settings.language);
@@ -121,6 +124,7 @@ let selectedTopologyNode = null;
 let selectedLinkPoint = null;
 let selectedTopologyIds = new Set();
 const selectableKinds = { component: true, structure: true, node: true, edge: true, plate: true, link: true };
+const hiddenKinds = { ...settings.hiddenKinds };
 const connectionVisibility = { ...settings.connectionVisibility };
 let transparencyGroups = [];
 let nodeMoveFrame = null;
@@ -320,6 +324,36 @@ const selectionFilterToggle = selectionFilterToolbar.querySelector('#selection-f
 const selectionFilterOptions = selectionFilterToolbar.querySelector('#selection-filter-options');
 const connectionVisibilityToggle = selectionFilterToolbar.querySelector('#connection-visibility-toggle');
 const connectionVisibilityOptions = selectionFilterToolbar.querySelector('#connection-visibility-options');
+const typeVisibilityToggle = document.createElement('button');
+typeVisibilityToggle.id = 'type-visibility-toggle'; typeVisibilityToggle.type = 'button'; typeVisibilityToggle.className = 'selection-filter-toggle';
+typeVisibilityToggle.dataset.i18n = '按类型隐藏'; typeVisibilityToggle.setAttribute('aria-controls', 'type-visibility-options');
+const typeVisibilityOptions = document.createElement('div');
+typeVisibilityOptions.id = 'type-visibility-options'; typeVisibilityOptions.className = 'selection-filter-options';
+const typeVisibilityLabels = { component: '组件', structure: '结构对象', node: '节点', edge: '梁', plate: '面板', link: '连接' };
+typeVisibilityOptions.innerHTML = TYPE_VISIBILITY_KINDS.map(kind => `<label><input type="checkbox" data-hidden-kind="${kind}"><span data-i18n="${typeVisibilityLabels[kind]}"></span></label>`).join('');
+connectionVisibilityToggle.before(typeVisibilityToggle, typeVisibilityOptions);
+applyTranslations(typeVisibilityOptions);
+function setTypeVisibilityCollapsed(collapsed) {
+  typeVisibilityOptions.hidden = collapsed;
+  typeVisibilityToggle.setAttribute('aria-expanded', String(!collapsed));
+  const label = collapsed ? '展开按类型隐藏' : '收起按类型隐藏';
+  typeVisibilityToggle.dataset.i18nTitle = label; typeVisibilityToggle.dataset.i18nAriaLabel = label;
+  applyTranslations(typeVisibilityToggle);
+}
+setTypeVisibilityCollapsed(true);
+typeVisibilityToggle.addEventListener('click', () => setTypeVisibilityCollapsed(!typeVisibilityOptions.hidden));
+for (const input of typeVisibilityOptions.querySelectorAll('[data-hidden-kind]')) {
+  input.checked = hiddenKinds[input.dataset.hiddenKind];
+  input.addEventListener('change', () => {
+    hiddenKinds[input.dataset.hiddenKind] = input.checked;
+    if (input.checked && input.dataset.hiddenKind !== 'node') {
+      const componentIds = selectedObjectIds().filter(() => isKindVisible('component', hiddenKinds));
+      const topologyKeys = [...selectedTopologyIds].filter(key => isKindVisible(key.split(':')[0], hiddenKinds));
+      if (componentIds.length !== selectedObjectIds().length || topologyKeys.length !== selectedTopologyIds.size) selectMixed(componentIds, topologyKeys);
+    }
+    updateTypeVisibility(); scheduleSettings();
+  });
+}
 function setSelectionFilterCollapsed(collapsed) {
   selectionFilterOptions.hidden = collapsed;
   selectionFilterToggle.setAttribute('aria-expanded', String(!collapsed));
@@ -389,6 +423,7 @@ const sidebarTabPanels = {
   right: { editor: '#editor-tab-panel', inspector: '#inspector-tab-panel', resources: '#resources-tab-panel', history: '#history-tab-panel' },
 };
 function activateSidebarTab(side, tab, { focus = false } = {}) {
+  if (side === 'left' && tab === 'archives') void driveArchives?.prepare();
   const panels = sidebarTabPanels[side];
   if (!Object.hasOwn(panels, tab)) return;
   const sidebar = side === 'left' ? leftSidebar : rightSidebar;
@@ -1284,7 +1319,7 @@ function buildTopologyVisual(state, components = new Map(), changedKeys = null, 
       mesh.userData.nodeIds = [edge.a, edge.b];
       mesh.castShadow = true; mesh.receiveShadow = true;
       configureOpaqueDepthLayer(mesh, RENDER_DEPTH_LAYERS.edge, { key: depthKey });
-      mesh.visible = !edge.hidden;
+      mesh.visible = !edge.hidden && isKindVisible('edge', hiddenKinds);
       layer.add(mesh);
     }
     for (const plate of state.plates) {
@@ -1324,7 +1359,7 @@ function buildTopologyVisual(state, components = new Map(), changedKeys = null, 
       mesh.userData.topology = 'plate'; mesh.userData.plateId = plate.id;
       mesh.userData.nodeIds = [...plate.nodeIds]; mesh.userData.normalOffset = offset;
       mesh.userData.surfaceDirection = plate.surfaceDirection;
-      mesh.visible = !plate.hidden;
+      mesh.visible = !plate.hidden && isKindVisible('plate', hiddenKinds);
       if (glass) mesh.renderOrder = 4;
       else configureOpaqueDepthLayer(mesh, RENDER_DEPTH_LAYERS.plate, { key: depthKey });
       layer.add(mesh);
@@ -1356,7 +1391,7 @@ function buildTopologyVisual(state, components = new Map(), changedKeys = null, 
         }));
       if (link.kind === 'hydraulic' && !route.children.length) material.dispose();
       route.renderOrder = 4; route.userData.topology = 'link'; route.userData.linkId = link.id; route.userData.linkKind = link.kind;
-      route.visible = connectionVisibility[link.kind] !== false && !referencePreview;
+      route.visible = isKindVisible('link', hiddenKinds) && connectionVisibility[link.kind] !== false && !referencePreview;
       route.traverse(object => {
         if (object.userData.topology !== 'link-point') object.userData.topology = 'link';
         object.userData.linkId = link.id;
@@ -1405,7 +1440,7 @@ function updateTopologyPreview(nodeId, value, counterpartId = null, counterpartV
         object.visible = false;
         continue;
       }
-      object.visible = vertices.length > 0 && !topology.plates.find(plate => plate.id === object.userData.plateId)?.hidden;
+      object.visible = vertices.length > 0 && isKindVisible('plate', hiddenKinds) && !topology.plates.find(plate => plate.id === object.userData.plateId)?.hidden;
       if (!vertices.length) continue;
       const attribute = object.geometry.getAttribute('position');
       if (attribute.count === vertices.length / 3) attribute.set(vertices);
@@ -1439,7 +1474,7 @@ function updateLinkPointPreview(linkId, pointIndex, position) {
 function nodeHelpersVisible() {
   // Editing nodes must remain possible after fitting a large native vehicle.
   // Distance culling still applies to passive helpers, including the grid.
-  return showNodes && !referencePreview && (topologyHelpersVisible || tool === 'translate' || tool === 'node');
+  return showNodes && isKindVisible('node', hiddenKinds) && !referencePreview && (topologyHelpersVisible || tool === 'translate' || tool === 'node');
 }
 function updateNodeVisualState() {
   const hiddenNodes = new Set(topology.nodes.filter(node => node.hidden).map(node => node.id));
@@ -1484,7 +1519,7 @@ function replaceTopologyVisual(prepared) {
   updateConnectionVisibility();
   updateNodeVisualState();
   edgeLengthLabels.setEdges(topology.nodes, topology.edges);
-  edgeLengthLabels.setVisible(!referencePreview && settings.edgeLengthsVisible);
+  edgeLengthLabels.setVisible(!referencePreview && settings.edgeLengthsVisible && isKindVisible('edge', hiddenKinds));
 }
 function reconcileOpaqueDepthOrder() {
   const entries = objects.map(object => ({ object, layer: RENDER_DEPTH_LAYERS.component, key: `component:${object.userData.id}` }));
@@ -1506,18 +1541,34 @@ function clearNodeSelection() {
   if (transform.object?.userData?.topology === 'node') transform.detach();
   selectedTopologyNode = null; nodeMoveFrame = null; topologyTransform = null; updateNodeVisualState();
 }
+function updateTypeVisibility() {
+  for (const object of objects) object.visible = !object.userData.hidden && isKindVisible('component', hiddenKinds);
+  const records = new Map([
+    ...topology.edges.map(edge => ['edge:' + edge.id, edge]),
+    ...topology.plates.map(plate => ['plate:' + plate.id, plate]),
+  ]);
+  for (const object of topologyLayer.children) {
+    const kind = object.userData.topology;
+    const record = records.get(kind + ':' + object.userData[kind + 'Id']);
+    if (record) object.visible = !record.hidden && isKindVisible(kind, hiddenKinds);
+  }
+  updateNodeVisualState(); updateConnectionVisibility();
+  edgeLengthLabels.setVisible(!referencePreview && settings.edgeLengthsVisible && isKindVisible('edge', hiddenKinds));
+  hoveredObject = null; updateInteractionHighlights(); refreshConnectionPorts();
+  placementPicker.invalidate(); renderQuality.invalidateShadows();
+}
 function updateConnectionVisibility() {
   for (const object of topologyLayer.children) {
     if (object.userData.topology === 'track') {
-      object.visible = !object.userData.trackHidden && (referencePreview || connectionVisibility.belt !== false);
+      object.visible = isKindVisible('track', hiddenKinds) && !object.userData.trackHidden && (referencePreview || connectionVisibility.belt !== false);
       continue;
     }
     if (object.userData.topology === 'belt') {
-      object.visible = !object.userData.beltHidden && (referencePreview || connectionVisibility.belt !== false);
+      object.visible = isKindVisible('belt', hiddenKinds) && !object.userData.beltHidden && (referencePreview || connectionVisibility.belt !== false);
       continue;
     }
     if (object.userData.topology !== 'link') continue;
-    object.visible = !referencePreview && connectionVisibility[object.userData.linkKind] !== false;
+    object.visible = isKindVisible('link', hiddenKinds) && !referencePreview && connectionVisibility[object.userData.linkKind] !== false;
   }
   const issues = topologyLayer.userData.trackIssues || [];
   trackDiagnostics.hidden = !issues.length;
@@ -1527,7 +1578,7 @@ function updateConnectionVisibility() {
   beltDiagnostics.textContent = beltIssues.length ? t('皮带未生成，连接已保留：{reasons}', { reasons: [...new Set(beltIssues.map(issue => t(beltErrorMessages[issue.code])))].join(' / ') }) : '';
   if (selectedLinkPoint) {
     const link = topology.links.find(value => value.id === selectedLinkPoint.linkId);
-    if (link && connectionVisibility[link.kind] === false) clearLinkPointSelection();
+    if (link && (!isKindVisible('link', hiddenKinds) || connectionVisibility[link.kind] === false)) clearLinkPointSelection();
   }
   updateInteractionHighlights();
 }
@@ -1760,7 +1811,7 @@ function updateConnectionDraftPreview(point = cursorPoint) {
 }
 function refreshConnectionPorts() {
   clearConnectionPorts();
-  if (tool !== 'connect' || referencePreview || !selectableKinds.link) {
+  if (tool !== 'connect' || referencePreview || !selectableKinds.link || !isKindVisible('link', hiddenKinds)) {
     $('#viewport').dataset.connectionPortCount = '0';
     $('#viewport').dataset.connectionPortColors = '';
     return;
@@ -1889,6 +1940,7 @@ function updateInteractionHighlights(hovered = hoveredObject) {
   const add = (object, color) => {
     if (!object) return;
     const kind = object.userData.topology;
+    if (!isKindVisible(kind || 'component', hiddenKinds)) return;
     const id = kind && object.userData[`${kind}Id`];
     const key = kind && id ? `${kind}:${id}` : object.uuid;
     if (highlighted.has(key)) return;
@@ -2484,6 +2536,14 @@ const subgridDiagnosticReasons = {
   'cross-grid-edge': '梁跨越了现有子网格。',
   'cross-grid-plate': '面板跨越了现有子网格。',
   'mixed-grid-island': '相连结构使用了多个子网格编号。',
+  'duplicate-structural-id': '同类结构对象的编号缺失或重复。',
+  'invalid-node-position': '节点坐标包含无效数值。',
+  'degenerate-edge': '梁的两个端点位于同一位置。',
+  'duplicate-edge': '多根梁使用了同一对节点。',
+  'invalid-plate-geometry': '面板边界退化、不共面或自交。',
+  'missing-plate-boundary': '面板缺少边界梁；检查按实际存在的梁计算连通性。',
+  'plate-node-without-beam': '面板节点没有相连的梁，会导致游戏拆分结构岛时崩溃；保存时补齐缺失的边界梁。',
+  'plate-crosses-islands': '面板引用了其他结构岛的节点，请补齐边界梁。',
 };
 function syncSubgridErrorMarkers() {
   if (renderedSubgridAnalysis !== lastSubgridAnalysis) {
@@ -2753,6 +2813,7 @@ function archiveId() {
 function renderArchiveList() {
   const host = $('#archive-list');
   if (!host) return;
+  $('#archive-save').disabled = busy || Boolean(driveArchives?.isBusy());
   host.replaceChildren();
   if (archiveLoadError) {
     const message = document.createElement('p'); message.className = 'empty'; message.textContent = t('存档不可用：{error}', { error: archiveLoadError }); host.append(message); return;
@@ -2772,12 +2833,18 @@ function renderArchiveList() {
     load.onclick = () => { void readArchive(record); };
     const subgrid = document.createElement('button'); subgrid.type = 'button'; subgrid.className = 'archive-action'; setText(subgrid, '作为子网格'); subgrid.title = t('作为子网格导入'); subgrid.setAttribute('aria-label', `${t('作为子网格导入')}: ${record.name}`); subgrid.disabled = busy;
     subgrid.onclick = () => { void importArchiveAsSubgrid(record); };
-    row.append(detail, load, subgrid);
+    const overwrite = document.createElement('button'); overwrite.type = 'button'; overwrite.className = 'archive-action archive-overwrite'; setText(overwrite, '覆盖'); overwrite.setAttribute('aria-label', `${t('覆盖存档')}: ${record.name}`); overwrite.disabled = busy || Boolean(driveArchives?.isBusy());
+    overwrite.onclick = () => { void overwriteArchive(record); };
+    const sync = document.createElement('button'); sync.type = 'button'; sync.className = 'archive-action archive-drive-sync'; setText(sync, '同步到谷歌云盘'); sync.disabled = busy || Boolean(driveArchives?.isBusy());
+    sync.onclick = () => { void driveArchives?.upload(record.id); };
+    row.append(detail, load, subgrid, overwrite);
     if (record.kind !== 'auto') {
       const remove = document.createElement('button'); remove.type = 'button'; remove.className = 'archive-delete'; setText(remove, '删除'); remove.title = t('删除存档'); remove.setAttribute('aria-label', `${t('删除存档')}: ${record.name}`); remove.disabled = busy;
+      remove.disabled = busy || Boolean(driveArchives?.isBusy());
       remove.onclick = () => { void removeArchive(record); };
       row.append(remove);
     }
+    row.append(sync);
     host.append(row);
   }
 }
@@ -2833,7 +2900,7 @@ async function importArchiveAsSubgrid(record) {
   }
 }
 async function removeArchive(record) {
-  if (busy || record.kind === 'auto' || !archiveStore) return;
+  if (busy || record.kind === 'auto' || !archiveStore || driveArchives?.isBusy()) return;
   if (!confirm(t('删除存档确认', { name: record.name }))) return;
   try {
     await archiveStore.remove(record.id);
@@ -2842,22 +2909,33 @@ async function removeArchive(record) {
   } catch (error) { reportError('删除存档失败：{error}', error); }
 }
 async function saveNamedArchive() {
-  if (busy || !archiveStore) return;
+  if (busy || !archiveStore || driveArchives?.isBusy()) return;
   const input = $('#archive-name');
   const name = input.value.trim();
   if (!name || name.length > 120) { setText($('#archive-status'), '请输入有效的存档名称'); return; }
   try {
     const existing = archiveRecords.find(record => record.kind === 'manual' && record.name === name);
-    await archiveStore.put({ id: existing?.id || archiveId(), name, kind: 'manual', savedAt: Date.now(), document: currentProject() });
+    await archiveStore.put({ ...existing, id: existing?.id || archiveId(), name, kind: 'manual', savedAt: Date.now(), document: currentProject() });
     input.value = '';
     await refreshArchiveList();
     setText($('#archive-status'), '已保存存档 {name}', { name });
   } catch (error) { setText($('#archive-status'), '保存存档失败：{error}', { error: error instanceof Error ? error.message : String(error) }); }
 }
+async function overwriteArchive(record) {
+  if (busy || !archiveStore || driveArchives?.isBusy()) return;
+  if (!confirm(t('使用当前载具覆盖存档“{name}”？', { name: record.name }))) return;
+  try {
+    const document = migrateDocument(currentProject(), catalog.index);
+    await archiveStore.put({ ...record, document, savedAt: Date.now() });
+    await refreshArchiveList();
+    setText($('#archive-status'), '已覆盖存档 {name}', { name: record.name });
+  } catch (error) { setText($('#archive-status'), '保存存档失败：{error}', { error: error.message }); }
+}
 async function saveAutoArchive(savedAt = Date.now()) {
   if (!archiveStore) return;
   try {
-    await archiveStore.put({ id: AUTO_ARCHIVE_ID, name: '自动存档', kind: 'auto', savedAt: Number.isFinite(savedAt) ? savedAt : Date.now(), document: currentProject() });
+    const existing = archiveRecords.find(record => record.id === AUTO_ARCHIVE_ID);
+    await archiveStore.put({ ...existing, id: AUTO_ARCHIVE_ID, name: '自动存档', kind: 'auto', savedAt: Number.isFinite(savedAt) ? savedAt : Date.now(), document: currentProject() });
     await refreshArchiveList();
   } catch (error) {
     archiveLoadError = error instanceof Error ? error.message : String(error);
@@ -2980,6 +3058,13 @@ async function handleShareLink() {
   }
 }
 $('#archive-save').onclick = () => { void saveNamedArchive(); };
+driveArchives = mountGoogleDriveArchives({
+  host: $('#archive-panel > .section'), store: archiveStore,
+  clientId: settings.googleClientId || import.meta.env.VITE_GOOGLE_CLIENT_ID || '',
+  saveClientId: value => { settings.googleClientId = value; saveSettings(); },
+  validateDocument: value => migrateDocument(value, catalog.index),
+  refreshArchives: refreshArchiveList, renderArchives: renderArchiveList, createId: archiveId, editorBusy: () => busy,
+});
 void refreshArchiveList();
 async function checkSubgrids() {
   if (busy) return;
@@ -3106,7 +3191,7 @@ async function createObject(data) {
   setObjectLocalMirrorAxes(object, data.localMirrorAxes);
   if (data.mirror?.axis) reflectObject(object, data.mirror.axis);
   configureOpaqueDepthLayer(object, RENDER_DEPTH_LAYERS.component, { key: `component:${data.id}` });
-  object.visible = !data.hidden;
+  object.visible = !data.hidden && isKindVisible('component', hiddenKinds);
   object.traverse(child => { if (child.isMesh && !child.geometry.boundingBox) child.geometry.computeBoundingBox(); });
   return object;
 }
@@ -4470,23 +4555,24 @@ function pick({ ignoreComponentFilter = false } = {}) {
   while (object && !objects.includes(object)) object = object.parent;
   return object || null;
 }
-function pickTopologyNode(includeHidden = false, maxPixels = 22, accept = null) {
-  if (!selectableKinds.node && !includeHidden) return null;
-  if (!nodeHelpersVisible() && !includeHidden) return null;
+function pickTopologyNode({ includeHidden = false, requireVisible = true, maxPixels = 22, accept = null } = {}) {
+  if (!canSelectKind('node') && !includeHidden) return null;
+  if (!includeHidden && (referencePreview || (requireVisible && !nodeHelpersVisible()))) return null;
+  const availableNodes = requireVisible ? null : new Set(topology.nodes.filter(node => !node.hidden).map(node => node.id));
   const rect = renderer.domElement.getBoundingClientRect();
   return nodePicker.pick(topology.nodes, camera, pointer, rect.width, rect.height, maxPixels, node =>
-    (includeHidden || topologyNodeMarker(node.id)?.visible) && (!accept || accept(node)));
+    (includeHidden || (requireVisible ? topologyNodeMarker(node.id)?.visible : availableNodes.has(node.id))) && (!accept || accept(node)));
 }
 function pickConstructionNode(includeHidden = false) {
   const targets = constructionHitTargets();
-  return pickTopologyNode(includeHidden, 22, node => {
+  return pickTopologyNode({ includeHidden, accept: node => {
     if (!axes.every(axis => worldToCell(node.position[axis]) !== null)) return false;
     const size = topology.edges.some(edge => edge.size === 3 && !edge.hidden && (edge.a === node.id || edge.b === node.id)) ? 3 : 1;
     // A node is an anchor of its incident structure. Slanted bridge faces and
     // panel offsets must not hide their own anchor; other solids still can.
     return placementPicker.pointVisible(node.position, camera, targets, size * CELL_SIZE_WORLD / 2,
       target => target.userData.nodeIds?.includes(node.id));
-  });
+  } });
 }
 function pickSelectionTarget({ anchorFallback = true } = {}) {
   const roots = [
@@ -4554,9 +4640,9 @@ function pickInteractionHover() {
   return pickSelectable();
 }
 function pickMoveTarget() {
-  // Node helpers render above solids. Editing must pick that same overlay,
-  // independently of the occlusion rules used when constructing new beams.
-  const nodeId = selectableKinds.structure ? pickTopologyNode(false, 22, node => topologyNodeMarker(node.id)?.visible) : null;
+  // Node display is a visual preference. Moving uses logical node positions
+  // and selection filters, independently of helper visibility or occlusion.
+  const nodeId = pickTopologyNode({ requireVisible: false });
   if (nodeId) return { kind: 'node', id: nodeId, object: topologyObject('node', nodeId) };
   return pickSelectionTarget();
 }
@@ -4569,7 +4655,7 @@ function pickTopologyLink() {
   return object?.userData.topology === 'link' ? { kind: 'link', id: object.userData.linkId, object, point: hit.point } : null;
 }
 function pickLinkPoint() {
-  if (!selectableKinds.link) return null;
+  if (!selectableKinds.link || !isKindVisible('link', hiddenKinds)) return null;
   const rect = renderer.domElement.getBoundingClientRect();
   let nearest = null; let distance = 18;
   for (const link of topology.links || []) {
@@ -4583,6 +4669,7 @@ function pickLinkPoint() {
   return nearest;
 }
 function pickEdgeByScreenTolerance(maxPixels = 18, respectFilter = true) {
+  if (!isKindVisible('edge', hiddenKinds)) return null;
   if (respectFilter && !selectableKinds.edge) return null;
   const rect = renderer.domElement.getBoundingClientRect();
   const toScreen = value => {
@@ -4592,7 +4679,7 @@ function pickEdgeByScreenTolerance(maxPixels = 18, respectFilter = true) {
   const pointerScreen = { x: (pointer.x + 1) * rect.width / 2, y: (1 - pointer.y) * rect.height / 2 };
   let nearest = null;
   for (const edge of topology.edges) {
-    if (edge.hidden) continue;
+    if (edge.hidden || !isKindVisible('edge', hiddenKinds)) continue;
     const a = topology.nodes.find(node => node.id === edge.a)?.position;
     const b = topology.nodes.find(node => node.id === edge.b)?.position;
     if (!a || !b) continue;
@@ -4649,7 +4736,7 @@ function pickPaintTopology() {
   // between facets of the octagonal visual mesh at a distance.
   let nearest = null;
   for (const edge of topology.edges) {
-    if (edge.hidden) continue;
+    if (edge.hidden || !isKindVisible('edge', hiddenKinds)) continue;
     const a = topology.nodes.find(node => node.id === edge.a)?.position;
     const b = topology.nodes.find(node => node.id === edge.b)?.position;
     if (!a || !b) continue;
@@ -5553,7 +5640,7 @@ function setReferencePreview(value) {
   updateConnectionVisibility();
   edgePreview.visible = false; edgeAnchor.visible = false; edgeRuler.hide();
   updateNodeVisualState();
-  edgeLengthLabels.setVisible(!referencePreview && settings.edgeLengthsVisible);
+  edgeLengthLabels.setVisible(!referencePreview && settings.edgeLengthsVisible && isKindVisible('edge', hiddenKinds));
   orientation.root.hidden = referencePreview;
   $('.view-controls').hidden = referencePreview;
   $('.top-tool-section').hidden = referencePreview;
@@ -5674,7 +5761,7 @@ $('#placement-orientation-indicator').addEventListener('change', () => {
 updateRenderSettings();
 function updateEdgeLengthVisibility() {
   settings.edgeLengthsVisible = normalizeSettings({ version: 1, edgeLengthsVisible: $('#edge-lengths-visible').checked }).edgeLengthsVisible;
-  edgeLengthLabels.setVisible(!referencePreview && settings.edgeLengthsVisible);
+  edgeLengthLabels.setVisible(!referencePreview && settings.edgeLengthsVisible && isKindVisible('edge', hiddenKinds));
   scheduleSettings();
 }
 $('#edge-lengths-visible').addEventListener('change', updateEdgeLengthVisibility);
@@ -5796,7 +5883,6 @@ nodesButton.dataset.i18nTitle = '仅切换逻辑节点辅助标记，不隐藏�
 $('.view-controls').append(nodesButton);
 nodesButton.onclick = () => {
   showNodes = !showNodes;
-  if (!showNodes) clearNodeSelection();
   updateNodeVisualState();
   setText(nodesButton, showNodes ? '隐藏节点' : '显示节点');
   nodesButton.setAttribute('aria-pressed', String(showNodes));
@@ -6086,7 +6172,13 @@ async function saveNativeVehicle() {
     ];
     await saveFilePair(files, { download: downloadExportFile });
     status('已下载原生格式 .data / .meta 配套载具');
-  } catch (error) { if (!isSaveCancelled(error)) reportError('原生导出失败：{error}', error); }
+  } catch (error) {
+    if (error.structuralDiagnostics?.length) {
+      const first = error.structuralDiagnostics[0];
+      error.message = t(subgridDiagnosticReasons[first.code] || first.message) + ' (' + first.entityIds.join(', ') + ')';
+    }
+    if (!isSaveCancelled(error)) reportError('原生导出失败：{error}', error);
+  }
 }
 $('#save-btn').onclick = saveNativeVehicle;
 nativeExportButton.onclick = saveNativeVehicle;
@@ -6215,9 +6307,10 @@ resumeBackup.onclick = () => {
 };
 function collectSettings() {
   return {
+    googleClientId: settings.googleClientId,
     version: 1, renderQuality: settings.renderQuality, language: getLocale(), leftWidth: leftSidebarWidth, rightWidth: rightSidebarWidth, leftCollapsed: leftSidebar.hidden, rightOpen: !rightSidebar.hidden,
     gridColor: $('#grid-color').value, gridOpacity: Number($('#grid-opacity').value), gridStyle: $('#grid-style').value, gridVisible: gridPreferenceVisible,
-    nodesVisible: showNodes, nodeColor: $('#node-color').value, nodeSize: Number($('#node-size').value), nodeOpacity: Number($('#node-opacity').value), edgeAxisSnap, edgeMicroMode, edgeSize, hideMirrorPlane: mirrorMode.hidePlane, connectionVisibility: { ...connectionVisibility }, edgeLengthsVisible: settings.edgeLengthsVisible, edgeOutlinesVisible: settings.edgeOutlinesVisible, tool, selectedType,
+    nodesVisible: showNodes, hiddenKinds: { ...hiddenKinds }, nodeColor: $('#node-color').value, nodeSize: Number($('#node-size').value), nodeOpacity: Number($('#node-opacity').value), edgeAxisSnap, edgeMicroMode, edgeSize, hideMirrorPlane: mirrorMode.hidePlane, connectionVisibility: { ...connectionVisibility }, edgeLengthsVisible: settings.edgeLengthsVisible, edgeOutlinesVisible: settings.edgeOutlinesVisible, tool, selectedType,
     backgroundColor: settings.backgroundColor, lightAzimuth: settings.lightAzimuth, lightElevation: settings.lightElevation, lightIntensity: settings.lightIntensity, shadowStrength: settings.shadowStrength, lightSoftness: settings.lightSoftness, cameraLightEnabled: settings.cameraLightEnabled, cameraLightIntensity: settings.cameraLightIntensity, paintColor: settings.paintColor, paintQuickColors: settings.paintQuickColors, orthographic: settings.orthographic, placementOrientationIndicator: settings.placementOrientationIndicator,
     showBuildingFurniture: $('#show-building-furniture').checked, modelThumbnails: $('#use-model-thumbnails').checked, catalogCardSize: settings.catalogCardSize, favoriteComponents: [...settings.favoriteComponents], query: $('#component-search').value, category: $('#category-filter').value,
     sidebarTabs: { left: settings.sidebarTabs.left, right: settings.sidebarTabs.right },
@@ -6250,6 +6343,7 @@ export function changeLanguage(locale) {
   renderOfficialPaintColors();
   renderLatestPagesBuildTime();
   renderCategories(); renderCatalog(); inspect(); refresh(); renderArchiveList();
+  driveArchives?.relabel();
   updateConnectionVisibility();
   if (definitionOpen && $('#inspector-content details')) $('#inspector-content details').open = true;
   leftSidebar.scrollTop = scrollTop;

@@ -15,7 +15,11 @@ export function locatableSubgridErrors(diagnostics, topology) {
   };
   for (const diagnostic of diagnostics) {
     if (diagnostic.severity !== 'error') continue;
-    if (diagnostic.code === 'missing-edge-node' || diagnostic.code === 'missing-plate-node') {
+    // Node and plate IDs may overlap in native imports. Use typed locations
+    // so a plate ID never highlights an unrelated node with the same ID.
+    if (Array.isArray(diagnostic.nodeIds)) {
+      for (const id of diagnostic.nodeIds) add(id, diagnostic);
+    } else if (['missing-edge-node', 'missing-plate-node'].includes(diagnostic.code)) {
       for (const id of diagnostic.entityIds) if (nodes.has(id)) add(id, diagnostic);
     } else if (diagnostic.code === 'invalid-plate') {
       const plate = plates.get(diagnostic.entityIds[0]);

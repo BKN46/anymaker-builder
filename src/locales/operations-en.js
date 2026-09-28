@@ -1,4 +1,12 @@
 export const operationMessages = {
+  '同类结构对象的编号缺失或重复。': 'Structural IDs must be present and unique within each kind.',
+  '节点坐标包含无效数值。': 'Node coordinates contain invalid numbers.',
+  '梁的两个端点位于同一位置。': 'Both beam endpoints occupy the same position.',
+  '多根梁使用了同一对节点。': 'Multiple beams use the same node pair.',
+  '面板边界退化、不共面或自交。': 'The plate boundary is degenerate, nonplanar or self-intersecting.',
+  '面板缺少边界梁；检查按实际存在的梁计算连通性。': 'Plate boundary beams are missing; connectivity follows the beams that exist.',
+  '面板节点没有相连的梁，会导致游戏拆分结构岛时崩溃；保存时补齐缺失的边界梁。': 'A plate node has no incident beam and can crash native island splitting. Saving supplies its missing boundary beams.',
+  '面板引用了其他结构岛的节点，请补齐边界梁。': 'The plate references nodes in another structural island. Complete its boundary beams.',
   '梁 1 格 · 点击起点': 'Edge 1 block · Click start', '梁 1 格 · 点击终点 · Esc 取消': 'Edge 1 block · Click end · Esc to cancel',
   '梁终点微操': 'Edge endpoint micro control', '梁终点微操 · U/J I/K O/L 移动终点 · 点击或 Enter 完成 / Esc 取消': 'Edge endpoint micro control · U/J I/K O/L move the endpoint · click or press Enter to finish / Esc to cancel',
   '梁终点微操 · U/J I/K O/L 移动 · 点击或 Enter 完成 / Esc 取消': 'Edge endpoint micro control · U/J I/K O/L move the endpoint · click or press Enter to finish / Esc to cancel',

@@ -1,6 +1,16 @@
 import { operationMessages } from './operations-en.js';
+import { googleDriveMessages } from './google-drive-en.js';
 
 export const englishMessages = {
+  ...googleDriveMessages,
+  '覆盖': 'Overwrite',
+  '覆盖存档': 'Overwrite archive',
+  '使用当前载具覆盖存档“{name}”？': 'Overwrite archive "{name}" with the current vehicle?',
+  '已覆盖存档 {name}': 'Overwrote archive {name}',
+  '同步到谷歌云盘': 'Sync to Google Drive',
+  '按类型隐藏': 'Hide by type',
+  '展开按类型隐藏': 'Expand hide by type',
+  '收起按类型隐藏': 'Collapse hide by type',
   '旋转与镜像': 'Rotation and mirroring',
   '手动旋转': 'Manual rotation',
   '旋转平面': 'Rotation plane',

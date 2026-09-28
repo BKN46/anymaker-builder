@@ -71,6 +71,22 @@ async function ready(page, catalogCount = '332 / 598') {
   await expect(page.locator('#viewport')).toHaveAttribute('data-ready', 'true');
 }
 
+test('hide by type preferences survive reload independently of selection and connection filters', async ({ page }) => {
+  await page.goto('./'); await ready(page);
+  await page.locator('#type-visibility-toggle').click();
+  await expect(page.locator('[data-hidden-kind]:checked')).toHaveCount(0);
+  for (const kind of ['node', 'plate', 'link']) await page.locator('[data-hidden-kind="' + kind + '"]').check();
+  await expect.poll(() => page.evaluate(key => JSON.parse(localStorage.getItem(key))?.hiddenKinds, settingsKey)).toEqual({ component: false, structure: false, node: true, edge: false, plate: true, link: true });
+  await page.reload(); await ready(page); await page.locator('#type-visibility-toggle').click();
+  for (const kind of ['component', 'structure', 'node', 'edge', 'plate', 'link']) {
+    await expect(page.locator('[data-hidden-kind="' + kind + '"]')).toBeChecked({ checked: ['node', 'plate', 'link'].includes(kind) });
+    await expect(page.locator('[data-selectable-kind="' + kind + '"]')).toBeChecked();
+  }
+  await expect(page.locator('[data-connection-kind]:checked')).toHaveCount(7);
+  await page.locator('#language-select').selectOption('zh');
+  await expect(page.locator('#type-visibility-toggle')).toHaveText('按类型隐藏');
+});
+
 test('mirror plane visibility preference survives reload', async ({ page }) => {
   await page.goto('./'); await ready(page);
   await page.locator('#mirror-action').click();
@@ -143,7 +159,9 @@ test('English default, language switching, axis views, grid and panel preference
   await page.locator('#orientation-indicator [data-view="right"]').click();
   await page.locator('#left-sidebar-resizer').focus(); await page.keyboard.press('End');
   await page.locator('#left-sidebar-toggle').click();
-  await expect.poll(async () => JSON.parse(await page.evaluate(key => localStorage.getItem(key), settingsKey))?.leftCollapsed).toBe(true);
+  // SwiftShader thumbnail rendering can stall evaluation after settings are saved.
+  // Keep checking the persisted value while allowing the renderer to finish.
+  await expect.poll(async () => JSON.parse(await page.evaluate(key => localStorage.getItem(key), settingsKey))?.leftCollapsed, { timeout: 15000 }).toBe(true);
   const before = JSON.parse(await page.evaluate(key => localStorage.getItem(key), settingsKey));
   expect(before.gridColor).toBe('#ff3366'); expect(before.gridStyle).toBe('dashed'); expect(before.gridOpacity).toBe(.25);
   expect(before.nodeColor).toBe('#22aa66'); expect(before.nodeSize).toBe(.12); expect(before.nodeOpacity).toBe(.4);
