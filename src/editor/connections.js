@@ -3,7 +3,7 @@
 // deliberately not guessed here.
 import { assertGridVector } from './grid.js';
 
-export const LINK_KINDS = ['electric', 'mechanical', 'liquid', 'gas', 'belt', 'data'];
+export const LINK_KINDS = ['electric', 'mechanical', 'liquid', 'gas', 'belt', 'data', 'hydraulic'];
 
 // These diagnostic colours identify a network family consistently in the
 // connection toolbar, endpoint markers, and rendered links.
@@ -14,6 +14,7 @@ export const LINK_COLORS = Object.freeze({
   gas: '#27ae60',
   belt: '#98a2b3',
   data: '#9b51e0',
+  hydraulic: '#64748b',
 });
 
 // A native route may use fractional coordinates, but a single segment this
@@ -30,6 +31,7 @@ export const LINK_RENDER_STYLES = Object.freeze({
   gas: { radius: .019, radialSegments: 8 },
   belt: { linewidth: 3, dashSize: .04, gapSize: .025 },
   data: { radius: .0075, radialSegments: 8 },
+  hydraulic: { radius: .035, radialSegments: 12 },
 });
 
 const clone = value => structuredClone(value);
@@ -88,6 +90,7 @@ function endpoint(value, label, componentIds) {
 export function validateLinks(links = [], componentIds = null) {
   if (!Array.isArray(links)) throw new Error('Connections must be an array');
   const ids = new Set();
+  const hydraulicPorts = new Set();
   return links.map((link, index) => {
     if (!link || typeof link.id !== 'string' || !link.id || ids.has(link.id)) throw new Error(`Connection ID is invalid or duplicated: ${index}`);
     if (!LINK_KINDS.includes(link.kind)) throw new Error(`Unsupported connection kind: ${String(link.kind)}`);
@@ -104,6 +107,16 @@ export function validateLinks(links = [], componentIds = null) {
       points: link.points.map(point => routePoint(point, link.nativeProjected === true)),
       ...(link.nativeProjected ? { nativeProjected: true } : {}),
     };
+    if (link.kind === 'hydraulic') {
+      if (link.points.length || !Number.isInteger(link.lengthMax) || link.lengthMax < 1 || link.lengthMax > 10000 || !Number.isFinite(link.extensionFactor) || link.extensionFactor < 0 || link.extensionFactor > 1) throw new Error('Invalid hydraulic cylinder length or extension');
+      for (const endpoint of [from, to]) {
+        const key = endpoint.componentId + ':' + port(endpoint.port);
+        if (hydraulicPorts.has(key)) throw new Error('Hydraulic port is already connected');
+        hydraulicPorts.add(key);
+      }
+      normalized.lengthMax = link.lengthMax;
+      normalized.extensionFactor = link.extensionFactor;
+    }
     if (Number.isInteger(link.color) && link.color >= 0 && link.color <= 255) normalized.color = link.color;
     if (typeof link.paintColor === 'string') normalized.paintColor = link.paintColor.toLowerCase();
     return normalized;
@@ -116,7 +129,8 @@ export function createLink(links, value, componentIds = null) {
   let index = 1;
   while (next.some(link => link.id === `${prefix}-${index}`)) index++;
   const [link] = validateLinks([{ ...clone(value), id: `${prefix}-${index}` }], componentIds);
-  return { links: [...next, link], link };
+  const combined = validateLinks([...next, link], componentIds);
+  return { links: combined, link: combined.at(-1) };
 }
 
 export function removeLink(links, id, componentIds = null) {

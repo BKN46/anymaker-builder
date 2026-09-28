@@ -9,6 +9,9 @@
 export function logicNodeNetwork(node) {
   const type = node?.type;
   if (!type || type === 'mechanical' || (typeof type === 'string' && type.startsWith('mechanical_'))) return 'mechanical';
+  if (type === 'hydraulic_base') return 'hydraulic';
+  // Tracks use the native belt_links family; the node subtype selects width.
+  if (['belt_track_narrow', 'belt_track', 'belt_track_wide'].includes(type)) return 'belt';
   return type;
 }
 
@@ -53,9 +56,14 @@ export function orientMechanicalLink(link, componentsById, definitionsByType) {
 export function logicNodeCellPosition(node, extension = undefined, centerStretch = undefined) {
   const pos = node?.pos;
   const result = Array.isArray(pos) && pos.length === 3 && pos.every(Number.isFinite) ? [...pos] : [0, 0, 0];
-  if (!Array.isArray(extension) || extension.length !== 3 || !extension.every(Number.isFinite)) return result;
-  if (!Array.isArray(centerStretch) || centerStretch.length !== 3 || !centerStretch.every(Number.isFinite)) return result;
-  for (let axis = 0; axis < 3; axis++) if (result[axis] > centerStretch[axis]) result[axis] += extension[axis];
+  if (Array.isArray(extension) && extension.length === 3 && extension.every(Number.isFinite) && Array.isArray(centerStretch) && centerStretch.length === 3 && centerStretch.every(Number.isFinite)) {
+    for (let axis = 0; axis < 3; axis++) if (result[axis] > centerStretch[axis]) result[axis] += extension[axis];
+  }
+  // logic_node.get_size_offset centers even-width endpoints on half cells.
+  if (Number.isInteger(node?.size) && node.size % 2 === 1) {
+    const axis = Math.floor((node.direction ?? 0) / 2);
+    for (let index = 0; index < 3; index++) if (index !== axis) result[index] += .5;
+  }
   return result;
 }
 

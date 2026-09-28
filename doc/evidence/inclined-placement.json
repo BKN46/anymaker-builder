@@ -1,0 +1,337 @@
+{
+  "checkedOn": "2026-09-28",
+  "source": {
+    "file": "bin/game.gcl",
+    "bytes": 81870449,
+    "sha256": "d9725681f1b0bff321c58fcadc0d2e12104919a541eef074cf12945b283edb75"
+  },
+  "functions": [
+    {
+      "name": "client_scene.item_world.vehicle_editor_add_component.state_add_component.tick",
+      "signature": "(ref<client_scene.item_world.vehicle_editor_add_component.state_base>) client_scene.item_world.vehicle_editor_add_component.state_add_component.tick (client_scene.item_world.vehicle_editor_add_component.state_add_component, client_scene.item_world.vehicle_editor_add_component, client, client_scene, const f64, const mat34, const client_scene.item_world.vehicle_editor_add_component.inputs)",
+      "signatureOffset": "0x846758",
+      "codeOffset": "0x84880f",
+      "codeSize": "0x68d8",
+      "codeSha256": "d615293922e53517a86125d5505db701c3a9b5a3795d25be0bd1b7b6574bd9bb"
+    },
+    {
+      "name": "client_scene.vehicle_component.can_add_component_surface_snap",
+      "signature": "(bool) client_scene.vehicle_component.can_add_component_surface_snap (const client_scene.vehicle_component, const vehicle_component_definition, const vec3, s32, s32, vehicle_util.grid_origin_dir, vec3_s32, mat33_s32)",
+      "signatureOffset": "0x102f929",
+      "codeOffset": "0x10306bd",
+      "codeSize": "0x2b40",
+      "codeSha256": "7de8d84bdb884b97175faf1bcc122b57b9b410ec4bb74d4a3d412221297cdbaa"
+    },
+    {
+      "name": "client_scene.vehicle_plate.get_grid_origin_dir",
+      "signature": "(vehicle_util.grid_origin_dir) client_scene.vehicle_plate.get_grid_origin_dir (const client_scene.vehicle_plate)",
+      "signatureOffset": "0x1344cde",
+      "codeOffset": "0x1344e69",
+      "codeSize": "0xe0",
+      "codeSha256": "1b0596c2aa95a8b60996c85e0a7b5e8043ad0e34d1d8557c7eb6906a0bcc4253"
+    },
+    {
+      "name": "mat33_s32.rotation_angle_axis",
+      "signature": "(mat33_s32) mat33_s32.rotation_angle_axis (const vec3_s32, const s32)",
+      "signatureOffset": "0x1c7b364",
+      "codeOffset": "0x1c7b48a",
+      "codeSize": "0x218",
+      "codeSha256": "b1225c9a87f1f4f9bb9c0865d365cf5b7d26834229b81928e772e5a2ddfc2a9c"
+    },
+    {
+      "name": "vehicle_grid_util.get_consistent_grid_origin_and_dir",
+      "signature": "() vehicle_grid_util.get_consistent_grid_origin_and_dir (const vec3_s32, const vec3_s32, vec3_s32, vec3_s32)",
+      "signatureOffset": "0x3bd80a6",
+      "codeOffset": "0x3bd8380",
+      "codeSize": "0x520",
+      "codeSha256": "6fa7c0d183c4ed81d8e0d12ef041ddb87bb3eeee96b3cb013158010ef68b13f4"
+    },
+    {
+      "name": "vehicle_grid_util.get_grid_axis_dirs",
+      "signature": "() vehicle_grid_util.get_grid_axis_dirs (const vec3_s32, vec3_s32, vec3_s32, vec3_s32)",
+      "signatureOffset": "0x3bd8bbc",
+      "codeOffset": "0x3bd8d88",
+      "codeSize": "0x240",
+      "codeSha256": "f50d0be0176d3e55d41c4c2a385199cdb904f8d0c1130578fa5d73ffbd69df4f"
+    },
+    {
+      "name": "vehicle_grid_util.get_grid_axis_normals",
+      "signature": "() vehicle_grid_util.get_grid_axis_normals (const vec3_s32, vec3, vec3, vec3)",
+      "signatureOffset": "0x3bd9164",
+      "codeOffset": "0x3bd937d",
+      "codeSize": "0x348",
+      "codeSha256": "c62315e12a109423a6811a7f0c6176469e00b7c78f230f9ef0a239c2e41dbdd2"
+    },
+    {
+      "name": "vehicle_plate_util.get_plate_grid_origin",
+      "signature": "(vec3) vehicle_plate_util.get_plate_grid_origin (const vec3_s32, const vec3, const f64, const s32)",
+      "signatureOffset": "0x3c18cf5",
+      "codeOffset": "0x3c18e65",
+      "codeSize": "0x150",
+      "codeSha256": "845fbf44427c437311611f1a0d00f9a55bf37eab9b764f7b4101f9ff64429929"
+    },
+    {
+      "name": "vehicle_util.grid_origin_dir.get_transform",
+      "signature": "(mat34) vehicle_util.grid_origin_dir.get_transform (const vehicle_util.grid_origin_dir)",
+      "signatureOffset": "0x3c4e0df",
+      "codeOffset": "0x3c4e435",
+      "codeSize": "0x500",
+      "codeSha256": "afe42e812ce3deabb754e7514f07316799db1ccdef1e7be441c683bf7a8031b8"
+    }
+  ],
+  "constants": [
+    {
+      "name": "positive quarter turn",
+      "address": "0x84f0bf",
+      "type": "s32",
+      "value": 1
+    },
+    {
+      "name": "negative quarter turn",
+      "address": "0x84f0c3",
+      "type": "s32",
+      "value": -1
+    }
+  ],
+  "sample": {
+    "file": "test-vehicle/vehicle.data",
+    "bytes": 63399,
+    "sha256": "89844924ac0b99c714b90ee2055beae478f8e0f0ea10433ae4dc855975302210",
+    "vehicleId": 553,
+    "gridIndex": 1,
+    "origin": [
+      0,
+      -90,
+      183
+    ],
+    "dir": [
+      0,
+      1,
+      -2
+    ],
+    "components": [
+      {
+        "id": 180,
+        "type": "circular_dial_a",
+        "pos": [
+          66,
+          0,
+          131
+        ],
+        "rot": [
+          -1,
+          0,
+          0,
+          0,
+          1,
+          0,
+          0,
+          0,
+          -1
+        ]
+      },
+      {
+        "id": 181,
+        "type": "circular_dial_a",
+        "pos": [
+          69,
+          0,
+          131
+        ],
+        "rot": [
+          -1,
+          0,
+          0,
+          0,
+          1,
+          0,
+          0,
+          0,
+          -1
+        ]
+      },
+      {
+        "id": 217,
+        "type": "circular_dial_small_a",
+        "pos": [
+          67,
+          0,
+          131
+        ],
+        "rot": [
+          -1,
+          0,
+          0,
+          0,
+          1,
+          0,
+          0,
+          0,
+          -1
+        ]
+      },
+      {
+        "id": 218,
+        "type": "circular_dial_small_a",
+        "pos": [
+          70,
+          0,
+          129
+        ],
+        "rot": [
+          0,
+          0,
+          1,
+          0,
+          1,
+          0,
+          -1,
+          0,
+          0
+        ]
+      },
+      {
+        "id": 219,
+        "type": "circular_dial_small_a",
+        "pos": [
+          70,
+          0,
+          130
+        ],
+        "rot": [
+          0,
+          0,
+          1,
+          0,
+          1,
+          0,
+          -1,
+          0,
+          0
+        ]
+      }
+    ],
+    "plates": [
+      {
+        "id": 45,
+        "nodes": [
+          258,
+          256,
+          267,
+          268,
+          263
+        ],
+        "positions": [
+          [
+            64,
+            24,
+            240
+          ],
+          [
+            65,
+            28,
+            242
+          ],
+          [
+            66,
+            28,
+            242
+          ],
+          [
+            66,
+            26,
+            241
+          ],
+          [
+            66,
+            24,
+            240
+          ]
+        ]
+      },
+      {
+        "id": 46,
+        "nodes": [
+          269,
+          268,
+          267,
+          266
+        ],
+        "positions": [
+          [
+            68,
+            26,
+            241
+          ],
+          [
+            66,
+            26,
+            241
+          ],
+          [
+            66,
+            28,
+            242
+          ],
+          [
+            68,
+            28,
+            242
+          ]
+        ]
+      },
+      {
+        "id": 52,
+        "nodes": [
+          254,
+          265,
+          269,
+          266,
+          255,
+          271
+        ],
+        "positions": [
+          [
+            70,
+            24,
+            240
+          ],
+          [
+            68,
+            24,
+            240
+          ],
+          [
+            68,
+            26,
+            241
+          ],
+          [
+            68,
+            28,
+            242
+          ],
+          [
+            70,
+            28,
+            242
+          ],
+          [
+            70,
+            26,
+            241
+          ]
+        ]
+      }
+    ]
+  },
+  "verified": [
+    "Mounting grid normal [0,1,-2] carries the dashboard incline; its five component rotations are signed integer orthogonal matrices.",
+    "Plane origins follow primitive integer in-plane axes and floor-divided projections.",
+    "Placement calls mat33_s32.rotation_angle_axis with signed quarter-turn steps."
+  ],
+  "unverified": [
+    "Arbitrary local placement angles: no supporting path observed.",
+    "Actual game loading, mounting collision acceptance, dynamic vehicle orientations and visual parity."
+  ]
+}

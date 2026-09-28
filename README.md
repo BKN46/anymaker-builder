@@ -10,12 +10,16 @@ The editor currently provides:
 
 - A searchable published component catalog with lazy-loaded Mesh assets.
 - Component placement, selection, transform controls, copy, mirror, grid split/merge, hiding, history, and local recovery.
-- Integer-grid construction tools for nodes, edges, panels, glass panels, and six connection families.
-- Edge previews, axis snapping, node and edge interaction aids, panel construction from closed edge loops, and diagnostic painting.
+- Whole-selection movement and rotation for beams and plates, including mixed component selections. The rotation toolbar separates manual rotation (XY/XZ/YZ, 90°/180°/270° around the selection center) from mirror controls. **Mirror selection** copies across the current world plane and retains the originals, independently of continuous mirror mode. Shared boundary nodes detach from unselected structure. See [selection transforms](doc/05_BUILD_OPERATIONS.md#梁面板及混合选择的整体变换).
+- Inclined structural-plate placement with plane-local snapping, 90° placement rotations, and native mounting-grid export. See [inclined placement](doc/12_INCLINED_PLACEMENT.md) for the dashboard sample and game-code evidence.
+- Integer-grid construction tools for nodes, edges, plates, glass plates, six network connection families, and hydraulic cylinders. Cylinder connections support matching base/rod endpoints in three sizes; hydraulic oil uses liquid pipes. See [hydraulic connections](doc/11_HYDRAULIC_CONNECTIONS.md) for native fields and validation limits.
+- Edge previews, axis snapping, node and edge interaction aids, plate construction from closed edge loops, and diagnostic painting.
 - Import of paired native `.data` / `.meta` vehicle files for inspection and editing.
+- Native track connections, three widths of real track-link Meshes, wheel-driven loop rebuilding, and endpoint export. See [tracks](doc/13_TRACKS.md) for the game-code evidence, synthetic fixtures, and remaining validation limits.
+- Continuous drive belts for pulley wheels and all three engine wheels, including mixed radii, reverse idlers, and the original belt texture. See [ordinary belts](doc/14_BELTS.md) for the six-wheel native sample and static-rendering limits.
 - Export of a paired native JSON `.data` / `.meta` representation, plus a clearly non-game-compatible debug XML export.
 - English UI by default, with a persisted Chinese language option.
-- A local GLB/OBJ/STL model tool under Resources & validation, with filtered outer shells, 13 simplification levels (30–250 target vertices, focused on 70–250), quad-first panels, optional X/Y/Z symmetry, uniform scale, footprint preview, and undoable beam/panel generation. See [model import](doc/07_MODEL_IMPORT.md) for supported geometry and limits.
+- A local GLB/OBJ/STL model tool under Resources & validation, with filtered outer shells, 13 simplification levels (30–250 target vertices, focused on 70–250), quad-first plates, optional X/Y/Z symmetry, uniform scale, footprint preview, and undoable beam/plate generation. See [model import](doc/07_MODEL_IMPORT.md) for supported geometry and limits.
 
 The published asset set and its source metadata are checked by repository scripts. Component geometry is rendered with neutral diagnostic materials; game materials, camera matching, lighting, dynamic assembly, and visual parity have not been verified.
 
@@ -33,9 +37,9 @@ Manual editor operations use a fixed world grid:
 1 block = 8 cm = 0.08 world units
 ```
 
-Component origins, manually created nodes, edge endpoints, panel boundaries, and transform translations are quantized to integer world blocks. Scale remains dimensionless. Native vehicle imports may retain fractional projected positions where required by their decoded rigid transforms.
+Ordinary component origins, manually created nodes, edge endpoints, plate boundaries, and transform translations use integer world blocks. Components placed on inclined structural plates snap within the mounting plane and retain the resulting fractional world positions; moving them snaps the displacement in whole blocks. Native vehicle imports may also retain fractional projected positions where required by their decoded rigid transforms. Scale remains dimensionless.
 
-Edge endpoints are represented by world-axis-aligned block cubes. Edge geometry uses their projected silhouette, including diagonal cases. When a panel is created, it records the camera-facing direction and connects actual vertices of the corresponding node-cube faces; it does not fabricate a plane-wide mitered expansion. These are editor diagnostics informed by observed behavior and screenshots, not a claim that the original game mesh algorithm has been reproduced.
+Edge endpoints are represented by world-axis-aligned block cubes. Plates and windows accept boundary edges in any order, including split collinear sides and mixed beam widths. A complete loop is checked for coplanarity, shared subgrid ownership and a valid boundary; there is no four-edge limit or convexity requirement. Inner plate geometry uses a uniform normal-derived node support offset; the camera only chooses its facing side. Native thickness, outer strips, window frames and visual parity remain incomplete. See [plate rendering and selection review](doc/15_PLATES.md) for the evidence and remaining differences.
 
 ## Getting started
 

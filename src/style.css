@@ -64,6 +64,10 @@ button:focus-visible, input:focus-visible, select:focus-visible { outline: 2px s
 .top-tool-section h2 { display: none; }
 .context-toolbar { position: absolute; top: 68px; left: 50%; z-index: 5; display: flex; align-items: center; gap: 7px; max-width: calc(100% - 32px); padding: 6px 9px; transform: translateX(-50%); border: 1px solid var(--line); border-radius: 10px; background: rgba(255,255,255,.94); box-shadow: 0 4px 18px #20334518; backdrop-filter: blur(10px); }
 .context-toolbar[hidden] { display: none; }
+#native-import-notice { position: absolute; top: 116px; left: 50%; transform: translateX(-50%); z-index: 10; display: flex; align-items: start; gap: 12px; max-width: min(520px, calc(100% - 32px)); padding: 12px 14px; border: 1px solid #d6a753; border-radius: 8px; background: #fff8e6; color: #704d0e; box-shadow: 0 4px 18px #20334518; font-size: 12px; line-height: 1.5; overflow-wrap: anywhere; }
+#native-import-notice[hidden] { display: none; }
+#native-import-notice[data-state="error"] { border-color: #dc8989; background: #fff0f0; color: #912929; }
+#native-import-notice button { flex-shrink: 0; padding: 0 5px; min-height: 24px; }
 .context-toolbar strong { color: #475467; font-size: 11px; white-space: nowrap; }
 .context-toolbar input { width: 58px; padding: 5px; border: 1px solid #d0d5dd; border-radius: 5px; }
 .context-toolbar button { min-height: 28px; padding: 4px 7px; font-size: 11px; }
@@ -71,6 +75,13 @@ button:focus-visible, input:focus-visible, select:focus-visible { outline: 2px s
 #selection-box { position: absolute; z-index: 9; pointer-events: none; box-sizing: border-box; border: 1px dashed var(--accent); background: color-mix(in srgb, var(--accent) 16%, transparent); }
 .mirror-toolbar { display: grid; gap: 7px; min-width: 0; padding-top: 8px; border-top: 1px solid var(--line); }
 .mirror-toolbar[hidden] { display: none; }
+.rotate-toolbar { display: grid; gap: 10px; }
+.rotate-toolbar[hidden] { display: none; }
+.rotation-section { display: grid; grid-template-columns: 1fr 1fr; align-items: center; gap: 6px; padding-top: 8px; border-top: 1px solid var(--line); font-size: 11px; color: #475467; }
+.rotation-section strong, .rotation-section button, .rotation-section p { grid-column: 1 / -1; }
+.rotation-section select { width: 100%; min-width: 0; padding: 4px; border: 1px solid #d0d5dd; border-radius: 5px; }
+.rotation-section p { margin: 0; font-size: 11px; }
+.rotate-toolbar input[type="checkbox"] { width: auto; accent-color: var(--accent); }
 .mirror-toolbar strong { color: #475467; font-size: 11px; }
 .mirror-plane-buttons { display: flex; gap: 3px; }
 .mirror-plane-buttons button { flex: 1; min-width: 0; min-height: 28px; padding: 4px 2px; font-size: 10px; white-space: nowrap; }
@@ -217,11 +228,12 @@ button:focus-visible, input:focus-visible, select:focus-visible { outline: 2px s
 .subgrid-options { display: flex; flex-wrap: wrap; align-items: center; gap: 8px; margin: 7px 0 10px; }
 .subgrid-options button { flex: 1 1 100%; }
 .subgrid-options label { display: inline-flex; align-items: center; gap: 4px; color: var(--muted); font-size: 11px; white-space: nowrap; }
-.subgrid-row { display: grid; grid-template-columns: minmax(0, 1fr) auto auto auto; align-items: center; gap: 8px; padding: 8px; border: 1px solid var(--line); border-radius: 7px; background: var(--panel-soft); }
-.subgrid-detail { min-width: 0; display: grid; gap: 2px; }
+.subgrid-row { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); align-items: center; gap: 6px; padding: 8px; border: 1px solid var(--line); border-radius: 7px; background: var(--panel-soft); }
+.subgrid-detail { grid-column: 1 / -1; min-width: 0; display: grid; gap: 2px; }
 .subgrid-detail strong { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; font-size: 12px; }
-.subgrid-detail span { color: var(--muted); font-size: 10px; }
-.subgrid-row button { padding: 5px 7px; font-size: 11px; }
+.subgrid-detail input { width: 100%; min-width: 0; font-size: 12px; }
+.subgrid-detail span { overflow: hidden; color: var(--muted); font-size: 10px; text-overflow: ellipsis; white-space: nowrap; }
+.subgrid-row button { min-width: 0; padding: 5px 3px; font-size: 11px; }
 .subgrid-row .subgrid-delete:not(:disabled) { color: var(--danger, #c53d4b); }
 .archive-create { display: flex; gap: 6px; margin: 8px 0; }
 .archive-create input { min-width: 0; flex: 1; }

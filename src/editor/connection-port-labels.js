@@ -32,6 +32,7 @@ const networkLabels = new Map([
   ['gas', ['气体管线', 'Gas']],
   ['belt', ['皮带', 'Belt']],
   ['data', ['数据线', 'Data']],
+  ['hydraulic', ['液压缸', 'Hydraulic cylinder']],
 ]);
 
 function humanizeIdentifier(value) {
@@ -64,6 +65,10 @@ export function connectionDescriptorLabel(descriptor, locale = 'en') {
 }
 
 export function connectionPortRoleLabel({ descriptor, type } = {}, locale = 'en') {
+  const track = { belt_track_narrow: ['窄履带', 'Narrow track'], belt_track: ['履带', 'Track'], belt_track_wide: ['宽履带', 'Wide track'] }[type];
+  if (track) return track[locale === 'zh' ? 0 : 1];
+  if (type === 'hydraulic_base') return locale === 'zh' ? '液压缸底座' : 'Cylinder base';
+  if (type === 'hydraulic') return locale === 'zh' ? '液压缸杆端' : 'Cylinder rod';
   if (descriptor) return connectionDescriptorLabel(descriptor, locale);
   if (type === 'surface' || type === 'port') return locale === 'zh' ? '物理端口' : 'Physical port';
   return connectionNetworkLabel(type, locale);

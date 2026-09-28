@@ -1,0 +1,12 @@
+{
+  "source": "textures/belt.txtr",
+  "sourceSha256": "71455c7625963a1b66353d3229ecea120ab8c1380aab2a0f081cf36d1e4b9779",
+  "sourceBytes": 5504,
+  "format": "TXTR v2 RGBA8",
+  "width": 32,
+  "height": 32,
+  "sourceMipLevels": 6,
+  "url": "assets/textures/belt.png",
+  "outputSha256": "5a763f5388e7abeeb864a80fabd74acc3b8237c3b54704bba5a2a5c8e0128852",
+  "outputBytes": 109
+}

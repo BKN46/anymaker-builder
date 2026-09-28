@@ -4,6 +4,8 @@
 // The observed game node representation is a one-cell cube (the eight
 // +/-0.5 corners). Boundary contact helps estimate connectivity, but is not
 // evidence that other valid structural nodes must be mounted to a component.
+import { structuralFaces, segmentTouchesFace, faceTouchesPlate, facesTouch } from './mechanical-bodies.js';
+import { vectorArray } from './component-frame.js';
 
 const entityKey = (kind, id) => `${kind}:${id}`;
 const EPSILON = 1e-6;
@@ -69,7 +71,7 @@ function structuralRegions(component) {
   return regions.length ? regions : [structuralBounds(component)].filter(validBounds);
 }
 
-function buildAnalysis({ components = [], topology = {}, cellSize = DEFAULT_CELL_SIZE, epsilon = EPSILON } = {}) {
+function buildAnalysis({ components = [], topology = {}, definitions = new Map(), cellSize = DEFAULT_CELL_SIZE, epsilon = EPSILON } = {}) {
   const graph = new Map();
   const componentById = new Map();
   const nodeById = new Map();
@@ -77,10 +79,13 @@ function buildAnalysis({ components = [], topology = {}, cellSize = DEFAULT_CELL
   const plateById = new Map();
   const referencedNodeIds = new Set();
   const diagnostics = [];
+  const facesById = new Map(components.map(component => [component.id, finitePoint(component.position) ? structuralFaces(component, definitions, { includeAttachments: true }) : []]));
+  const hasDefinition = component => !!(component.definitionOverride || definitions.get(component.type));
   for (const component of components) {
     if (!component?.id) continue;
     componentById.set(component.id, component);
     graph.set(entityKey('component', component.id), new Set());
+    if (hasDefinition(component)) continue;
     if (!structuralRegions(component).length) addDiagnostic(diagnostics, 'missing-component-bounds', 'warning', [component.id], 'Component has no usable structural bounds.');
     else if (!(component?.occupancyRegions || []).some(validBounds) && !validBounds(component.occupancyBounds)) addDiagnostic(diagnostics, 'missing-occupancy-bounds', 'info', [component.id], 'Component uses a visual fallback because no definition occupancy zone is available.');
   }
@@ -109,17 +114,49 @@ function buildAnalysis({ components = [], topology = {}, cellSize = DEFAULT_CELL
       else { connect(graph, entityKey('plate', plate.id), entityKey('node', nodeId)); referencedNodeIds.add(nodeId); }
     }
   }
-  const bounded = [...componentById.values()].filter(component => structuralRegions(component).length);
+  const bounded = [...componentById.values()].filter(component => !hasDefinition(component) && structuralRegions(component).length);
+  // Mounting surfaces can touch the interior of a beam or panel, far from
+  // its nodes. Use the same native-cell frame and support offset as export.
+  const faces = [...facesById.values()].flat();
+  const movablePairs = new Set((topology.mechanicalConnections || []).map(connection => [connection.from, connection.to].sort().join('|')));
+  // Existing joint bodies must not be welded by incidental contact when a
+  // hatch is closed. Explicit topology still reports genuine cross-boundaries.
+  const separateGrids = new Set((topology.mechanicalConnections || []).flatMap(connection => {
+    const from = componentById.get(connection.from); const to = componentById.get(connection.to);
+    const a = from?.gridId || 'grid-1'; const b = to?.gridId || 'grid-1';
+    return from && to && a !== b ? [[a, b].sort().join('|')] : [];
+  }));
+  const sameRigidSide = (a, b) => !separateGrids.has([a.gridId || 'grid-1', b.gridId || 'grid-1'].sort().join('|'));
+  for (const face of faces) {
+    if (face.type !== 'port') continue;
+    const owner = entityKey('component', face.object.id);
+    for (const node of nodeById.values()) if (sameRigidSide(face.object, node) && finitePoint(node.position) && segmentTouchesFace(face, vectorArray(node.position), vectorArray(node.position))) connect(graph, owner, entityKey('node', node.id));
+    for (const edge of edgeById.values()) {
+      const a = nodeById.get(edge.a); const b = nodeById.get(edge.b);
+      if (sameRigidSide(face.object, edge) && finitePoint(a?.position) && finitePoint(b?.position) && segmentTouchesFace(face, vectorArray(a.position), vectorArray(b.position))) connect(graph, owner, entityKey('edge', edge.id));
+    }
+    for (const plate of plateById.values()) {
+      const points = (plate.nodeIds || []).map(id => nodeById.get(id)?.position);
+      if (sameRigidSide(face.object, plate) && points.every(finitePoint) && faceTouchesPlate(face, points.map(vectorArray))) connect(graph, owner, entityKey('plate', plate.id));
+    }
+  }
+  for (let i = 0; i < faces.length; i++) for (let j = i + 1; j < faces.length; j++) {
+    const a = faces[i]; const b = faces[j];
+    // Typed accessory sockets also support components (e.g. a handle on a
+    // hitch's mechanical socket, or a pulley on an engine's port). A drawn
+    // network link alone is never evidence of this physical attachment.
+    if (a.object.id !== b.object.id && sameRigidSide(a.object, b.object) && !movablePairs.has([a.object.id, b.object.id].sort().join('|')) && facesTouch(a, b)) connect(graph, entityKey('component', a.object.id), entityKey('component', b.object.id));
+  }
   for (let index = 0; index < bounded.length; index++) {
     for (let other = index + 1; other < bounded.length; other++) {
-      if (structuralRegions(bounded[index]).some(a => structuralRegions(bounded[other]).some(b => boxesTouch(a, b, epsilon)))) {
+      if (sameRigidSide(bounded[index], bounded[other]) && !movablePairs.has([bounded[index].id, bounded[other].id].sort().join('|')) && structuralRegions(bounded[index]).some(a => structuralRegions(bounded[other]).some(b => boxesTouch(a, b, epsilon)))) {
         connect(graph, entityKey('component', bounded[index].id), entityKey('component', bounded[other].id));
       }
     }
   }
   for (const node of nodeById.values()) {
     for (const component of bounded) {
-      if (nodeTouchesComponent(node, component, cellSize, epsilon)) {
+      if (sameRigidSide(node, component) && nodeTouchesComponent(node, component, cellSize, epsilon)) {
         connect(graph, entityKey('node', node.id), entityKey('component', component.id));
       }
     }
@@ -134,7 +171,8 @@ function buildAnalysis({ components = [], topology = {}, cellSize = DEFAULT_CELL
       addDiagnostic(diagnostics, 'missing-link-component', 'error', [link?.id, from, to], 'Connection references a missing component.');
       continue;
     }
-    connect(graph, entityKey('component', from), entityKey('component', to));
+    // Signal cables, hoses, belts and cylinders do not weld rigid bodies.
+    // Keep references and diagnose ownership, without merging the endpoints.
     const fromGrid = link.gridId || componentById.get(from)?.gridId;
     const toGrid = componentById.get(to)?.gridId;
     if (fromGrid && toGrid && fromGrid !== toGrid) addDiagnostic(diagnostics, 'cross-grid-link', 'warning', [link.id, from, to], 'Connection crosses existing subgrid ownership.');
@@ -153,7 +191,7 @@ function buildAnalysis({ components = [], topology = {}, cellSize = DEFAULT_CELL
     if (visited.has(start)) continue;
     const queue = [start]; const members = []; visited.add(start);
     while (queue.length) {
-      const current = queue.shift(); members.push(current);
+      const current = queue.pop(); members.push(current);
       for (const next of graph.get(current) || []) if (!visited.has(next)) { visited.add(next); queue.push(next); }
     }
     groups.push({

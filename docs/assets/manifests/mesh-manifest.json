@@ -1,11 +1,11 @@
 {
   "format": "anymaker-mesh-manifest",
   "version": 1,
-  "generatedAt": "2026-09-25T15:27:18.439Z",
+  "generatedAt": "2026-09-28T11:57:54.753Z",
   "sourceRoot": "Anymaker/rom",
   "parser": "src/assets/mesh.js",
   "compression": "gzip",
-  "count": 865,
+  "count": 868,
   "opaque": 1,
   "entries": {
     "meshes/blade_blurred/blade.mesh": {
@@ -11250,6 +11250,45 @@
       "parts": 1,
       "vertices": 8188,
       "triangles": 5328,
+      "compression": "gzip",
+      "format": "anymaker-published-mesh/1",
+      "parsed": true
+    },
+    "meshes/components/tank_track_a.mesh": {
+      "url": "assets/meshes/6a27efb143ab4a5f.json.gz",
+      "sourceSha256": "8da68e04c7e5d4f0aaaf20ac42051d024ec326148e1e21a23bfd93d27e6bd602",
+      "outputSha256": "a219674d2846fb7abe3d2f605075e7af7747c133ddf4eec5e63b92e0f7d6efbe",
+      "bytes": 4751,
+      "uncompressedBytes": 50358,
+      "parts": 1,
+      "vertices": 376,
+      "triangles": 224,
+      "compression": "gzip",
+      "format": "anymaker-published-mesh/1",
+      "parsed": true
+    },
+    "meshes/components/tank_track_b.mesh": {
+      "url": "assets/meshes/3c13bbe1d9f10912.json.gz",
+      "sourceSha256": "2fda6d8e8346d55b4087732934266a57764c4abd151d6c98a53bdf7551202382",
+      "outputSha256": "2859b19b8253ba7523f276cfc694996370dc78681e6e2d4ca33496d41d0e2d81",
+      "bytes": 5216,
+      "uncompressedBytes": 65691,
+      "parts": 1,
+      "vertices": 541,
+      "triangles": 305,
+      "compression": "gzip",
+      "format": "anymaker-published-mesh/1",
+      "parsed": true
+    },
+    "meshes/components/tank_track_c.mesh": {
+      "url": "assets/meshes/d63b4e94e03d7119.json.gz",
+      "sourceSha256": "78910588c06e356d66ca39fdb849291c6efd026b53cad51237fcaf6db0e183d6",
+      "outputSha256": "bd9cb966a0d3f7bcefb52f997b143e4bf949b4a2d317227f2dbd0b74ea31161c",
+      "bytes": 6013,
+      "uncompressedBytes": 83780,
+      "parts": 1,
+      "vertices": 696,
+      "triangles": 404,
       "compression": "gzip",
       "format": "anymaker-published-mesh/1",
       "parsed": true

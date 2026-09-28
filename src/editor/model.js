@@ -1,6 +1,10 @@
+import { nativeGridFrame } from '../native/grid-frame.js';
+import { validateSurfaceMount } from './surface-mount.js';
 // Renderer-independent Anymaker editing model. Native file adapters can map
 // this model to .data without importing Three.js or relying on scene objects.
 import { nativePropertiesFromState } from './component-properties.js';
+import { nativeHydraulicLinks } from './hydraulic-connections.js';
+import { HYDRAULIC_PROFILES } from './hydraulic-profiles.js';
 import { nativeAccessoryContainerFromState, nativeAccessoryFromState } from './native-accessories.js';
 import { detectMechanicalConnections, mechanicalMateRule, validateMechanicalConnections } from './mechanical-connections.js';
 import { reflectNativePoint, reflectNativeRotation } from '../native/coordinates.js';
@@ -65,6 +69,7 @@ export class Component {
     this.colors = Array.isArray(data.colors) ? [...data.colors] : undefined;
     this.paintColor = typeof data.paintColor === 'string' ? data.paintColor : undefined;
     this.hidden = data.hidden === true ? true : undefined;
+    this.surfaceMount = data.surfaceMount ? validateSurfaceMount(data.surfaceMount) : undefined;
     this.extras = clone(data.extras || {});
   }
 }
@@ -213,31 +218,8 @@ function selectedVehicles(model, vehicleIds) {
   return model.vehicles.filter(vehicle => ids.has(vehicle.id));
 }
 
-// Game GCL: vehicle_grid_util.get_grid_axis_normals and
-// vehicle_util.grid_origin_dir.get_transform (see doc/06_REVERSE_ENGINEERING.md).
-// Keep the frame in cells so attachment offsets precede the 8 cm conversion.
-export function nativeGridFrame(grid) {
-  const origin = vector(grid?.origin);
-  const direction = vector(grid?.dir ?? { x: 0, y: 1, z: 0 });
-  if ([...AXES.map(axis => origin[axis]), ...AXES.map(axis => direction[axis])].some(value => !Number.isFinite(value))) throw new Error('Native grid origin/dir must contain finite numbers');
-  if (length(direction) === 0) throw new Error('Native grid direction must be nonzero');
-  // Only the zero-origin, +Y base grid bypasses surface mounting. A translated
-  // +Y grid is still a surface grid and needs the mounting offset.
-  if (AXES.every(axis => origin[axis] === 0) && direction.x === 0 && direction.y === 1 && direction.z === 0) return { origin, rotation: identityMatrix() };
-  const y = normalize(direction);
-  const up = direction.x === 0 && direction.z === 0 ? { x: 0, y: 0, z: 1 } : { x: 0, y: 1, z: 0 };
-  const x = normalize(cross(direction, up));
-  const z = normalize(cross(x, y));
-  // get_plate_node_surface_offset(dir, normal, 0): the supporting face center,
-  // edge midpoint or corner of the half-cell node cube. get_transform then
-  // adds another half-cell along the normal to place the component base.
-  const surfaceOffset = Object.fromEntries(AXES.map(axis => [axis, Math.sign(direction[axis]) * .5]));
-  return {
-    origin: add(origin, add(surfaceOffset, scale(y, .5))),
-    // Columns are the local axes expressed in the vehicle frame.
-    rotation: [x.x, y.x, z.x, x.y, y.y, z.y, x.z, y.z, z.z],
-  };
-}
+// Shared native mounting frame, retained here for existing import callers.
+export { nativeGridFrame } from '../native/grid-frame.js';
 
 function nativeCellPosition(position, frame) {
   return add(frame.origin, multiplyMatrixVector(frame.rotation, position));
@@ -262,6 +244,8 @@ const NATIVE_CONSTRAINT_POSITIONS = new Map([
 ]);
 
 function isNativeRigidAttachment(parent, target) {
+  // A cylinder spans its two anchors; collapsing them destroys its length.
+  if (HYDRAULIC_PROFILES[parent.type] || HYDRAULIC_PROFILES[target.type]) return false;
   if (NATIVE_CONSTRAINT_POSITIONS.has(parent.type) || NATIVE_CONSTRAINT_POSITIONS.has(target.type)) return true;
   // Interface ports are logic endpoints, not rigid construction anchors.
   return !/(?:^|_)(?:interface|port)(?:_|$)/i.test(parent.type) && !/(?:^|_)(?:interface|port)(?:_|$)/i.test(target.type);
@@ -416,12 +400,17 @@ export function toEditorDocument(model, { vehicleIds = null } = {}) {
     objects.push({
       id,
       type: component.type,
-      gridId: grid.id,
+      // Native grids are mounting frames inside one physical vehicle. The
+      // editor's subgrid owns the complete body, including surface handles.
+      gridId: nativeImport ? vehicle.grids[0].id : grid.id,
       ...(component.mirror ? { mirror: clone(component.mirror) } : {}),
       ...(component.localMirrorAxes?.length ? { localMirrorAxes: [...component.localMirrorAxes] } : {}),
       ...(Array.isArray(sourceColors) && sourceColors.length <= 10 && sourceColors.every(color => Number.isInteger(color) && color >= 0 && color <= 255) ? { colors: [...sourceColors] } : {}),
       ...(typeof component.paintColor === 'string' ? { paintColor: component.paintColor } : {}),
       ...(component.hidden ? { hidden: true } : {}),
+      ...(nativeImport && AXES.filter(axis => grid.dir[axis] !== 0).length > 1
+        ? { surfaceMount: validateSurfaceMount({ dir: AXES.map(axis => grid.dir[axis]), position: AXES.map(axis => component.transform.position[axis]) }) }
+        : component.surfaceMount ? { surfaceMount: clone(component.surfaceMount) } : {}),
       ...(nativeExtension(component) ? { nativeExtension: nativeExtension(component) } : {}),
       ...(nativePropertiesFromState(propertyState) ? { nativeProperties: nativePropertiesFromState(propertyState) } : {}),
       ...(accessoryItem ? { nativeAccessory: accessoryItem } : {}),
@@ -506,5 +495,6 @@ export function toEditorTopology(model, { vehicleIds = null } = {}) {
   }
   }
   if (nativeImport) mechanicalConnections.push(...nativeMechanicalConnections(vehicles, frames, offsets, nativeComponentIds));
+  if (nativeImport) links.push(...nativeHydraulicLinks(vehicles, nativeComponentIds));
   return { nodes, edges, plates, links, ...(mechanicalConnections.length ? { mechanicalConnections } : {}) };
 }

@@ -52,6 +52,7 @@ export function normalizeSettings(input = {}) {
       gas: bool(s.connectionVisibility?.gas, true),
       belt: bool(s.connectionVisibility?.belt, true),
       data: bool(s.connectionVisibility?.data, true),
+      hydraulic: bool(s.connectionVisibility?.hydraulic, true),
     },
     edgeLengthsVisible: bool(s.edgeLengthsVisible, false),
     edgeOutlinesVisible: bool(s.edgeOutlinesVisible, false),

@@ -1,0 +1,439 @@
+{
+  "checkedOn": "2026-09-28",
+  "source": {
+    "file": "bin/game.gcl",
+    "bytes": 81870449,
+    "sha256": "d9725681f1b0bff321c58fcadc0d2e12104919a541eef074cf12945b283edb75"
+  },
+  "functions": [
+    {
+      "name": "client_scene.item_world.vehicle_editor_hydraulic.state_edit_hydraulic_nodes_drag.tick",
+      "signature": "(ref<client_scene.item_world.vehicle_editor_hydraulic.state_base>) client_scene.item_world.vehicle_editor_hydraulic.state_edit_hydraulic_nodes_drag.tick (client_scene.item_world.vehicle_editor_hydraulic.state_edit_hydraulic_nodes_drag, client_scene.item_world.vehicle_editor_hydraulic, client, client_scene, const f64, const client_scene.item_world.vehicle_editor_hydraulic.inputs)",
+      "signatureOffset": "0x982926",
+      "codeOffset": "0x983a14",
+      "codeSize": "0x18c0",
+      "codeSha256": "fc97809fa324013c23d5b0b3d7ebc708a39e0b045aeadd5a0f09db68a8ec55a1"
+    },
+    {
+      "name": "server_scene.vehicle_component.hydraulic_cylinder_connector.parse_save_data",
+      "signature": "() server_scene.vehicle_component.hydraulic_cylinder_connector.parse_save_data (server_scene.vehicle_component.hydraulic_cylinder_connector, server_scene.save_data.parser)",
+      "signatureOffset": "0x345b63e",
+      "codeOffset": "0x345b855",
+      "codeSize": "0x270",
+      "codeSha256": "6fc384e76caafa96f96cbf6e3b869f2b87318d4172e3f6711bbd7225f1d7a2eb"
+    },
+    {
+      "name": "server_scene.vehicle_component.hydraulic_cylinder_connector.post_load",
+      "signature": "() server_scene.vehicle_component.hydraulic_cylinder_connector.post_load (server_scene.vehicle_component.hydraulic_cylinder_connector, server_scene)",
+      "signatureOffset": "0x345bc2a",
+      "codeOffset": "0x345bf94",
+      "codeSize": "0x260",
+      "codeSha256": "451e1ab135d5319ce404916b6900966842e02aa9cfd280578c02f9cdeca0cc31"
+    },
+    {
+      "name": "server_scene.vehicle_component.hydraulic_cylinder_connector_base.connect_multibody",
+      "signature": "() server_scene.vehicle_component.hydraulic_cylinder_connector_base.connect_multibody (server_scene.vehicle_component.hydraulic_cylinder_connector_base, physics.scene, const ptr<server_scene.vehicle_component>, server_scene.vehicle, server_scene.vehicle)",
+      "signatureOffset": "0x345ff1c",
+      "codeOffset": "0x346091c",
+      "codeSize": "0x1740",
+      "codeSha256": "8df355b1f6d71518500388b38e441dfd6e78a42209b30e8d3a9a1e465e433c15"
+    },
+    {
+      "name": "server_scene.vehicle_component.hydraulic_cylinder_connector_base.parse_save_data",
+      "signature": "() server_scene.vehicle_component.hydraulic_cylinder_connector_base.parse_save_data (server_scene.vehicle_component.hydraulic_cylinder_connector_base, server_scene.save_data.parser)",
+      "signatureOffset": "0x3465732",
+      "codeOffset": "0x3465a8a",
+      "codeSize": "0x4d0",
+      "codeSha256": "b45bc8d27dc811a40331d587f830a6efa247c8378ac3aa19cffcc95cf31fa88b"
+    },
+    {
+      "name": "server_scene.vehicle_component.hydraulic_cylinder_connector_base.post_load",
+      "signature": "() server_scene.vehicle_component.hydraulic_cylinder_connector_base.post_load (server_scene.vehicle_component.hydraulic_cylinder_connector_base, server_scene)",
+      "signatureOffset": "0x3466109",
+      "codeOffset": "0x34664d2",
+      "codeSize": "0x2b0",
+      "codeSha256": "4e11f14624c9f3ff3a4760aa26cf939eb1a3ed4a43be3b7c42ead8773d62d5ba"
+    },
+    {
+      "name": "server_scene.vehicle_component.hydraulic_cylinder_connector_base.set_extension_size",
+      "signature": "() server_scene.vehicle_component.hydraulic_cylinder_connector_base.set_extension_size (server_scene.vehicle_component.hydraulic_cylinder_connector_base, const f64, const s32)",
+      "signatureOffset": "0x346936f",
+      "codeOffset": "0x34694a7",
+      "codeSize": "0x68",
+      "codeSha256": "120a41348f962e29340f44b737041dd378b88299dc952acbcd2fb04423950487"
+    },
+    {
+      "name": "vehicle_util.can_add_hydraulic_link<server_scene>",
+      "signature": "(bool) vehicle_util.can_add_hydraulic_link<server_scene> (const server_scene.vehicle, const s32, const s32, const server_scene.vehicle, const s32, const s32)",
+      "signatureOffset": "0x3d5877d",
+      "codeOffset": "0x3d588d5",
+      "codeSize": "0x1d0",
+      "codeSha256": "22c70024359757bf194099986bf751bca0b9af9c070f51a61348e4e88209361e"
+    },
+    {
+      "name": "vehicle_component_definition.logic_node.get_size_offset",
+      "signature": "(vec3) vehicle_component_definition.logic_node.get_size_offset (const vehicle_component_definition.logic_node)",
+      "signatureOffset": "0x3b541bc",
+      "codeOffset": "0x3b542c3",
+      "codeSize": "0x2c0",
+      "codeSha256": "2094eccb7ac56017b7d58db0c28afb9740ce51e098a0eec5e84b5ea53c448467"
+    },
+    {
+      "name": "server_scene.vehicle_component.wheel_hydraulic.parse_save_data",
+      "signature": "() server_scene.vehicle_component.wheel_hydraulic.parse_save_data (server_scene.vehicle_component.wheel_hydraulic, server_scene.save_data.parser)",
+      "signatureOffset": "0x36fdee0",
+      "codeOffset": "0x36fe350",
+      "codeSize": "0x508",
+      "codeSha256": "7d0aa69546151d18f309dcb54632bedd293acb09c93f21505d4c5cf80a7d55fa"
+    },
+    {
+      "name": "server_scene.vehicle_element.hydraulic_cylinder.parse_save_data",
+      "signature": "() server_scene.vehicle_element.hydraulic_cylinder.parse_save_data (server_scene.vehicle_element.hydraulic_cylinder, server_scene.save_data.parser)",
+      "signatureOffset": "0x3738b40",
+      "codeOffset": "0x3738cf3",
+      "codeSize": "0x130",
+      "codeSha256": "51c5434a7766d2fb31963abc9d3dbd51b8c6685ce5e6557f85b9d21238b6ceee"
+    }
+  ],
+  "constants": [
+    {
+      "name": "new-cylinder extension_factor",
+      "address": "0x9852cc",
+      "type": "f64",
+      "value": 1
+    },
+    {
+      "name": "omitted extension_factor",
+      "address": "0x3465f42",
+      "type": "f64",
+      "value": 0
+    },
+    {
+      "name": "omitted length_max",
+      "address": "0x3465f56",
+      "type": "s32",
+      "value": 8
+    },
+    {
+      "name": "even-width endpoint half-cell offset",
+      "address": "0x3b5456b",
+      "type": "f64",
+      "value": 0.5
+    }
+  ],
+  "definitions": [
+    {
+      "id": "wheel_c",
+      "sha256": "f4d09a0f9ccac496c87056aa2ff3adefcdf4a2a84e302b8e5c2a1207a66763d1",
+      "logicNodes": [
+        {
+          "index": 0,
+          "type": "liquid",
+          "size": 0,
+          "position": [
+            -3,
+            0,
+            0
+          ],
+          "direction": 4
+        },
+        {
+          "index": 1,
+          "type": "liquid",
+          "size": 0,
+          "position": [
+            3,
+            0,
+            0
+          ],
+          "direction": 4
+        },
+        {
+          "index": 2,
+          "type": "gas",
+          "size": 0,
+          "position": [
+            0,
+            3,
+            0
+          ],
+          "direction": 4
+        }
+      ]
+    },
+    {
+      "id": "hydraulic_cylinder_connector_base",
+      "sha256": "28b6e567a0ee74dcfa9335b1d3ce2f5152cf395cffe552331f769fce522fea59",
+      "logicNodes": [
+        {
+          "index": 0,
+          "type": "liquid",
+          "size": 0,
+          "position": [
+            1,
+            0,
+            0
+          ],
+          "direction": 5
+        },
+        {
+          "index": 1,
+          "type": "liquid",
+          "size": 0,
+          "position": [
+            -1,
+            0,
+            0
+          ],
+          "direction": 5
+        },
+        {
+          "index": 2,
+          "type": "hydraulic_base",
+          "size": 0,
+          "position": [
+            0,
+            0,
+            0
+          ],
+          "direction": 3
+        }
+      ]
+    },
+    {
+      "id": "hydraulic_cylinder_connector",
+      "sha256": "9d5ece24e186eb9bf6fa06553ef471a010c4e20049258eca4fb6a3cba1991ec1",
+      "logicNodes": [
+        {
+          "index": 0,
+          "type": "hydraulic",
+          "size": 0,
+          "position": [
+            0,
+            0,
+            0
+          ],
+          "direction": 2
+        }
+      ]
+    },
+    {
+      "id": "hydraulic_cylinder_connector_base_2_2",
+      "sha256": "5b5e92df9c7ae6fdba4c3f35e061e9cae37cd47dbd6038303f4ecacaea9c9e01",
+      "logicNodes": [
+        {
+          "index": 0,
+          "type": "liquid",
+          "size": 0,
+          "position": [
+            2,
+            0,
+            1
+          ],
+          "direction": 5
+        },
+        {
+          "index": 1,
+          "type": "liquid",
+          "size": 0,
+          "position": [
+            -1,
+            0,
+            1
+          ],
+          "direction": 5
+        },
+        {
+          "index": 2,
+          "type": "hydraulic_base",
+          "size": 1,
+          "position": [
+            0,
+            1,
+            0
+          ],
+          "direction": 3
+        }
+      ]
+    },
+    {
+      "id": "hydraulic_cylinder_connector_2_2",
+      "sha256": "a7bee0fff51522bb2ef11481e56473fbcbe392868be21760f1e67250c6f8b482",
+      "logicNodes": [
+        {
+          "index": 0,
+          "type": "hydraulic",
+          "size": 1,
+          "position": [
+            0,
+            0,
+            0
+          ],
+          "direction": 2
+        }
+      ]
+    },
+    {
+      "id": "hydraulic_cylinder_connector_base_3_3",
+      "sha256": "71d69838f4a9ca53dfe0a904342124bfaf64a3282230844d22e8aeab5700c58e",
+      "logicNodes": [
+        {
+          "index": 0,
+          "type": "liquid",
+          "size": 0,
+          "position": [
+            2,
+            0,
+            0
+          ],
+          "direction": 5
+        },
+        {
+          "index": 1,
+          "type": "liquid",
+          "size": 0,
+          "position": [
+            -2,
+            0,
+            0
+          ],
+          "direction": 5
+        },
+        {
+          "index": 2,
+          "type": "hydraulic_base",
+          "size": 2,
+          "position": [
+            0,
+            2,
+            0
+          ],
+          "direction": 3
+        }
+      ]
+    },
+    {
+      "id": "hydraulic_cylinder_connector_3_3",
+      "sha256": "4d91ee666ea53903ed7fe3c47df5ba3114a8c87c2fcfbd567ff64a849f7410b6",
+      "logicNodes": [
+        {
+          "index": 0,
+          "type": "hydraulic",
+          "size": 2,
+          "position": [
+            0,
+            0,
+            0
+          ],
+          "direction": 2
+        }
+      ]
+    }
+  ],
+  "sample": {
+    "workshopId": "3809467608",
+    "appId": "4435340",
+    "files": [
+      {
+        "name": "vehicle.data",
+        "bytes": 21989,
+        "sha256": "887172a8748f56824bd9059603a280129b625b85a40454a9b4b04e23faf9b59f"
+      },
+      {
+        "name": "vehicle.meta",
+        "bytes": 378,
+        "sha256": "e737324fbafc32d5ed16b66cdcf441f9bad576e5fb06743e4a9986e2c8d21e63"
+      }
+    ],
+    "vehicleId": 2168,
+    "components": 105,
+    "nodes": 58,
+    "edges": 77,
+    "plates": 11,
+    "links": {
+      "electric": 3,
+      "mechanical": 16,
+      "liquid": 22,
+      "gas": 10,
+      "belt": 5,
+      "data": 0,
+      "hydraulic": 0
+    },
+    "hydraulicWheels": 2,
+    "steeringLinks": [
+      {
+        "from": {
+          "component": 26,
+          "port": 1
+        },
+        "to": {
+          "component": 36,
+          "port": 1
+        }
+      },
+      {
+        "from": {
+          "component": 26,
+          "port": 0
+        },
+        "to": {
+          "component": 37,
+          "port": 1
+        }
+      },
+      {
+        "from": {
+          "component": 27,
+          "port": 0
+        },
+        "to": {
+          "component": 39,
+          "port": 1
+        }
+      },
+      {
+        "from": {
+          "component": 27,
+          "port": 1
+        },
+        "to": {
+          "component": 38,
+          "port": 1
+        }
+      }
+    ],
+    "externalCylinderEndpoints": 0
+  },
+  "verifiedRules": {
+    "endpointTypes": [
+      "hydraulic_base",
+      "hydraulic"
+    ],
+    "matchingSizes": [
+      0,
+      1,
+      2
+    ],
+    "basePort": 2,
+    "rodPort": 0,
+    "nativeEndpointFields": [
+      "connected_vehicle",
+      "connected_component",
+      "connected_node_index"
+    ],
+    "nativeBaseFields": [
+      "length_max",
+      "extension_factor",
+      "hydraulic_cylinder"
+    ],
+    "oilNetwork": "liquid_links",
+    "nativeHydraulicLinksArray": false,
+    "newLengthMax": "round(worldAnchorDistance / 0.08)",
+    "sizeOffset": "If size is odd, add 0.5 cells on the two axes perpendicular to the node direction after stretching."
+  },
+  "limitations": [
+    "Static game code and definition evidence; no actual game loading or hydraulic simulation verified.",
+    "Workshop sample contains hydraulic steering liquid routes, not external cylinder links.",
+    "Diagnostic cylinder geometry is not game visual parity."
+  ]
+}

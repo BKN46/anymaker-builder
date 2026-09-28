@@ -1,6 +1,7 @@
 // Rigid ownership for physical-mate export. Structural surfaces and topology
 // join bodies; mating anchors and signal cables never weld the two sides.
 import { CELL_SIZE_WORLD } from './grid.js';
+import { HYDRAULIC_PROFILES } from './hydraulic-profiles.js';
 import { mechanicalComponentDefinition, mechanicalMateError } from './mechanical-connections.js';
 import { componentFrame, vectorArray, transformVector, addVectors, subtractVectors, dotVectors } from './component-frame.js';
 
@@ -10,12 +11,12 @@ const directions = [[-1, 0, 0], [1, 0, 0], [0, -1, 0], [0, 1, 0], [0, 0, -1], [0
 const scale = (v, amount) => v.map(value => value * amount);
 const cross = (a, b) => [a[1] * b[2] - a[2] * b[1], a[2] * b[0] - a[0] * b[2], a[0] * b[1] - a[1] * b[0]];
 
-function structuralFaces(object, definitions) {
-  const definition = mechanicalComponentDefinition(object, definitions);
+export function structuralFaces(object, definitions, { includeAttachments = false } = {}) {
+  const definition = mechanicalComponentDefinition(object, definitions) || HYDRAULIC_PROFILES[object.type];
   if (!definition) return [];
   const frame = componentFrame(object);
   return (definition.surfaces || []).flatMap(surface => {
-    if (surface.type !== undefined && surface.type !== 'port') return [];
+    if (!includeAttachments && surface.type !== undefined && surface.type !== 'port') return [];
     const dir = directions[surface.dir ?? 0];
     if (!dir) return [];
     const axis = dir.findIndex(value => value !== 0);
@@ -37,11 +38,11 @@ function structuralFaces(object, definitions) {
       return frame.point(local);
     });
     const center = frame.point(min.map((value, index) => (value + max[index]) / 2));
-    return [{ object, frame, min, max, normal, corners, center, tangent }];
+    return [{ object, frame, min, max, normal, corners, center, tangent, type: surface.type || 'port' }];
   });
 }
 
-function segmentTouchesFace(face, a, b) {
+export function segmentTouchesFace(face, a, b) {
   // The structure's axis-aligned node cube contributes a half-cell support
   // offset. This also handles the game's non-axis-aligned mounting grids.
   const support = face.normal.map(value => Math.abs(value) < EPSILON ? 0 : Math.sign(value) * CELL_SIZE_WORLD / 2);
@@ -61,7 +62,7 @@ function segmentTouchesFace(face, a, b) {
   return true;
 }
 
-function facesTouch(a, b) {
+export function facesTouch(a, b) {
   if (dotVectors(a.normal, b.normal) > -1 + EPSILON || Math.abs(dotVectors(subtractVectors(a.center, b.center), a.normal)) > CELL_SIZE_WORLD * EPSILON) return false;
   // Coplanar rectangle SAT, including rotated faces; no render AABB welding.
   for (const face of [a, b]) for (const axis of face.tangent) {
@@ -72,7 +73,7 @@ function facesTouch(a, b) {
   return true;
 }
 
-function faceTouchesPlate(face, points) {
+export function faceTouchesPlate(face, points) {
   if (points.length < 3) return false;
   const point = addVectors(face.center, face.normal.map(value => Math.abs(value) < EPSILON ? 0 : Math.sign(value) * CELL_SIZE_WORLD / 2));
   const origin = points[0]; let normal;
@@ -147,6 +148,6 @@ export function partitionMechanicalBodies(document, connections, definitions = n
   }
   const componentBody = new Map(bodies.flatMap((body, index) => body.components.map(id => [id, index])));
   const nodeBody = new Map(bodies.flatMap((body, index) => body.nodes.map(id => [id, index])));
-  for (const link of topology.links || []) if (componentBody.has(link.from?.componentId) && componentBody.has(link.to?.componentId) && componentBody.get(link.from.componentId) !== componentBody.get(link.to.componentId)) throw mechanicalMateError('cross-body-link', 'A network link crosses physical bodies; use a supported native interface', link.id);
+  for (const link of topology.links || []) if (link.kind !== 'hydraulic' && componentBody.has(link.from?.componentId) && componentBody.has(link.to?.componentId) && componentBody.get(link.from.componentId) !== componentBody.get(link.to.componentId)) throw mechanicalMateError('cross-body-link', 'A network link crosses physical bodies; use a supported native interface', link.id);
   return { bodies, componentBody, nodeBody };
 }

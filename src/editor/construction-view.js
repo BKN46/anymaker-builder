@@ -3,6 +3,7 @@ import { Line2 } from 'three/addons/lines/Line2.js';
 import { LineGeometry } from 'three/addons/lines/LineGeometry.js';
 import { CELL_SIZE_WORLD, AXES, assertGridVector, quantizeWorldVector, worldToCell } from './grid.js';
 import { createPlacementPicker } from './placement-picking.js';
+import { triangulatePlatePolygon } from './plate-polygon.js';
 
 export const GRID_SIZE = 20;
 export const GRID_DIVISIONS = GRID_SIZE / CELL_SIZE_WORLD;
@@ -366,39 +367,9 @@ function plateSurfaceOptions(points, surface) {
   if (rawDirection.lengthSq() <= EPSILON) return null;
   return {
     normal,
-    direction: rawDirection.normalize(),
-    halfWidth: typeof surface === 'object' && Number.isFinite(surface?.halfWidth) ? Math.abs(surface.halfWidth) : EDGE_WIDTH / 2,
+    direction: normal.clone().multiplyScalar(rawDirection.dot(normal) < 0 ? -1 : 1),
+    halfWidth: typeof surface === 'object' && Number.isFinite(surface?.halfWidth) ? Math.abs(surface.halfWidth) : Math.abs(normalOffset ?? EDGE_WIDTH / 2),
   };
-}
-
-function nodeOutwardDirection(points, index, normal) {
-  const previous = points[(index + points.length - 1) % points.length];
-  const current = points[index];
-  const next = points[(index + 1) % points.length];
-  const incoming = current.clone().sub(previous);
-  const outgoing = next.clone().sub(current);
-  const outward = new THREE.Vector3();
-  if (incoming.lengthSq() > EPSILON) outward.add(incoming.normalize().cross(normal));
-  if (outgoing.lengthSq() > EPSILON) outward.add(outgoing.normalize().cross(normal));
-  if (outward.lengthSq() <= EPSILON) {
-    const center = points.reduce((sum, point) => sum.add(point), new THREE.Vector3()).multiplyScalar(1 / points.length);
-    outward.copy(current).sub(center);
-  }
-  return outward.lengthSq() > EPSILON ? outward.normalize() : new THREE.Vector3();
-}
-
-// The panel must be made from vertices that actually exist on the endpoint
-// cubes.  A plane-wide mitered expansion can produce points outside those
-// cubes, especially on spatial diagonals.  Select the cube face nearest the
-// camera direction first; if that face has several equally near vertices,
-// select its local outside corner so the panel still meets its boundary beam.
-function cameraFacingNodeCorner(points, index, direction, normal, halfWidth) {
-  const outward = nodeOutwardDirection(points, index, normal);
-  const corners = cubeCornerOffsets(halfWidth);
-  const scores = corners.map(corner => corner.dot(direction));
-  const maximum = Math.max(...scores);
-  const candidates = corners.filter((corner, cornerIndex) => maximum - scores[cornerIndex] <= EPSILON);
-  return candidates.reduce((best, corner) => corner.dot(outward) > best.dot(outward) ? corner : best).clone();
 }
 
 export function plateSurfaceBoundary(nodeIds, positions, surface = EDGE_WIDTH / 2) {
@@ -406,17 +377,18 @@ export function plateSurfaceBoundary(nodeIds, positions, surface = EDGE_WIDTH / 
   if (points.some(point => !point)) return [];
   const options = plateSurfaceOptions(points, surface);
   if (!options) return [];
-  return points.map((point, index) => point.clone().add(cameraFacingNodeCorner(
-    points, index, options.direction, options.normal, options.halfWidth,
-  )));
+  // Native inner geometry translates every node by the same support offset:
+  // face centre for one nonzero normal axis, edge midpoint for two, corner
+  // for three. Camera tangents must never shear/expand that boundary.
+  // Native thickness, outer strips and window frames remain separate work.
+  const offset = new THREE.Vector3(...AXES.map(axis => Math.abs(options.direction[axis]) <= 1e-9 ? 0 : Math.sign(options.direction[axis]) * options.halfWidth));
+  return points.map(point => point.clone().add(offset));
 }
 
 export function plateSurfaceVertices(nodeIds, positions, surface = EDGE_WIDTH / 2) {
   const corners = plateSurfaceBoundary(nodeIds, positions, surface);
   const vertices = [];
-  for (let index = 1; index < corners.length - 1; index++) {
-    for (const point of [corners[0], corners[index], corners[index + 1]]) vertices.push(...point.toArray());
-  }
+  for (const triangle of triangulatePlatePolygon(corners)) for (const index of triangle) vertices.push(...corners[index].toArray());
   return vertices;
 }
 
@@ -434,9 +406,8 @@ export function cameraFacingPlateDirection(nodeIds, positions, cameraPosition) {
   if (points.some(point => !point)) return new THREE.Vector3(0, 0, 1);
   const center = points.reduce((sum, point) => sum.add(point), new THREE.Vector3()).multiplyScalar(1 / points.length);
   const direction = vector(cameraPosition).sub(center);
-  if (direction.lengthSq() > EPSILON) return direction.normalize();
   const normal = plateNormal(points);
-  return normal.lengthSq() > EPSILON ? normal : new THREE.Vector3(0, 0, 1);
+  return normal.lengthSq() > EPSILON ? normal.multiplyScalar(normal.dot(direction) < 0 ? -1 : 1) : new THREE.Vector3(0, 0, 1);
 }
 
 // Three.js stores the face normal with the geometry's front winding. A ray

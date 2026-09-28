@@ -6,9 +6,11 @@ import path from 'node:path';
 import { createHash } from 'node:crypto';
 import { gzipSync } from 'node:zlib';
 import { parseMesh } from '../src/assets/mesh.js';
+import { TRACK_TYPES } from '../src/editor/track-profiles.js';
 
 const root = process.argv[2];
 if (!root) throw new Error('Usage: node scripts/build-published-assets.mjs <Anymaker/rom>');
+const tracksOnly = process.argv.includes('--tracks-only');
 
 const projectRoot = process.cwd();
 const dataRoot = path.join(projectRoot, 'public', 'data');
@@ -69,8 +71,13 @@ for (const source of staticSources) {
   for (const file of fs.readdirSync(inputDirectory)) if (pattern.test(file)) sources.add(safeSource(path.posix.join(directory, file)));
 }
 
-const entries = {};
-let opaque = 0;
+// Runtime-generated tracks reference these Meshes outside component bindings.
+const trackSources = Object.values(TRACK_TYPES).map(profile => profile.mesh);
+trackSources.forEach(source => sources.add(source));
+if (tracksOnly) { sources.clear(); trackSources.forEach(source => sources.add(source)); }
+const previous = tracksOnly ? readJson(path.join(manifestRoot, 'mesh-manifest.json')) : null;
+const entries = previous ? { ...previous.entries } : {};
+let opaque = tracksOnly ? Object.entries(entries).filter(([source, entry]) => !sources.has(source) && !entry.parsed).length : 0;
 for (const source of [...sources].sort()) {
   const inputPath = path.join(root, source);
   if (!fs.existsSync(inputPath)) throw new Error(`Referenced Mesh is missing from ROM: ${source}`);

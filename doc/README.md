@@ -15,6 +15,11 @@
 | [08 编辑性能与渲染质量](08_EDITOR_PERFORMANCE.md) | 增量更新、交互降采样、详细画质参数、持久化与性能验证边界 |
 | [09 接口识别色](09_INTERFACE_COLORS.md) | 真实 Mesh 局部颜色、机身涂装隔离、动态端头遮挡与渲染回归 |
 | [10 自动机械配合](10_MECHANICAL_MATES.md) | 铰链、安装销、导轨、锁扣和拖钩的检测、编辑更新、多体原生引用及验证边界 |
+| [11 液压连接](11_HYDRAULIC_CONNECTIONS.md) | 车轮转向油路、三尺寸液压缸端点、原生双向引用、游戏代码证据和验证边界 |
+| [12 斜面组件吸附](12_INCLINED_PLACEMENT.md) | 仪表盘原生安装网格、面内整格吸附、局部 90° 旋转、导出及证据复核 |
+| [13 履带](13_TRACKS.md) | 履带端点网络、18 种轮子、三种真实 Mesh、闭环路径、静态渲染及原生往返 |
+| [14 普通皮带](14_BELTS.md) | 滑轮与三种发动机轮、反向惰轮、连续带面、原始纹理、六轮存档及游戏证据 |
+| [15 Plate 渲染与选边](15_PLATES.md) | 法线支撑偏移、任意顺序选梁、闭环共面与自交校验及未完成的厚度/边框 |
 | [资源研究记录](RESOURCE_ANALYSIS.md) | 扫描方法、Mesh 支持范围、Stormworks 方法参考 |
 | [审计报告](evidence/asset-audit.json) | ROM 计数、EXE/定义/Mesh SHA-256、解析成功和失败记录 |
 | [原生子网格变换证据](evidence/native-grid-transform.json) | 游戏 GCL 函数与常量、安装偏移、四个车门把手回归坐标 |

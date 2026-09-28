@@ -1,4 +1,5 @@
 import { fromEditorDocument } from './model.js';
+import { validateSurfaceMount } from './surface-mount.js';
 import { validateTopologyState } from './topology.js';
 import { assertGridScalar, assertGridVector, CELL_SIZE_CM } from './grid.js';
 import { validateNativeProperties } from './component-properties.js';
@@ -17,23 +18,27 @@ const GRID_ID = /^[A-Za-z0-9_-]{1,80}$/;
 
 function normalizedGrids(input, objects, topology) {
   if (input !== undefined && (!Array.isArray(input) || input.length > LIMIT)) throw new Error('Invalid grids');
-  const ids = new Set();
+  const grids = new Map();
   const add = value => {
     if (typeof value !== 'string' || !GRID_ID.test(value)) throw new Error('Invalid grid ID');
-    ids.add(value);
+    if (!grids.has(value)) grids.set(value, { id: value });
   };
   for (const grid of input || []) {
-    if (!grid || typeof grid !== 'object' || Array.isArray(grid) || Object.keys(grid).some(key => key !== 'id')) throw new Error('Invalid grid');
-    if (ids.has(grid.id)) throw new Error('Duplicate grid ID');
+    if (!grid || typeof grid !== 'object' || Array.isArray(grid) || Object.keys(grid).some(key => !['id', 'name'].includes(key))) throw new Error('Invalid grid');
+    if (grids.has(grid.id)) throw new Error('Duplicate grid ID');
     add(grid.id);
+    if (grid.name !== undefined) {
+      if (typeof grid.name !== 'string' || !grid.name.trim() || grid.name.length > 80 || /[\u0000-\u001f\u007f]/.test(grid.name)) throw new Error('Invalid grid name');
+      grids.get(grid.id).name = grid.name.trim();
+    }
   }
   for (const object of objects) if (object.gridId) add(object.gridId);
   for (const item of [...(topology?.nodes || []), ...(topology?.edges || []), ...(topology?.plates || [])]) {
     if (item.gridId !== undefined) add(item.gridId);
   }
-  if (!ids.size) ids.add('grid-1');
-  if (input === undefined && ids.size === 1 && ids.has('grid-1')) return undefined;
-  return [...ids].map(id => ({ id }));
+  if (!grids.size) add('grid-1');
+  if (input === undefined && grids.size === 1 && grids.has('grid-1')) return undefined;
+  return [...grids.values()];
 }
 
 function validateDefinitionOverride(value, type) {
@@ -118,6 +123,7 @@ export function validateDocument(input, definitions) {
       result.nativeProjected = true;
     }
     if (o.nativeAccessory !== undefined) result.nativeAccessory = validateNativeAccessory(o.nativeAccessory);
+    if (o.surfaceMount !== undefined) result.surfaceMount = validateSurfaceMount(o.surfaceMount);
     if (o.nativeAccessoryContainer !== undefined) {
       if (!result.nativeAccessory || !['acc', 'element.acc'].includes(o.nativeAccessoryContainer)) throw new Error('Invalid native accessory container at ' + index);
       result.nativeAccessoryContainer = o.nativeAccessoryContainer;
@@ -132,7 +138,7 @@ export function validateDocument(input, definitions) {
       const vector = o[field];
       if (!vector || !axes.every(a => own(vector, a) && typeof vector[a] === 'number' && Number.isFinite(vector[a]) && Math.abs(vector[a]) <= 10000)) throw new Error('Invalid transform at ' + index + '.' + field);
       if (field === 'scale' && axes.some(a => vector[a] <= 0 || vector[a] > 100)) throw new Error('Scale must be in (0, 100]');
-      result[field] = field === 'position' && !result.nativeProjected
+      result[field] = field === 'position' && !result.nativeProjected && !result.surfaceMount
         ? assertGridVector(vector, '组件位置')
         : Object.fromEntries(axes.map(a => [a, vector[a]]));
     }
@@ -196,7 +202,7 @@ export function escapeXml(value) {
 }
 
 export function toIntermediateXml(document) {
-  for (const object of document.objects || []) { if (!object.nativeProjected) assertGridVector(object.position, '组件位置'); if (object.mirror) assertGridScalar(object.mirror.offset, '镜像偏移'); }
+  for (const object of document.objects || []) { if (!object.nativeProjected && !object.surfaceMount) assertGridVector(object.position, '组件位置'); if (object.mirror) assertGridScalar(object.mirror.offset, '镜像偏移'); }
   validateTopologyState(document.topology);
   const vector = (name, v) => '<' + name + ' ' + axes.map(a => a + '="' + v[a].toFixed(6) + '"').join(' ') + '/>';
   const components = document.objects.map(o => {

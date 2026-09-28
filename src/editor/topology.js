@@ -3,13 +3,12 @@
 import { AXES, assertGridVector, cellToWorld, cellsBetween, greatestCommonDivisor, worldToCell } from './grid.js';
 import { validateLinks } from './connections.js';
 import { validateMechanicalConnections } from './mechanical-connections.js';
+import { triangulatePlatePolygon, validatePlatePolygon } from './plate-polygon.js';
 
 const EPSILON = 1e-6;
 const clone = value => structuredClone(value);
 const position = node => ({ x: Number(node.position?.x ?? 0), y: Number(node.position?.y ?? 0), z: Number(node.position?.z ?? 0) });
 const sub = (a, b) => ({ x: a.x - b.x, y: a.y - b.y, z: a.z - b.z });
-const cross = (a, b) => ({ x: a.y * b.z - a.z * b.y, y: a.z * b.x - a.x * b.z, z: a.x * b.y - a.y * b.x });
-const dot = (a, b) => a.x * b.x + a.y * b.y + a.z * b.z;
 const length = value => Math.hypot(value.x, value.y, value.z);
 const same = (a, b) => length(sub(a, b)) <= EPSILON;
 const edgeKey = (a, b) => [a, b].sort().join('::');
@@ -29,8 +28,8 @@ function sameBoundary(a, b) {
   if (a.length !== b.length) return false;
   return a.some((start, index) => {
     if (start !== b[0]) return false;
-    const forward = a.every((id, offset) => id === b[(index + offset) % b.length]);
-    const reverse = a.every((id, offset) => id === b[(index - offset + b.length) % b.length]);
+    const forward = b.every((id, offset) => id === a[(index + offset) % a.length]);
+    const reverse = b.every((id, offset) => id === a[(index - offset + a.length) % a.length]);
     return forward || reverse;
   });
 }
@@ -268,13 +267,7 @@ export function validatePlate(nodeIds, nodes, normalOffset = 0) {
   if (!Number.isFinite(normalOffset) || Math.abs(normalOffset) > 10000) throw new Error('面板法向偏移无效');
   const byId = new Map(nodes.map(node => [node.id, node]));
   const points = nodeIds.map(id => { const node = byId.get(id); if (!node) throw new Error('面板引用未知节点：' + id); return position(node); });
-  let normal = null;
-  for (let first = 1; first < points.length - 1 && !normal; first++) for (let second = first + 1; second < points.length; second++) {
-    const candidate = cross(sub(points[first], points[0]), sub(points[second], points[0]));
-    if (length(candidate) > EPSILON) normal = candidate;
-  }
-  if (!normal) throw new Error('面板节点不能共线');
-  for (const point of points.slice(3)) if (Math.abs(dot(normal, sub(point, points[0]))) > EPSILON) throw new Error('面板节点必须共面');
+  const { normal } = validatePlatePolygon(points);
   return { points, normal };
 }
 
@@ -331,6 +324,6 @@ export function createGlassPlateFromEdges(plates, edgeIds, edges, nodes, propert
 }
 
 export function triangulatePlate(plate, nodes) {
-  validatePlate(plate.nodeIds, nodes);
-  return Array.from({ length: plate.nodeIds.length - 2 }, (_, index) => [plate.nodeIds[0], plate.nodeIds[index + 1], plate.nodeIds[index + 2]]);
+  const { points } = validatePlate(plate.nodeIds, nodes);
+  return triangulatePlatePolygon(points).map(triangle => triangle.map(index => plate.nodeIds[index]));
 }

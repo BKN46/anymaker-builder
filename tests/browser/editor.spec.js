@@ -2,9 +2,716 @@ import { test, expect } from '@playwright/test';
 import { meshFixture, modelGlbFixture } from '../fixtures.js';
 import { readFileSync } from 'node:fs';
 import { hingeAssemblyFixture } from '../mechanical-fixtures.js';
-import { parseNativePair } from '../../src/native/anymaker-data.js';
+import { hydraulicFixture } from '../hydraulic-fixtures.js';
+import { inclinedPanelFixture } from '../inclined-fixtures.js';
+import { trackFixture } from '../track-fixtures.js';
+import { beltFixture, sampleBeltData } from '../belt-fixtures.js';
+import { disconnectedSubgridsFixture } from '../subgrid-fixtures.js';
+import { structureTransformFixture } from '../selection-transform-fixtures.js';
+import { nonplanarNativeFixture } from '../native-import-fixtures.js';
+import { parseNativePair, toNativePairFromEditor } from '../../src/native/anymaker-data.js';
 import { toEditorDocument } from '../../src/editor/model.js';
+import { decodeProjectCode } from '../../src/editor/project-code.js';
 import { observeRendering, observePointerRay, renderedIdentities, renderedInterfaceSamples, projectWorldPoint, renderedPlacementState } from './render-observer.js';
+
+async function openStructureTransformFixture(page, document = structureTransformFixture()) {
+  await observeRendering(page);
+  await page.goto('./'); await expect(page.locator('#viewport')).toHaveAttribute('data-ready', 'true');
+  await page.locator('#file-input').setInputFiles({ name: 'structure-transform.json', mimeType: 'application/json', buffer: Buffer.from(JSON.stringify(document)) });
+  await expect(page.locator('#topology-count')).toHaveText(`${document.topology.nodes.length} 节点 · ${document.topology.edges.length} 梁 · ${document.topology.plates.length} 面板` + (document.topology.links.length ? ' · ' + document.topology.links.length + ' 连接' : ''));
+  await openRightSidebar(page); await page.locator('#right-tab-inspector').click();
+  await page.locator('#fit-btn').click(); await page.locator('[data-view="front"]').click();
+  await page.locator('[data-tool="select"]').click();
+}
+
+async function clickStructurePoint(page, position, shift = false) {
+  const point = await projectWorldPoint(page, position);
+  if (shift) await page.keyboard.down('Shift');
+  await page.mouse.click(point.x, point.y);
+  if (shift) await page.keyboard.up('Shift');
+}
+
+async function structureGizmoDrag(page, mode) {
+  return page.evaluate(mode => {
+    const { scene, renderer, camera } = window.__renderTestState;
+    const helper = scene.children.find(object => object.isTransformControlsRoot); helper.updateMatrixWorld(true);
+    const control = helper.controls; const axis = mode === 'rotate' ? 'Z' : 'X';
+    const handle = control._gizmo.gizmo[mode].children.find(object => object.name === axis && object.visible);
+    const point = handle.position.clone();
+    if (mode === 'rotate') point.fromBufferAttribute(handle.geometry.attributes.position, 16);
+    else { handle.geometry.computeBoundingBox(); handle.geometry.boundingBox.getCenter(point); }
+    handle.localToWorld(point).project(camera);
+    const origin = control.worldPosition.clone().project(camera); const rect = renderer.domElement.getBoundingClientRect();
+    const x = rect.x + (point.x + 1) * rect.width / 2; const y = rect.y + (1 - point.y) * rect.height / 2;
+    const cx = rect.x + (origin.x + 1) * rect.width / 2; const cy = rect.y + (1 - origin.y) * rect.height / 2;
+    return { x, y, endX: mode === 'rotate' ? cx - (y - cy) : x + 85, endY: mode === 'rotate' ? cy + (x - cx) : y, camera: camera.position.toArray() };
+  }, mode);
+}
+
+function coveredNodeFixture() {
+  const fixture = structureTransformFixture();
+  const nodes = [[-.08, -.16], [.64, -.16], [.64, .64], [-.08, .64]].map(([x, y], i) => ({ id: 'cover-' + i, gridId: 'grid-1', position: { x, y, z: .16 } }));
+  fixture.topology.nodes.push(...nodes);
+  fixture.topology.plates.push({ id: 'cover', gridId: 'grid-1', nodeIds: nodes.map(node => node.id), normalOffset: 0, surfaceDirection: { x: 0, y: 0, z: 1 } });
+  return fixture;
+}
+
+test('node overlay remains movable behind a body plate with beam selection disabled', async ({ page }) => {
+  await openStructureTransformFixture(page, coveredNodeFixture()); const before = await saveProject(page);
+  await page.locator('#selection-filter-toggle').click();
+  await page.locator('[data-selectable-kind="edge"]').uncheck();
+  await page.locator('#selection-filter-toggle').click();
+  await page.locator('[data-tool="translate"]').click();
+  await clickStructurePoint(page, before.topology.nodes[0].position);
+  await expect.poll(() => page.evaluate(() => window.__renderTestState.scene.children.find(object => object.isTransformControlsRoot).controls.object?.userData.nodeId)).toBe('n0');
+  const drag = await structureGizmoDrag(page, 'translate');
+  await page.mouse.move(drag.x, drag.y); await page.mouse.down(); await page.mouse.move(drag.x - 85, drag.y, { steps: 20 }); await page.mouse.up();
+  await expect(page.locator('#save-status')).toContainText('已移动节点');
+  const moved = await saveProject(page);
+  expect(moved.topology.nodes).toHaveLength(before.topology.nodes.length);
+  expect(moved.topology.nodes[0].position.x).toBeLessThan(before.topology.nodes[0].position.x);
+  expect(moved.topology.edges).toEqual(before.topology.edges); expect(moved.topology.plates).toEqual(before.topology.plates);
+  await page.locator('#undo-btn').click(); expect((await saveProject(page)).topology).toEqual(before.topology);
+});
+
+test('node editing keeps helpers selectable beyond the passive distance limit', async ({ page }) => {
+  const fixture = structureTransformFixture();
+  for (const node of fixture.topology.nodes) for (const axis of ['x', 'y', 'z']) node.position[axis] *= 20;
+  fixture.topology.nodes.find(node => node.id === 'n4').hidden = true;
+  await openStructureTransformFixture(page, fixture);
+  const visibleNodes = () => page.evaluate(() => window.__renderTestState.scene.getObjectByName('topology-overlay').children.filter(object => object.userData.topology === 'node' && object.visible).map(object => object.userData.nodeId).sort());
+  await expect.poll(visibleNodes).toEqual([]);
+  await page.locator('#selection-filter-toggle').click(); await page.locator('[data-selectable-kind="edge"]').uncheck(); await page.locator('#selection-filter-toggle').click();
+  await page.locator('[data-tool="translate"]').click();
+  await expect.poll(visibleNodes).toEqual(['n0', 'n1', 'n2', 'n3']);
+  await clickStructurePoint(page, fixture.topology.nodes[0].position);
+  await expect.poll(() => page.evaluate(() => window.__renderTestState.scene.children.find(object => object.isTransformControlsRoot).controls.object?.userData.nodeId)).toBe('n0');
+  const drag = await structureGizmoDrag(page, 'translate');
+  await page.mouse.move(drag.x, drag.y); await page.mouse.down(); await page.mouse.move(drag.x - 40, drag.y, { steps: 12 }); await page.mouse.up();
+  await expect(page.locator('#save-status')).toContainText('已移动节点');
+  const moved = await saveProject(page);
+  expect(moved.topology.nodes[0].position.x).toBeLessThan(fixture.topology.nodes[0].position.x);
+  expect(moved.topology.edges).toEqual(fixture.topology.edges); expect(moved.topology.plates).toEqual(fixture.topology.plates);
+  await page.locator('#undo-btn').click();
+  await page.locator('#nodes-btn').click(); await expect.poll(visibleNodes).toEqual([]);
+  await page.locator('[data-tool="node"]').click(); await expect.poll(visibleNodes).toEqual([]);
+  await page.locator('#nodes-btn').click(); await expect.poll(visibleNodes).toEqual(['n0', 'n1', 'n2', 'n3']);
+  await clickStructurePoint(page, fixture.topology.nodes[0].position);
+  await expect(page.locator('#save-status')).toContainText('已选择节点');
+  await page.locator('[data-tool="select"]').click(); await expect.poll(visibleNodes).toEqual([]);
+});
+
+test('native node overlays can be selected through the body with beam selection disabled', async ({ page }, testInfo) => {
+  await observeRendering(page); await page.goto('./'); await expect(page.locator('#viewport')).toHaveAttribute('data-ready', 'true');
+  const sample = process.env.ANYMAKER_NODE_SAMPLE;
+  const pair = sample ? { data: JSON.parse(readFileSync(sample + '.data', 'utf8')), meta: JSON.parse(readFileSync(sample + '.meta', 'utf8')) } : toNativePairFromEditor(coveredNodeFixture());
+  await page.locator('#native-input').setInputFiles(['data', 'meta'].map(extension => ({ name: 'node-overlay.' + extension, mimeType: 'application/json', buffer: Buffer.from(JSON.stringify(pair[extension])) })));
+  await expect(page.locator('#native-summary')).toContainText('已导入');
+  if (await page.locator('#native-import-notice').isVisible()) await page.locator('#native-import-notice button').click();
+  await page.locator('[data-view="' + (sample ? 'iso' : 'front') + '"]').click();
+  await page.locator('#selection-filter-toggle').click(); await page.locator('[data-selectable-kind="edge"]').uncheck(); await page.locator('#selection-filter-toggle').click();
+  await page.locator('[data-tool="translate"]').click();
+  await expect.poll(() => page.evaluate(() => window.__renderTestState.scene.getObjectByName('topology-overlay').children.filter(object => object.userData.topology === 'node' && object.visible).length)).toBeGreaterThan(0);
+  const candidates = await page.evaluate(() => {
+    const { scene, camera, renderer } = window.__renderTestState; scene.updateMatrixWorld(true); camera.updateWorldMatrix(true, false);
+    const layer = scene.getObjectByName('topology-overlay'); const rect = renderer.domElement.getBoundingClientRect();
+    const controls = scene.children.find(object => object.isTransformControlsRoot).controls; const ray = new (controls.getRaycaster().constructor)();
+    const markers = layer.children.filter(object => object.userData.topology === 'node' && object.visible);
+    const projected = markers.map(marker => { const point = marker.position.clone().project(camera); return { marker, id: marker.userData.nodeId, x: rect.x + (point.x + 1) * rect.width / 2, y: rect.y + (1 - point.y) * rect.height / 2, point }; });
+    return projected.filter(item => {
+      if (item.point.z < -1 || item.point.z > 1 || item.x < rect.x + 250 || item.x > rect.right - 170 || item.y < rect.y + 210 || item.y > rect.bottom - 80) return false;
+      if (projected.some(other => other !== item && Math.hypot(other.x - item.x, other.y - item.y) < 1)) return false;
+      ray.setFromCamera(item.point, camera); ray.far = item.marker.position.distanceTo(ray.ray.origin) - .06;
+      const solids = [...scene.children.filter(object => object.visible && object.userData.id), ...layer.children.filter(object => object.visible && ['edge', 'plate'].includes(object.userData.topology) && !object.userData.nodeIds?.includes(item.id))];
+      return ray.intersectObjects(solids, true).length > 0;
+    }).slice(0, 3).map(({ id, x, y }) => ({ id, x, y }));
+  });
+  expect(candidates.length).toBeGreaterThan(0);
+  for (const target of candidates) {
+    await page.keyboard.press('Escape'); await page.locator('[data-tool="translate"]').click(); await page.mouse.click(target.x, target.y);
+    await expect.poll(() => page.evaluate(() => window.__renderTestState.scene.children.find(object => object.isTransformControlsRoot).controls.object?.userData.nodeId)).toBe(target.id);
+  }
+  await page.locator('#viewport').screenshot({ path: testInfo.outputPath('native-node-overlay.png') });
+});
+
+test('rotate toolbar separates manual rotation and mirroring and applies centered rotations with history', async ({ page }, testInfo) => {
+  await openStructureTransformFixture(page);
+  await page.locator('[data-tool="rotate"]').click();
+  await expect(page.locator('#rotate-toolbar #manual-rotation')).toBeVisible();
+  await expect(page.locator('#rotate-toolbar #mirror-toolbar')).toBeVisible();
+  await expect(page.locator('#rotate-selection')).toBeDisabled();
+  await clickStructurePoint(page, { x: .32, y: .24, z: .04 });
+  const before = await saveProject(page); const count = await page.locator('#history-list button').count();
+  await expect(page.locator('#rotate-angle')).toHaveValue('90');
+  for (const [plane, angle] of [['xy', '90'], ['xz', '180'], ['yz', '270']]) {
+    await page.locator('#rotate-plane').selectOption(plane); await page.locator('#rotate-angle').selectOption(angle);
+    await page.locator('#rotate-selection').click(); await expect(page.locator('#save-status')).toHaveText('已旋转选中内容');
+    const rotated = await saveProject(page); expect(rotated.topology.plates[0].nodeIds).not.toEqual(before.topology.plates[0].nodeIds);
+    expect(rotated.topology.edges).toEqual(before.topology.edges);
+    const vertices = rotated.topology.plates[0].nodeIds.map(id => rotated.topology.nodes.find(node => node.id === id).position);
+    for (const [axis, center] of [['x', .32], ['y', .24], ['z', 0]]) expect(vertices.reduce((sum, point) => sum + point[axis], 0) / vertices.length).toBeCloseTo(center);
+    await expect(page.locator('#history-list button')).toHaveCount(count + 1);
+    await page.locator('#undo-btn').click(); expect((await saveProject(page)).topology).toEqual(before.topology);
+    await page.locator('#redo-btn').click(); expect((await saveProject(page)).topology).toEqual(rotated.topology);
+    await page.locator('#undo-btn').click();
+    await clickStructurePoint(page, { x: .32, y: .24, z: .04 });
+  }
+  await expect(page.locator('#mirror-mode-toggle')).not.toBeChecked();
+  await page.locator('#mirror-selected').click(); await expect(page.locator('#save-status')).toHaveText('已按当前平面镜像选中内容');
+  const mirrored = await saveProject(page); expect(mirrored.topology.plates).toHaveLength(2);
+  await expect(page.locator('#mirror-mode-toggle')).not.toBeChecked();
+  await page.locator('#language-select').selectOption('en');
+  await expect(page.getByRole('group', { name: 'Manual rotation', exact: true })).toBeVisible();
+  await expect(page.getByRole('button', { name: 'Apply rotation', exact: true })).toBeEnabled();
+  await page.locator('#viewport').screenshot({ path: testInfo.outputPath('rotate-toolbar.png') });
+});
+
+for (const entry of ['move', 'select-then-move']) test('node movement ' + entry + ' edits the existing beam endpoint without detaching shared structure', async ({ page }) => {
+  const errors = []; page.on('pageerror', error => errors.push(error.message));
+  const fixture = structureTransformFixture();
+  // A thick beam covers its own node marker in the raycast, even though the
+  // marker is rendered as an overlay and should remain directly editable.
+  if (entry === 'move') fixture.topology.edges.forEach(edge => { edge.size = 3; });
+  await openStructureTransformFixture(page, fixture);
+  const before = await saveProject(page); const node = before.topology.nodes.find(value => value.id === 'n0');
+  const count = await page.locator('#history-list button').count();
+  if (entry === 'move') await page.locator('[data-tool="translate"]').click();
+  await clickStructurePoint(page, node.position);
+  if (entry === 'select-then-move') await page.keyboard.press('g');
+  await expect.poll(() => page.evaluate(() => {
+    const controls = window.__renderTestState.scene.children.find(object => object.isTransformControlsRoot).controls;
+    return controls.object?.userData.nodeId;
+  })).toBe(node.id);
+  expect(await page.evaluate(() => !!window.__renderTestState.scene.getObjectByName('structure-transform-pivot'))).toBe(false);
+  const drag = await structureGizmoDrag(page, 'translate');
+  await page.mouse.move(drag.x, drag.y); await page.mouse.down(); await page.mouse.move(drag.x - 85, drag.y, { steps: 20 });
+  await expect(page.locator('#history-list button')).toHaveCount(count);
+  await page.mouse.up();
+  await expect(page.locator('#save-status')).toContainText('已移动节点');
+  await expect(page.locator('#history-list button')).toHaveCount(count + 1);
+  const after = await saveProject(page);
+  expect(after.topology.nodes).toHaveLength(before.topology.nodes.length);
+  expect(after.topology.nodes.find(value => value.id === node.id).position.x).toBeLessThan(node.position.x);
+  expect(after.topology.nodes.filter(value => value.id !== node.id)).toEqual(before.topology.nodes.filter(value => value.id !== node.id));
+  expect(after.topology.edges).toEqual(before.topology.edges); expect(after.topology.plates).toEqual(before.topology.plates);
+  expect(await page.evaluate(() => window.__renderTestState.camera.position.toArray())).toEqual(drag.camera);
+  await page.locator('#undo-btn').click(); expect((await saveProject(page)).topology).toEqual(before.topology);
+  await page.locator('#redo-btn').click(); expect((await saveProject(page)).topology).toEqual(after.topology);
+  expect(errors).toEqual([]);
+});
+
+test('node movement tool retains click-to-move and merge with undo', async ({ page }) => {
+  await openStructureTransformFixture(page); const before = await saveProject(page);
+  await page.locator('[data-tool="node"]').click();
+  await clickStructurePoint(page, before.topology.nodes.find(node => node.id === 'n4').position);
+  await expect(page.locator('#save-status')).toContainText('已选择节点');
+  await clickStructurePoint(page, { x: .96, y: .08, z: 0 });
+  await expect(page.locator('#save-status')).toContainText('已移动节点');
+  const moved = await saveProject(page);
+  expect(moved.topology.nodes.find(node => node.id === 'n4').position).toEqual({ x: .96, y: .08, z: 0 });
+  expect(moved.topology.edges).toEqual(before.topology.edges); expect(moved.topology.plates).toEqual(before.topology.plates);
+  await clickStructurePoint(page, { x: .96, y: .08, z: 0 });
+  await clickStructurePoint(page, before.topology.nodes.find(node => node.id === 'n1').position);
+  await expect(page.locator('#save-status')).toContainText('已合并节点');
+  const merged = await saveProject(page);
+  expect(merged.topology.nodes).toHaveLength(4); expect(merged.topology.edges).toHaveLength(4);
+  expect(merged.topology.plates).toEqual(before.topology.plates);
+  await page.locator('#undo-btn').click(); expect((await saveProject(page)).topology).toEqual(moved.topology);
+});
+
+test('structural selection inspector moves and rotates whole plates and beams without pulling shared boundaries', async ({ page }) => {
+  const errors = []; page.on('pageerror', error => errors.push(error.message));
+  await openStructureTransformFixture(page); const original = await saveProject(page);
+  const count = await page.locator('#history-list button').count();
+  await clickStructurePoint(page, { x: .32, y: .24, z: .04 });
+  await expect(page.locator('#inspector-content')).toContainText('已选择 1 个结构对象');
+  await page.getByLabel('selection-move-z', { exact: true }).fill('2'); await page.getByLabel('selection-move-z', { exact: true }).press('Tab');
+  await expect(page.locator('#save-status')).toContainText('已移动选中内容');
+  const moved = await saveProject(page); expect(moved.topology.nodes).toHaveLength(9);
+  expect(moved.topology.edges).toEqual(original.topology.edges);
+  for (const node of original.topology.nodes) expect(moved.topology.nodes.find(value => value.id === node.id)).toEqual(node);
+  for (const id of moved.topology.plates[0].nodeIds) expect(moved.topology.nodes.find(node => node.id === id).position.z).toBeCloseTo(.16);
+  await page.getByLabel('selection-rotate-y', { exact: true }).fill('90'); await page.getByLabel('selection-rotate-y', { exact: true }).press('Tab');
+  await expect(page.locator('#save-status')).toContainText('已旋转选中内容');
+  const rotated = await saveProject(page); expect(rotated.topology.plates[0].surfaceDirection.x).toBeCloseTo(1);
+  expect(rotated.topology.plates[0].color_front).toBe('#aa2244'); expect(rotated.topology.plates[0].color_back).toBe('#22aa44');
+  expect(rotated.topology.edges).toEqual(original.topology.edges);
+  expect(await page.locator('#history-list button').count()).toBe(count + 2);
+  await page.getByLabel('selection-rotate-y', { exact: true }).fill('45'); await page.getByLabel('selection-rotate-y', { exact: true }).press('Tab');
+  await expect(page.locator('#save-status')).toContainText('90°'); expect((await saveProject(page)).topology).toEqual(rotated.topology);
+  expect(await page.locator('#history-list button').count()).toBe(count + 2);
+  await page.locator('#undo-btn').click(); expect((await saveProject(page)).topology).toEqual(moved.topology);
+  await page.locator('#undo-btn').click(); expect((await saveProject(page)).topology).toEqual(original.topology);
+  await page.getByRole('button', { name: '隐藏节点', exact: true }).click();
+  await page.locator('[data-tool="translate"]').click();
+  await clickStructurePoint(page, { x: .32, y: .08, z: 0 });
+  await expect(page.locator('#inspector-content')).toContainText('已选择 1 个结构对象');
+  await page.getByLabel('selection-move-x', { exact: true }).fill('2'); await page.getByLabel('selection-move-x', { exact: true }).press('Tab');
+  await expect(page.locator('#save-status')).toContainText('已移动选中内容');
+  const beam = await saveProject(page); const edge = beam.topology.edges[0];
+  expect(beam.topology.plates).toEqual(original.topology.plates); expect(beam.topology.edges.slice(1)).toEqual(original.topology.edges.slice(1));
+  const a = beam.topology.nodes.find(node => node.id === edge.a).position; const b = beam.topology.nodes.find(node => node.id === edge.b).position;
+  expect(a.x).toBeCloseTo(.32); expect(b.x).toBeCloseTo(.64); expect(b.x - a.x).toBeCloseTo(.32);
+  await page.locator('#file-input').setInputFiles({ name: 'moved-structure.json', mimeType: 'application/json', buffer: Buffer.from(JSON.stringify(beam)) });
+  await expect(page.locator('#topology-count')).toHaveText('7 节点 · 5 梁 · 1 面板');
+  expect((await saveProject(page)).topology).toEqual(beam.topology); expect(errors).toEqual([]);
+});
+
+for (const mode of ['translate', 'rotate']) test('structural selection gizmo ' + mode + ' commits once and cancels previews without moving the camera', async ({ page }) => {
+  const errors = []; page.on('pageerror', error => errors.push(error.message));
+  await openStructureTransformFixture(page); const before = await saveProject(page);
+  await clickStructurePoint(page, mode === 'translate' ? { x: .32, y: .08, z: 0 } : { x: .32, y: .24, z: .04 });
+  await page.locator('[data-tool="' + mode + '"]').click();
+  await expect.poll(() => page.evaluate(() => !!window.__renderTestState.scene.getObjectByName('structure-transform-pivot'))).toBe(true);
+  const count = await page.locator('#history-list button').count(); const drag = await structureGizmoDrag(page, mode);
+  await page.mouse.move(drag.x, drag.y); await page.mouse.down(); await page.mouse.move(drag.endX, drag.endY, { steps: 24 });
+  expect(await page.evaluate(() => window.__renderTestState.scene.children.find(object => object.isTransformControlsRoot).controls.dragging)).toBe(true);
+  expect(await page.locator('#history-list button').count()).toBe(count);
+  await page.mouse.up(); await expect(page.locator('#history-list button')).toHaveCount(count + 1);
+  const after = await saveProject(page); expect(after.topology).not.toEqual(before.topology);
+  expect(await page.evaluate(() => window.__renderTestState.camera.position.toArray())).toEqual(drag.camera);
+  if (mode === 'rotate') {
+    expect(after.topology.edges).toEqual(before.topology.edges);
+    const points = after.topology.plates[0].nodeIds.map(id => after.topology.nodes.find(node => node.id === id).position);
+    expect(Math.hypot(points[0].x - points[1].x, points[0].y - points[1].y)).toBeCloseTo(.32);
+  } else expect(after.topology.plates).toEqual(before.topology.plates);
+  if (mode === 'translate') {
+    const cancelled = await structureGizmoDrag(page, mode);
+    await page.mouse.move(cancelled.x, cancelled.y); await page.mouse.down(); await page.mouse.move(cancelled.endX, cancelled.endY, { steps: 12 });
+    await page.locator('#viewport canvas').dispatchEvent('pointercancel', { pointerId: 1, button: 0 }); await page.mouse.up();
+    expect((await saveProject(page)).topology).toEqual(after.topology);
+    expect(await page.locator('#history-list button').count()).toBe(count + 1);
+  }
+  const cancel = await structureGizmoDrag(page, mode);
+  await page.mouse.move(cancel.x, cancel.y); await page.mouse.down(); await page.mouse.move(cancel.endX, cancel.endY, { steps: 12 });
+  await page.keyboard.press('Escape'); await page.mouse.up();
+  expect((await saveProject(page)).topology).toEqual(after.topology); expect(await page.locator('#history-list button').count()).toBe(count + 1);
+  expect(await page.evaluate(() => window.__renderTestState.scene.children.find(object => object.isTransformControlsRoot).controls.dragging)).toBe(false);
+  await page.locator('#undo-btn').click(); expect((await saveProject(page)).topology).toEqual(before.topology);
+  await page.locator('#redo-btn').click(); expect((await saveProject(page)).topology).toEqual(after.topology); expect(errors).toEqual([]);
+});
+
+test('structural selection manual mirror copies mixed contents at the active plane with one history entry', async ({ page }) => {
+  const errors = []; page.on('pageerror', error => errors.push(error.message));
+  const fixture = structureTransformFixture();
+  fixture.objects = [.16, .64].map((x, i) => ({ id: 'shaft-' + i, type: 'drive_shaft', gridId: 'grid-1', position: { x, y: .8, z: 0 }, rotation: { x: 0, y: 0, z: 0 }, scale: { x: 1, y: 1, z: 1 } }));
+  fixture.topology.links = [{ id: 'shaft-link', kind: 'mechanical', from: { componentId: 'shaft-0', port: 0 }, to: { componentId: 'shaft-1', port: 0 }, points: [] }];
+  await openStructureTransformFixture(page, fixture); const original = await saveProject(page);
+  await clickStructurePoint(page, { x: .32, y: .08, z: 0 });
+  await clickStructurePoint(page, { x: .32, y: .24, z: .04 }, true);
+  for (const id of ['shaft-0', 'shaft-1']) {
+    const point = await page.evaluate(id => {
+      const { scene, camera, renderer } = window.__renderTestState; const object = scene.children.find(object => object.userData.id === id);
+      let mesh; object.traverse(child => { if (child.isMesh && !mesh) mesh = child; });
+      mesh.geometry.computeBoundingBox(); const p = mesh.geometry.boundingBox.getCenter(mesh.position.clone()); mesh.localToWorld(p).project(camera);
+      const r = renderer.domElement.getBoundingClientRect(); return { x: r.x + (p.x + 1) * r.width / 2, y: r.y + (1 - p.y) * r.height / 2 };
+    }, id);
+    await page.keyboard.down('Shift'); await page.mouse.click(point.x, point.y); await page.keyboard.up('Shift');
+  }
+  await expect(page.locator('#inspector-content')).toContainText('已选择 2 个组件和 2 个结构对象');
+  await page.locator('#mirror-action').click(); await page.locator('[data-mirror-axis="y"]').click();
+  await page.locator('#mirror-offset-input').fill('-2'); await page.locator('#mirror-offset-input').press('Tab');
+  const count = await page.locator('#history-list button').count();
+  await expect(page.locator('#mirror-selected')).toHaveText('手动镜像'); await page.locator('#mirror-selected').click();
+  await expect(page.locator('#history-list button')).toHaveCount(count + 1);
+  const mirrored = await saveProject(page); expect(mirrored.objects).toHaveLength(4); expect(mirrored.topology.edges).toHaveLength(6); expect(mirrored.topology.plates).toHaveLength(2); expect(mirrored.topology.links).toHaveLength(2);
+  expect(mirrored.objects.slice(0, 2)).toEqual(original.objects); expect(mirrored.objects[2].position.y).toBeCloseTo(-1.12);
+  expect(mirrored.topology.links[1].from.componentId).toBe(mirrored.objects[2].id); expect(mirrored.topology.links[1].to.componentId).toBe(mirrored.objects[3].id);
+  const copy = mirrored.topology.plates[1]; expect(copy.col_front).toBe(3); expect(copy.col_back).toBe(5);
+  await expect(page.locator('#mirror-selected')).toBeEnabled(); await page.locator('#mirror-selected').click();
+  await expect(page.locator('#save-status')).toContainText('镜像位置已有对应内容'); expect(await page.locator('#history-list button').count()).toBe(count + 1);
+  expect((await saveProject(page)).topology).toEqual(mirrored.topology);
+  await page.getByLabel('selection-move-x', { exact: true }).fill('1'); await page.getByLabel('selection-move-x', { exact: true }).press('Tab');
+  await expect(page.locator('#save-status')).toContainText('已移动选中内容');
+  const translated = await saveProject(page);
+  expect(translated.objects[0].position.x).toBeCloseTo(mirrored.objects[0].position.x + .08);
+  expect(translated.objects[2].position.x).toBeCloseTo(mirrored.objects[2].position.x + .08);
+  expect(translated.topology.edges.slice(1, 5)).toEqual(mirrored.topology.edges.slice(1, 5));
+  for (let i = 0; i < 2; i++) {
+    const oldPoints = mirrored.topology.plates[i].nodeIds.map(id => mirrored.topology.nodes.find(node => node.id === id).position);
+    const newPoints = translated.topology.plates[i].nodeIds.map(id => translated.topology.nodes.find(node => node.id === id).position);
+    newPoints.forEach((point, j) => { expect(point.x).toBeCloseTo(oldPoints[j].x + .08); expect(point.y).toBeCloseTo(oldPoints[j].y); });
+  }
+  await page.locator('#undo-btn').click(); expect((await saveProject(page)).topology).toEqual(mirrored.topology);
+  await page.locator('#language-select').selectOption('en'); await expect(page.locator('#mirror-selected')).toHaveText('Mirror selection');
+  await page.locator('#undo-btn').click(); expect((await saveProject(page)).topology).toEqual(original.topology);
+  await page.locator('#redo-btn').click(); expect((await saveProject(page)).topology).toEqual(mirrored.topology); expect(errors).toEqual([]);
+});
+
+test('structural selection undo during a mixed drag restores committed component poses and structure', async ({ page }) => {
+  const fixture = structureTransformFixture();
+  fixture.objects = [{ id: 'mixed-shaft', type: 'drive_shaft', gridId: 'grid-1', position: { x: .32, y: .64, z: 0 }, rotation: { x: 0, y: 0, z: 0 }, scale: { x: 1, y: 1, z: 1 } }];
+  await openStructureTransformFixture(page, fixture); const before = await saveProject(page);
+  await clickStructurePoint(page, { x: .32, y: .08, z: 0 });
+  await clickStructurePoint(page, { x: .32, y: .64, z: 0 }, true);
+  await expect(page.locator('#inspector-content')).toContainText('已选择 1 个组件和 1 个结构对象');
+  await page.getByLabel('selection-move-x', { exact: true }).fill('1'); await page.getByLabel('selection-move-x', { exact: true }).press('Tab');
+  await expect(page.locator('#save-status')).toContainText('已移动选中内容');
+  const committed = await saveProject(page);
+  await page.locator('[data-tool="translate"]').click(); const drag = await structureGizmoDrag(page, 'translate');
+  await page.mouse.move(drag.x, drag.y); await page.mouse.down(); await page.mouse.move(drag.endX, drag.endY, { steps: 16 });
+  await expect.poll(() => page.evaluate(() => window.__renderTestState.scene.children.find(object => object.isTransformControlsRoot).controls.dragging)).toBe(true);
+  await page.keyboard.press('Control+z'); await page.mouse.up(); await expect(page.locator('#save-status')).toContainText('已撤销');
+  const undone = await saveProject(page); expect(undone.objects).toEqual(before.objects); expect(undone.topology).toEqual(before.topology);
+  await page.locator('#redo-btn').click(); const redone = await saveProject(page);
+  expect(redone.objects).toEqual(committed.objects); expect(redone.topology).toEqual(committed.topology);
+});
+
+test('ordinary native belt renders six wheels and refreshes the full loop through edits and export', async ({ page }) => {
+  await observeRendering(page);
+  const errors = []; page.on('pageerror', error => errors.push(error.message));
+  await page.goto('./'); await expect(page.locator('#viewport')).toHaveAttribute('data-ready', 'true');
+  const pair = { data: sampleBeltData(JSON.parse(readFileSync('test-vehicle/vehicle.data'))), meta: JSON.parse(readFileSync('test-vehicle/vehicle.meta')) };
+  await page.locator('#native-input').setInputFiles(['data', 'meta'].map(extension => ({ name: 'belt.' + extension, mimeType: 'application/json', buffer: Buffer.from(JSON.stringify(pair[extension])) })));
+  await expect(page.locator('#object-count')).toHaveText('6 个组件');
+  const rendered = () => page.evaluate(() => {
+    const object = window.__renderTestState.scene.getObjectByName('belt-loop'); const mesh = object?.children[0];
+    return object ? { uuid: object.uuid, visible: object.visible, sections: object.userData.beltSectionCount, texture: mesh.material.map?.name, vertices: mesh.geometry.attributes.position.count, indices: mesh.geometry.index.count, bounds: mesh.geometry.boundingBox.min.toArray() } : null;
+  });
+  await expect.poll(async () => (await rendered())?.sections).toBe(60);
+  const initial = await rendered(); expect(initial.texture).toBe('native-belt'); expect(initial.vertices).toBe(488); expect(initial.indices).toBe(1440);
+  const imported = await saveProject(page); expect(imported.topology.links).toHaveLength(6);
+  await page.locator('#fit-btn').click(); await page.locator('[data-view="right"]').click();
+  await page.locator('canvas').screenshot({ path: 'test-results/belt-native-six-wheel.png' });
+  await page.mouse.move(700, 450); await page.mouse.down({ button: 'right' });
+  await page.mouse.move(790, 500, { steps: 12 }); await page.mouse.up({ button: 'right' });
+  await page.locator('canvas').screenshot({ path: 'test-results/belt-native-six-wheel-angled.png' });
+  await page.locator('[data-view="right"]').click();
+  await openRightSidebar(page); await page.locator('#right-tab-inspector').click();
+  // This wheel is not incident to the first link anchoring the cached visual.
+  const wheel = imported.objects.find(object => object.nativeProperties?.reverse); const point = await projectWorldPoint(page, wheel.position);
+  await page.mouse.click(point.x, point.y);
+  const reverse = page.getByRole('checkbox', { name: '反转方向', exact: true });
+  await expect(reverse).toBeChecked(); await reverse.uncheck();
+  await expect.poll(async () => (await rendered())?.uuid).not.toBe(initial.uuid);
+  await expect.poll(async () => (await rendered())?.sections).not.toBe(60);
+  await page.locator('#undo-btn').click(); await expect.poll(async () => (await rendered())?.sections).toBe(60);
+  await page.mouse.click(point.x, point.y);
+  const y = page.getByRole('spinbutton', { name: 'position-y', exact: true });
+  const beforeMove = await rendered(); await y.fill(String(wheel.position.y / .08 + 1)); await y.press('Enter');
+  await expect.poll(async () => (await rendered())?.uuid).not.toBe(beforeMove.uuid);
+  await page.locator('#undo-btn').click(); await expect.poll(async () => (await rendered())?.sections).toBe(60);
+  await page.locator('#redo-btn').click(); await expect.poll(async () => (await rendered())?.sections).not.toBe(60);
+  await page.locator('#undo-btn').click();
+  await page.locator('#connection-visibility-toggle').click(); await page.locator('[data-connection-kind="belt"]').uncheck();
+  await expect.poll(async () => (await rendered())?.visible).toBe(false); await page.locator('#connection-visibility-toggle').click();
+  await page.locator('#library-btn').click(); await page.locator('#native-reference-preview-btn').click();
+  await expect.poll(async () => (await rendered())?.visible).toBe(true); await page.keyboard.press('Escape');
+  const downloads = []; const receive = download => downloads.push(download); page.on('download', receive);
+  await page.locator('#save-btn').click(); await expect.poll(() => downloads.length).toBe(2); page.off('download', receive);
+  const files = await Promise.all(downloads.map(async download => {
+    const stream = await download.createReadStream(); let content = ''; for await (const chunk of stream) content += chunk;
+    return { name: download.suggestedFilename(), mimeType: 'application/json', buffer: Buffer.from(content) };
+  }));
+  const saved = JSON.parse(files.find(file => file.name.endsWith('.data')).buffer);
+  const ids = new Map(imported.objects.map((object, i) => [Number(object.id.split(':').at(-1)), i + 1]));
+  const expectedLinks = pair.data.vehicles.vehicles[0].belt_links.map(link => ({ p0: { comp: ids.get(link.p0.comp) }, p1: { comp: ids.get(link.p1.comp) }, points: [] }));
+  expect(saved.vehicles.vehicles[0].belt_links).toEqual(expectedLinks);
+  await page.locator('#native-input').setInputFiles(files); await expect.poll(async () => (await rendered())?.sections).toBe(60);
+  expect((await saveProject(page)).topology.links).toHaveLength(6); expect(errors).toEqual([]);
+});
+
+test('ordinary belt tool creates a closed surface and rejects noncoplanar or track endpoints', async ({ page }) => {
+  await observeRendering(page);
+  const errors = []; page.on('pageerror', error => errors.push(error.message));
+  await page.goto('./'); await expect(page.locator('#viewport')).toHaveAttribute('data-ready', 'true');
+  const document = beltFixture(['pulley_wheel', 'engine_wheel_c']); document.topology.links = [];
+  const wrong = structuredClone(document.objects[0]); wrong.id = 'wrong-plane'; wrong.position = { x: -.48, y: .8, z: .08 }; document.objects.push(wrong);
+  const track = structuredClone(wrong); track.id = 'track'; track.type = 'sprocket_a'; track.position = { x: .48, y: .8, z: 0 }; document.objects.push(track);
+  await page.locator('#file-input').setInputFiles({ name: 'belt-tool.json', mimeType: 'application/json', buffer: Buffer.from(JSON.stringify(document)) });
+  await expect(page.locator('#object-count')).toHaveText('4 个组件');
+  await page.locator('#fit-btn').click(); await page.locator('[data-view="front"]').click();
+  await page.locator('[data-tool="connect"]').click(); await page.locator('#connection-kind-buttons [data-kind="belt"]').click();
+  await expect(page.locator('#viewport')).toHaveAttribute('data-connection-port-count', '4');
+  const clickPort = async id => {
+    const position = await page.evaluate(id => {
+      const marker = window.__renderTestState.scene.getObjectByName('connection-ports').children.find(object => object.userData.connectionPort?.componentId === id);
+      return { x: marker.position.x, y: marker.position.y, z: marker.position.z };
+    }, id); const point = await projectWorldPoint(page, position); await page.mouse.click(point.x, point.y);
+  };
+  await clickPort('belt-wheel-0'); await clickPort('wrong-plane');
+  await expect(page.locator('#save-status')).toContainText('皮带轮必须共面');
+  expect((await saveProject(page)).topology.links).toHaveLength(0);
+  await clickPort('track'); await expect(page.locator('#save-status')).toContainText('履带');
+  expect((await saveProject(page)).topology.links).toHaveLength(0);
+  await clickPort('belt-wheel-1'); expect((await saveProject(page)).topology.links).toHaveLength(1);
+  await expect.poll(() => page.evaluate(() => window.__renderTestState.scene.getObjectByName('belt-loop')?.children[0].isMesh)).toBe(true);
+  await page.keyboard.press('Escape'); await page.locator('[data-view="iso"]').click();
+  await page.locator('canvas').screenshot({ path: 'test-results/belt-mixed-wheels.png' });
+  await page.locator('#undo-btn').click();
+  await expect.poll(() => page.evaluate(() => !!window.__renderTestState.scene.getObjectByName('belt-loop'))).toBe(false);
+  await page.locator('#redo-btn').click();
+  await expect.poll(() => page.evaluate(() => !!window.__renderTestState.scene.getObjectByName('belt-loop'))).toBe(true); expect(errors).toEqual([]);
+});
+
+test('ordinary belt unfinished routes retain links and bilingual diagnostics until closed', async ({ page }) => {
+  await observeRendering(page);
+  await page.goto('./'); await expect(page.locator('#viewport')).toHaveAttribute('data-ready', 'true');
+  const document = beltFixture(['pulley_wheel', 'engine_wheel_b', 'pulley_wheel'], [[-.48, 0], [0, .64], [.48, 0]]); document.topology.links.pop();
+  await page.locator('#file-input').setInputFiles({ name: 'belt-open.json', mimeType: 'application/json', buffer: Buffer.from(JSON.stringify(document)) });
+  await openRightSidebar(page); await page.locator('#right-tab-resources').click();
+  await expect(page.locator('#belt-diagnostics')).toContainText('多轮皮带尚未闭合');
+  expect((await saveProject(page)).topology.links).toHaveLength(2);
+  await expect.poll(() => page.evaluate(() => window.__renderTestState.scene.getObjectsByProperty('name', 'belt-loop').length)).toBe(0);
+  await page.locator('#language-select').selectOption('en'); await expect(page.locator('#belt-diagnostics')).toContainText('Multi-wheel belt is not closed');
+  await page.locator('#fit-btn').click(); await page.locator('[data-view="front"]').click();
+  await page.locator('[data-tool="connect"]').click(); await page.locator('#connection-kind-buttons [data-kind="belt"]').click();
+  for (const object of [document.objects[2], document.objects[0]]) { const point = await projectWorldPoint(page, object.position); await page.mouse.click(point.x, point.y); }
+  await expect.poll(() => page.evaluate(() => window.__renderTestState.scene.getObjectsByProperty('name', 'belt-loop').length)).toBe(1);
+  await expect(page.locator('#belt-diagnostics')).toBeHidden(); expect((await saveProject(page)).topology.links).toHaveLength(3);
+});
+
+test('native tracks render a full loop, refresh every wheel, survive history and export', async ({ page }) => {
+  await observeRendering(page);
+  const errors = []; page.on('pageerror', error => errors.push(error.message));
+  await page.goto('./'); await expect(page.locator('#viewport')).toHaveAttribute('data-ready', 'true');
+  const fixture = trackFixture('c', [[-1.6, 0], [1.6, 0], [.96, .64], [-.96, .64]]);
+  const pair = toNativePairFromEditor(fixture);
+  await page.locator('#native-input').setInputFiles(['data', 'meta'].map(extension => ({
+    name: 'track.' + extension, mimeType: 'application/json', buffer: Buffer.from(JSON.stringify(pair[extension])),
+  })));
+  await expect(page.locator('#object-count')).toHaveText('4 个组件');
+  const rendered = () => page.evaluate(() => {
+    const object = window.__renderTestState.scene.getObjectByName('track-loop');
+    return object ? { uuid: object.uuid, visible: object.visible, pieces: object.userData.trackPieceCount, instances: object.children.filter(child => child.isInstancedMesh).length } : null;
+  });
+  await expect.poll(async () => (await rendered())?.instances).toBe(1);
+  const initial = await rendered(); expect(initial.pieces).toBeGreaterThan(50);
+  const imported = await saveProject(page); expect(imported.topology.links).toHaveLength(4);
+  await page.locator('#fit-btn').click(); await page.locator('[data-view="front"]').click();
+  await page.locator('canvas').screenshot({ path: 'test-results/track-loop-front.png' });
+  await openRightSidebar(page); await page.locator('#right-tab-inspector').click();
+  // This wheel is not incident to the anchor link used by the visual cache.
+  const wheel = imported.objects[3]; const point = await projectWorldPoint(page, wheel.position);
+  await page.mouse.click(point.x, point.y);
+  const x = page.getByRole('spinbutton', { name: 'position-x', exact: true });
+  await expect(x).toBeVisible(); await x.fill(String(wheel.position.x / .08 - 5)); await x.press('Enter');
+  await expect.poll(async () => (await rendered())?.uuid).not.toBe(initial.uuid);
+  expect((await rendered()).pieces).not.toBe(initial.pieces);
+  await page.locator('#undo-btn').click(); await expect.poll(async () => (await rendered())?.pieces).toBe(initial.pieces);
+  await page.locator('#redo-btn').click(); await expect.poll(async () => (await rendered())?.pieces).not.toBe(initial.pieces);
+  await page.locator('#undo-btn').click();
+  await page.locator('#connection-visibility-toggle').click(); await page.locator('[data-connection-kind="belt"]').uncheck();
+  await expect.poll(async () => (await rendered())?.visible).toBe(false);
+  await page.locator('#connection-visibility-toggle').click();
+  await page.locator('#library-btn').click(); await page.locator('#native-reference-preview-btn').click();
+  await expect.poll(async () => (await rendered())?.visible).toBe(true);
+  await page.keyboard.press('Escape');
+  const downloads = []; const receive = value => downloads.push(value);
+  page.on('download', receive); await page.locator('#save-btn').click();
+  await expect.poll(() => downloads.length).toBe(2); page.off('download', receive);
+  const files = await Promise.all(downloads.map(async download => {
+    const stream = await download.createReadStream(); let content = ''; for await (const chunk of stream) content += chunk;
+    return { name: download.suggestedFilename(), mimeType: 'application/json', buffer: Buffer.from(content) };
+  }));
+  const data = JSON.parse(files.find(file => file.name.endsWith('.data')).buffer);
+  expect(data.vehicles.vehicles[0].belt_links).toEqual(pair.data.vehicles.vehicles[0].belt_links);
+  await page.locator('#native-input').setInputFiles(files);
+  await expect.poll(async () => (await rendered())?.pieces).toBe(initial.pieces);
+  expect((await saveProject(page)).topology.links).toHaveLength(4);
+  expect(errors).toEqual([]);
+});
+
+test('track tool uses matching widths and creates a native two-wheel track', async ({ page }) => {
+  await observeRendering(page);
+  const errors = []; page.on('pageerror', error => errors.push(error.message));
+  await page.goto('./'); await expect(page.locator('#viewport')).toHaveAttribute('data-ready', 'true');
+  const document = trackFixture('a'); document.topology.links = [];
+  const wrong = structuredClone(document.objects[1]); wrong.id = 'wrong-width'; wrong.type = 'roller_wheel_fixed_c'; wrong.position.y = .8; document.objects.push(wrong);
+  await page.locator('#file-input').setInputFiles({ name: 'track-tool.json', mimeType: 'application/json', buffer: Buffer.from(JSON.stringify(document)) });
+  await expect(page.locator('#object-count')).toHaveText('3 个组件');
+  await page.locator('#fit-btn').click(); await page.locator('[data-view="front"]').click();
+  await page.locator('[data-tool="connect"]').click(); await page.locator('#connection-kind-buttons [data-kind="belt"]').click();
+  await expect(page.locator('#viewport')).toHaveAttribute('data-connection-port-count', '3');
+  const clickPort = async id => {
+    const position = await page.evaluate(id => {
+      const marker = window.__renderTestState.scene.getObjectByName('connection-ports').children.find(object => object.userData.connectionPort?.componentId === id);
+      return { x: marker.position.x, y: marker.position.y, z: marker.position.z };
+    }, id); const point = await projectWorldPoint(page, position); await page.mouse.click(point.x, point.y);
+  };
+  await clickPort('track-wheel-0'); await clickPort('wrong-width');
+  await expect(page.locator('#save-status')).toContainText('履带端口宽度不一致');
+  expect((await saveProject(page)).topology.links).toHaveLength(0);
+  await clickPort('track-wheel-1');
+  expect((await saveProject(page)).topology.links).toHaveLength(1);
+  await expect.poll(() => page.evaluate(() => window.__renderTestState.scene.getObjectByName('track-loop')?.children[0].count)).toBeGreaterThan(50);
+  await page.locator('#undo-btn').click();
+  await expect.poll(() => page.evaluate(() => !!window.__renderTestState.scene.getObjectByName('track-loop'))).toBe(false);
+  await page.locator('#redo-btn').click();
+  await expect.poll(() => page.evaluate(() => !!window.__renderTestState.scene.getObjectByName('track-loop'))).toBe(true);
+  expect(errors).toEqual([]);
+});
+
+test('track widths load real meshes and unfinished loops retain bilingual diagnostics', async ({ page }) => {
+  await observeRendering(page);
+  await page.goto('./'); await expect(page.locator('#viewport')).toHaveAttribute('data-ready', 'true');
+  const document = trackFixture('a');
+  for (const [index, suffix] of ['c', 'e'].entries()) {
+    const next = trackFixture(suffix);
+    next.objects.forEach(object => { object.id += '-' + suffix; object.position.y += (index + 1) * .8; });
+    next.topology.links.forEach(link => { link.id += '-' + suffix; link.from.componentId += '-' + suffix; link.to.componentId += '-' + suffix; });
+    document.objects.push(...next.objects); document.topology.links.push(...next.topology.links);
+  }
+  await page.locator('#file-input').setInputFiles({ name: 'widths.json', mimeType: 'application/json', buffer: Buffer.from(JSON.stringify(document)) });
+  await expect.poll(() => page.evaluate(() => window.__renderTestState.scene.getObjectsByProperty('name', 'track-loop').length)).toBe(3);
+  await page.locator('#fit-btn').click(); await page.locator('[data-view="iso"]').click();
+  await page.locator('canvas').screenshot({ path: 'test-results/track-widths.png' });
+  const unfinished = trackFixture('c', [[-.8, 0], [0, .64], [.8, 0]]); unfinished.topology.links.pop();
+  await page.locator('#file-input').setInputFiles({ name: 'unfinished.json', mimeType: 'application/json', buffer: Buffer.from(JSON.stringify(unfinished)) });
+  await openRightSidebar(page); await page.locator('#right-tab-resources').click();
+  await expect(page.locator('#track-diagnostics')).toContainText('多轮履带尚未闭合');
+  expect((await saveProject(page)).topology.links).toHaveLength(2);
+  await expect.poll(() => page.evaluate(() => window.__renderTestState.scene.getObjectsByProperty('name', 'track-loop').length)).toBe(0);
+  await page.locator('#language-select').selectOption('en');
+  await expect(page.locator('#track-diagnostics')).toContainText('Multi-wheel track is not closed');
+});
+
+test('inclined panel placement keeps preview, local quarter turns and native dashboard grids aligned', async ({ page }) => {
+  await observeRendering(page);
+  const errors = []; page.on('pageerror', error => errors.push(error.message));
+  await page.goto('./'); await expect(page.locator('#viewport')).toHaveAttribute('data-ready', 'true');
+  const document = inclinedPanelFixture();
+  await page.locator('#file-input').setInputFiles({ name: 'slope.json', mimeType: 'application/json', buffer: Buffer.from(JSON.stringify(document)) });
+  await expect.poll(async () => (await saveProject(page)).topology.plates.length).toBe(1);
+  await page.locator('#fit-btn').click(); await page.locator('[data-view="back"]').click();
+  await page.locator('#component-search').fill('circular_dial_a'); await page.locator('[data-id="circular_dial_a"]').click();
+  const point = await projectWorldPoint(page, { x: 0, y: .36, z: .12 });
+  await page.mouse.move(point.x, point.y);
+  await expect.poll(async () => (await renderedPlacementState(page))?.visible).toBe(true);
+  const orientation = () => page.evaluate(() => {
+    const object = window.__renderTestState.scene.getObjectByName('component-placement-preview');
+    return object.position.clone().set(0, 1, 0).applyQuaternion(object.quaternion).toArray();
+  });
+  await expect.poll(async () => (await orientation())[1]).toBeCloseTo(1 / Math.sqrt(5), 6);
+  expect((await orientation())[2]).toBeCloseTo(-2 / Math.sqrt(5), 6);
+  await page.locator('#viewport').focus(); await page.keyboard.press('k');
+  await expect.poll(async () => (await orientation())[1]).toBeCloseTo(1 / Math.sqrt(5), 6);
+  const preview = await renderedPlacementState(page);
+  await page.mouse.click(point.x, point.y);
+  await expect(page.locator('#object-count')).toHaveText('1 个组件');
+  const saved = await saveProject(page); const object = saved.objects[0];
+  expect(object.surfaceMount.dir).toEqual([0, 1, -2]);
+  for (const [i, axis] of ['x', 'y', 'z'].entries()) {
+    expect(object.position[axis]).toBeCloseTo(preview.position[i], 8);
+    expect(object.rotation[axis]).toBeCloseTo(preview.rotation[i], 8);
+  }
+  await page.locator('#undo-btn').click(); await expect(page.locator('#object-count')).toHaveText('0 个组件');
+  await page.locator('#redo-btn').click(); await expect(page.locator('#object-count')).toHaveText('1 个组件');
+  expect((await saveProject(page)).objects[0].surfaceMount).toEqual(object.surfaceMount);
+  await page.locator('[data-tool="translate"]').click();
+  const selection = await projectWorldPoint(page, object.position);
+  await page.mouse.click(selection.x, selection.y);
+  const drag = await page.evaluate(() => {
+    const { scene, renderer, camera } = window.__renderTestState;
+    const helper = scene.children.find(value => value.isTransformControlsRoot);
+    helper.updateMatrixWorld(true);
+    const handle = helper.controls._gizmo.gizmo.translate.children.find(value => value.name === 'Y' && value.visible);
+    handle.geometry.computeBoundingBox();
+    const point = handle.geometry.boundingBox.getCenter(handle.position.clone());
+    handle.localToWorld(point).project(camera);
+    const rect = renderer.domElement.getBoundingClientRect();
+    return { x: rect.x + (point.x + 1) * rect.width / 2, y: rect.y + (1 - point.y) * rect.height / 2 };
+  });
+  await page.mouse.move(drag.x, drag.y); await page.mouse.down();
+  await page.mouse.move(drag.x, drag.y - 75, { steps: 16 }); await page.mouse.up();
+  const moved = (await saveProject(page)).objects[0];
+  expect(moved.position.y).not.toBeCloseTo(object.position.y, 6);
+  for (const axis of ['x', 'y', 'z']) {
+    const cells = (moved.position[axis] - object.position[axis]) / .08;
+    expect(cells).toBeCloseTo(Math.round(cells), 8);
+  }
+  expect(moved.surfaceMount).toEqual(object.surfaceMount);
+  await page.locator('#undo-btn').click();
+  expect((await saveProject(page)).objects[0]).toEqual(object);
+  const downloads = []; const receive = download => downloads.push(download);
+  page.on('download', receive); await page.locator('#save-btn').click();
+  await expect.poll(() => downloads.length).toBe(2); page.off('download', receive);
+  const files = await Promise.all(downloads.map(async download => {
+    const stream = await download.createReadStream(); let content = ''; for await (const chunk of stream) content += chunk;
+    return { name: download.suggestedFilename(), mimeType: 'application/json', buffer: Buffer.from(content) };
+  }));
+  const data = JSON.parse(files.find(file => file.name.endsWith('.data')).buffer);
+  const grids = data.vehicles.vehicles[0].grids;
+  expect(grids[1].dir).toEqual([0, 1, -2]);
+  expect(grids[1].components[0].rot.every(Number.isInteger)).toBe(true);
+  await page.locator('#native-input').setInputFiles(files);
+  await expect(page.locator('#object-count')).toHaveText('1 个组件');
+  const imported = await saveProject(page);
+  expect(imported.objects[0].surfaceMount).toEqual(object.surfaceMount);
+  // Native import centers the entire assembly. Compare to its support node.
+  for (const axis of ['x', 'y', 'z']) expect(imported.objects[0].position[axis] - imported.topology.nodes[0].position[axis]).toBeCloseTo(object.position[axis] - document.topology.nodes[0].position[axis], 8);
+  expect(errors).toEqual([]);
+});
+
+test('hydraulic tool connects matching cylinders, rejects occupied ports and saves native references', async ({ page }) => {
+  await observeRendering(page);
+  const errors = []; page.on('pageerror', error => errors.push(error.message));
+  await page.goto('./'); await expect(page.locator('#viewport')).toHaveAttribute('data-ready', 'true');
+  const document = hydraulicFixture('_2_2'); document.topology.links = [];
+  await page.locator('#file-input').setInputFiles({ name: 'cylinder.json', mimeType: 'application/json', buffer: Buffer.from(JSON.stringify(document)) });
+  await expect(page.locator('#object-count')).toHaveText('2 个组件');
+  await page.locator('#fit-btn').click(); await page.locator('[data-view="front"]').click();
+  await page.locator('[data-tool="connect"]').click();
+  await page.locator('#connection-kind-buttons [data-kind="hydraulic"]').click();
+  await expect(page.locator('#viewport')).toHaveAttribute('data-connection-port-count', '2');
+  await expect(page.locator('#connection-toolbar')).toContainText('液压缸');
+  const clickPort = async id => {
+    const position = await page.evaluate(id => {
+      const layer = window.__renderTestState.scene.getObjectByName('connection-ports');
+      const marker = layer.children.find(object => object.userData.connectionPort?.componentId === id);
+      return { x: marker.position.x, y: marker.position.y, z: marker.position.z };
+    }, id);
+    const point = await projectWorldPoint(page, position); await page.mouse.click(point.x, point.y);
+  };
+  await clickPort('rod'); await clickPort('base');
+  const saved = await saveProject(page);
+  expect(saved.topology.links).toHaveLength(1);
+  expect(saved.topology.links[0]).toMatchObject({ kind: 'hydraulic', from: { componentId: 'base', port: 2 }, to: { componentId: 'rod', port: 0 }, lengthMax: 19, extensionFactor: 1, points: [] });
+  await expect.poll(() => page.evaluate(() => window.__renderTestState.scene.getObjectsByProperty('name', 'hydraulic-cylinder').length)).toBeGreaterThan(0);
+  await page.locator('#language-select').selectOption('en');
+  await expect(page.locator('#connection-kind-buttons [data-kind="hydraulic"]')).toHaveText('Hydraulic cylinder');
+  await clickPort('base');
+  await expect(page.locator('#save-status')).toContainText('Source selected');
+  await clickPort('rod');
+  await expect(page.locator('#save-status')).toContainText('Cylinder port is occupied');
+  expect((await saveProject(page)).topology.links).toHaveLength(1);
+  await page.keyboard.press('Escape');
+  await page.locator('#undo-btn').click(); expect((await saveProject(page)).topology.links).toHaveLength(0);
+  await page.locator('#redo-btn').click(); expect((await saveProject(page)).topology.links).toHaveLength(1);
+  await page.locator('#connection-visibility-toggle').click();
+  await page.locator('[data-connection-kind="hydraulic"]').uncheck();
+  await expect.poll(() => page.evaluate(() => window.__renderTestState.scene.getObjectByName('topology-overlay').children.filter(object => object.userData.linkKind === 'hydraulic' && object.visible).length)).toBe(0);
+  await page.locator('[data-connection-kind="hydraulic"]').check();
+  await page.locator('#connection-visibility-toggle').click();
+  const downloads = []; const receive = value => downloads.push(value);
+  page.on('download', receive); await page.locator('#save-btn').click();
+  await expect.poll(() => downloads.length).toBe(2); page.off('download', receive);
+  const files = await Promise.all(downloads.map(async download => {
+    const stream = await download.createReadStream(); let content = ''; for await (const chunk of stream) content += chunk;
+    return { name: download.suggestedFilename(), mimeType: 'application/json', buffer: Buffer.from(content) };
+  }));
+  const data = JSON.parse(files.find(file => file.name.endsWith('.data')).buffer.toString());
+  expect(data.vehicles.vehicles).toHaveLength(2);
+  const base = data.vehicles.vehicles[0].grids[0].components[0];
+  const rod = data.vehicles.vehicles[1].grids[0].components[0];
+  expect(base).toMatchObject({ connected_vehicle: 2, connected_component: rod.id, connected_node_index: 0, length_max: 19, extension_factor: 1 });
+  expect(rod).toMatchObject({ connected_vehicle: 1, connected_component: base.id, connected_node_index: 2 });
+  await page.locator('#native-input').setInputFiles(files);
+  await expect(page.locator('#object-count')).toHaveText('2 components');
+  const imported = await saveProject(page);
+  expect(imported.topology.links.filter(link => link.kind === 'hydraulic')).toHaveLength(1);
+  const importedBase = imported.objects.find(object => object.type.includes('_base'));
+  const importedRod = imported.objects.find(object => !object.type.includes('_base'));
+  expect(importedRod.position.y - importedBase.position.y).toBeCloseTo(1.6, 8);
+  await page.locator('#fit-btn').click(); await page.locator('[data-view="front"]').click();
+  await page.locator('[data-tool="erase"]').click();
+  const midpoint = await projectWorldPoint(page, { x: importedBase.position.x - .04, y: importedBase.position.y + .8, z: importedBase.position.z + .04 });
+  await page.mouse.click(midpoint.x, midpoint.y);
+  expect((await saveProject(page)).topology.links).toHaveLength(0);
+  await page.locator('#undo-btn').click();
+  expect((await saveProject(page)).topology.links).toHaveLength(1);
+  expect(errors).toEqual([]);
+});
 
 test('mechanical mates update on edits and history and save reciprocal native hinge bodies', async ({ page }) => {
   await observeRendering(page);
@@ -636,6 +1343,156 @@ test('beam and panel commits reuse existing structure meshes across addition and
   expect((await renderedIdentities(page)).topology).toEqual(previous.topology);
 });
 
+test('plate tool accepts unordered boundary edges and preserves grid, shape and undo', async ({ page }, testInfo) => {
+  await observeRendering(page);
+  const errors = []; page.on('pageerror', error => errors.push(error.message));
+  await page.goto('./'); await expect(page.locator('#viewport')).toHaveAttribute('data-ready', 'true');
+  const topology = {
+    nodes: [[-.32, 0], [.32, 0], [.32, .64], [-.32, .64]].map(([x, y], i) => ({ id: 'n' + i, position: { x, y, z: 0 }, gridId: 'plate-grid' })),
+    edges: Array.from({ length: 4 }, (_, i) => ({ id: 'e' + i, a: 'n' + i, b: 'n' + (i + 1) % 4, gridId: 'plate-grid' })),
+    plates: [], links: [],
+  };
+  await page.locator('#file-input').setInputFiles({ name: 'plate-chain.json', mimeType: 'application/json', buffer: Buffer.from(JSON.stringify({ format: 'anymaker-web-project', version: 1, objects: [], topology, grids: [{ id: 'grid-1' }, { id: 'plate-grid' }] })) });
+  await expect(page.locator('#topology-count')).toHaveText('4 节点 · 4 梁 · 0 面板');
+  await page.locator('#fit-btn').click(); await page.locator('[data-view="front"]').click();
+  const clickAt = async (x, y) => { const point = await projectWorldPoint(page, { x, y, z: .04 }); await page.mouse.click(point.x, point.y); };
+  await page.locator('[data-tool="plate"]').click();
+  await clickAt(0, 0);
+  await expect(page.locator('#viewport')).toHaveAttribute('data-plate-draft-node-count', '2');
+  await clickAt(0, .64); // Opposite edges can be selected before their connectors.
+  await expect(page.locator('#viewport')).toHaveAttribute('data-plate-draft-node-count', '4');
+  await clickAt(-.32, .32);
+  await expect(page.locator('#viewport')).toHaveAttribute('data-plate-draft-node-count', '4');
+  await clickAt(.32, .32);
+  await expect(page.locator('#topology-count')).toHaveText('4 节点 · 4 梁 · 1 面板');
+  const saved = await saveProject(page);
+  expect(saved.topology.plates[0].gridId).toBe('plate-grid');
+  expect(saved.topology.plates[0].surfaceDirection).toEqual({ x: 0, y: 0, z: 1 });
+  const geometry = () => page.evaluate(() => {
+    const mesh = window.__renderTestState.scene.getObjectByName('topology-overlay').children.find(object => object.userData.topology === 'plate');
+    return [...mesh.geometry.attributes.position.array];
+  });
+  const vertices = await geometry();
+  expect(Math.min(...vertices.filter((_, i) => i % 3 === 0))).toBeCloseTo(-.32, 6);
+  expect(Math.max(...vertices.filter((_, i) => i % 3 === 0))).toBeCloseTo(.32, 6);
+  for (const value of vertices.filter((_, i) => i % 3 === 2)) expect(value).toBeCloseTo(.04, 6);
+  await page.locator('[data-view="iso"]').click();
+  expect(await geometry()).toEqual(vertices);
+  await page.locator('canvas').screenshot({ path: testInfo.outputPath('plate-normal-support.png') });
+  await page.locator('#undo-btn').click(); await expect(page.locator('#topology-count')).toHaveText('4 节点 · 4 梁 · 0 面板');
+  await page.locator('#redo-btn').click(); await expect(page.locator('#topology-count')).toHaveText('4 节点 · 4 梁 · 1 面板');
+  expect(await geometry()).toEqual(vertices);
+  expect(errors).toEqual([]);
+});
+
+for (const tool of ['plate', 'glass']) test(tool + ' creates a loop with eight split collinear beams in arbitrary order', async ({ page }) => {
+  const points = [[-.48, 0], [0, 0], [.48, 0], [.48, .48], [.48, .96], [0, .96], [-.48, .96], [-.48, .48]];
+  const nodes = points.map(([x, y], i) => ({ id: 'n' + i, position: { x, y, z: 0 }, gridId: 'grid-1' }));
+  const edges = nodes.map((node, i) => ({ id: 'e' + i, a: node.id, b: nodes[(i + 1) % nodes.length].id, gridId: 'grid-1', size: i === 4 ? 3 : 1 }));
+  const fixture = { format: 'anymaker-web-project', version: 1, objects: [], topology: { nodes, edges, plates: [], links: [] }, grids: [{ id: 'grid-1' }] };
+  await openStructureTransformFixture(page, fixture);
+  const before = await saveProject(page); const historyCount = await page.locator('#history-list button').count();
+  await page.locator('[data-tool="' + tool + '"]').click();
+  const selectEdge = async index => {
+    const [a, b] = [points[index], points[(index + 1) % points.length]];
+    await clickStructurePoint(page, { x: (a[0] + b[0]) / 2, y: (a[1] + b[1]) / 2, z: index === 4 ? .12 : .04 });
+  };
+  // Start with two collinear segments, then disconnected opposite segments.
+  for (const [i, index] of [0, 1, 4, 5, 2, 6, 3].entries()) {
+    await selectEdge(index);
+    await expect(page.locator('#save-status')).toContainText('已选 ' + (i + 1) + ' 根梁');
+    await expect(page.locator('#topology-count')).toHaveText('8 节点 · 8 梁 · 0 面板');
+    await expect(page.locator('#history-list button')).toHaveCount(historyCount);
+  }
+  await selectEdge(3); await expect(page.locator('#save-status')).toContainText('已选 6 根梁');
+  await selectEdge(3); await selectEdge(7);
+  await expect(page.locator('#topology-count')).toHaveText('8 节点 · 8 梁 · 1 面板');
+  await expect(page.locator('#history-list button')).toHaveCount(historyCount + 1);
+  const saved = await saveProject(page); const plate = saved.topology.plates[0];
+  expect(new Set(plate.nodeIds)).toEqual(new Set(nodes.map(node => node.id)));
+  expect(plate.gridId).toBe('grid-1'); expect(plate.normalOffset).toBeCloseTo(.12);
+  if (tool === 'glass') expect(plate.type).toBe('window');
+  expect(saved.topology.nodes).toEqual(before.topology.nodes); expect(saved.topology.edges).toEqual(before.topology.edges);
+  const rendered = await page.evaluate(() => {
+    const mesh = window.__renderTestState.scene.getObjectByName('topology-overlay').children.find(object => object.userData.topology === 'plate');
+    return { visible: mesh.visible, vertices: [...mesh.geometry.attributes.position.array] };
+  });
+  expect(rendered.visible).toBe(true); expect(rendered.vertices.length).toBeGreaterThan(0);
+  expect(rendered.vertices.every(Number.isFinite)).toBe(true);
+  await page.locator('#undo-btn').click(); expect((await saveProject(page)).topology).toEqual(before.topology);
+  await page.locator('#redo-btn').click(); expect((await saveProject(page)).topology).toEqual(saved.topology);
+  await page.locator('#file-input').setInputFiles({ name: 'split-boundary.json', mimeType: 'application/json', buffer: Buffer.from(JSON.stringify(saved)) });
+  await expect(page.locator('#topology-count')).toHaveText('8 节点 · 8 梁 · 1 面板');
+});
+
+test('plate and glass selection cannot pick through a foreground plate and cancel without mutation', async ({ page }) => {
+  await observeRendering(page);
+  const errors = []; page.on('pageerror', error => errors.push(error.message));
+  await page.goto('./'); await expect(page.locator('#viewport')).toHaveAttribute('data-ready', 'true');
+  const topology = {
+    nodes: [
+      { id: 'a', position: { x: -.32, y: 0, z: 0 } }, { id: 'b', position: { x: .32, y: 0, z: 0 } },
+      ...[[-.48, -.32], [.48, -.32], [.48, .32], [-.48, .32]].map(([x, y], i) => ({ id: 'p' + i, position: { x, y, z: .24 } })),
+    ],
+    edges: [{ id: 'beam', a: 'a', b: 'b' }], plates: [{ id: 'cover', nodeIds: ['p0', 'p1', 'p2', 'p3'], normalOffset: 0 }], links: [],
+  };
+  await page.locator('#file-input').setInputFiles({ name: 'plate-occlusion.json', mimeType: 'application/json', buffer: Buffer.from(JSON.stringify({ format: 'anymaker-web-project', version: 1, objects: [], topology })) });
+  await expect(page.locator('#topology-count')).toHaveText('6 节点 · 1 梁 · 1 面板');
+  const original = (await saveProject(page)).topology;
+  await page.locator('#fit-btn').click();
+  for (const tool of ['plate', 'glass']) {
+    await page.locator('[data-view="front"]').click(); await page.locator('[data-tool="' + tool + '"]').click();
+    let point = await projectWorldPoint(page, { x: 0, y: 0, z: 0 });
+    await page.mouse.move(point.x, point.y); await page.mouse.click(point.x, point.y);
+    await expect(page.locator('#viewport')).toHaveAttribute('data-edge-center-highlight-count', '0');
+    await page.locator('[data-view="back"]').click(); point = await projectWorldPoint(page, { x: 0, y: 0, z: 0 });
+    await page.mouse.click(point.x, point.y);
+    await expect(page.locator('#viewport')).toHaveAttribute('data-plate-draft-node-count', '2');
+    await page.keyboard.press('Escape');
+    await expect(page.locator('#viewport')).toHaveAttribute('data-plate-draft-node-count', '0');
+    expect((await saveProject(page)).topology).toEqual(original);
+  }
+  expect(errors).toEqual([]);
+});
+
+test('plate node preview handles invalid and collinear positions and restores both painted sides', async ({ page }) => {
+  await observeRendering(page);
+  const errors = []; page.on('pageerror', error => errors.push(error.message));
+  await page.goto('./'); await expect(page.locator('#viewport')).toHaveAttribute('data-ready', 'true');
+  const topology = {
+    nodes: [[-.32, 0], [.32, 0], [.32, .64], [-.32, .64]].map(([x, y], i) => ({ id: 'n' + i, position: { x, y, z: 0 } })),
+    edges: [], plates: [{ id: 'plate', nodeIds: ['n0', 'n1', 'n2', 'n3'], color_front: '#ff0000', color_back: '#0000ff' }], links: [],
+  };
+  await page.locator('#file-input').setInputFiles({ name: 'plate-preview.json', mimeType: 'application/json', buffer: Buffer.from(JSON.stringify({ format: 'anymaker-web-project', version: 1, objects: [], topology })) });
+  await expect(page.locator('#topology-count')).toHaveText('4 节点 · 0 梁 · 1 面板');
+  await page.locator('#fit-btn').click(); await page.locator('[data-view="front"]').click();
+  await page.locator('[data-tool="translate"]').click();
+  const point = await projectWorldPoint(page, { x: -.32, y: 0, z: 0 }); await page.mouse.click(point.x, point.y);
+  const frames = await page.evaluate(async () => {
+    const scene = window.__renderTestState.scene;
+    const controls = scene.children.find(object => object.isTransformControlsRoot).controls;
+    if (controls.object?.userData.nodeId !== 'n0') throw new Error('Expected the selected node handle');
+    const mesh = scene.getObjectByName('topology-overlay').children.find(object => object.userData.plateId === 'plate');
+    const original = controls.object.position.clone();
+    const capture = () => ({ visible: mesh.visible, positions: mesh.geometry.attributes.position.count, normals: mesh.geometry.attributes.normal.count, groups: mesh.geometry.groups.map(group => group.count) });
+    const previewFrame = async () => {
+      controls.dispatchEvent({ type: 'objectChange' });
+      await new Promise(resolve => requestAnimationFrame(() => requestAnimationFrame(resolve)));
+    };
+    controls.dragging = true;
+    controls.object.position.z += .08; await previewFrame(); const invalid = capture();
+    controls.object.position.set(0, .32, 0); await previewFrame(); const collinear = capture();
+    controls.object.position.copy(original); await previewFrame(); const restored = capture();
+    controls.dragging = false;
+    return { invalid, collinear, restored };
+  });
+  expect(frames.invalid.visible).toBe(false);
+  expect(frames.collinear).toEqual({ visible: true, positions: 3, normals: 3, groups: [3, 3] });
+  expect(frames.restored).toEqual({ visible: true, positions: 6, normals: 6, groups: [6, 6] });
+  expect((await saveProject(page)).topology.nodes.map(node => node.position)).toEqual(topology.nodes.map(node => node.position));
+  expect(errors).toEqual([]);
+});
+
 test.beforeEach(async ({ page }) => {
   await page.addInitScript(() => {
     const key = 'anymaker:' + location.pathname + ':settings:v1';
@@ -692,7 +1549,7 @@ test('3D model tool previews GLB, OBJ and STL, changes scale and panels, commits
   await input.setInputFiles({ name: 'triangle.stl', mimeType: 'application/octet-stream', buffer: Buffer.from('solid tri\nfacet normal 0 0 1\nouter loop\nvertex 0 0 0\nvertex 1 0 0\nvertex 0 1 0\nendloop\nendfacet\nendsolid tri') });
   await expect(page.locator('.model-import-tool')).toHaveAttribute('data-state', 'ready');
   await page.locator('#language-select').selectOption('en');
-  await expect(page.locator('#model-result-stats')).toContainText('3 nodes / 3 beams / 1 panels');
+  await expect(page.locator('#model-result-stats')).toContainText('3 nodes / 3 beams / 1 plates');
   await page.locator('#model-cancel-btn').click();
   await expect(page.locator('#model-generate-btn')).toBeDisabled();
   await expect(page.locator('#topology-count')).toContainText('4 nodes');
@@ -1113,6 +1970,74 @@ test('erase tool deletes only its highlighted component from a multi-selection',
   expect((await saveProject(page)).objects.map(object => object.id)).toEqual([before.objects[1].id]);
 });
 
+test('native import removes noncoplanar plates and retains the visible vehicle through save and history', async ({ page }, testInfo) => {
+  await observeRendering(page); const errors = []; page.on('pageerror', error => errors.push(error.message));
+  await page.goto('./'); await expect(page.locator('#viewport')).toHaveAttribute('data-ready', 'true');
+  // Set this only for an additional read-only regression against a local save.
+  const sample = process.env.ANYMAKER_NATIVE_IMPORT_SAMPLE;
+  const data = sample ? JSON.parse(readFileSync(sample + '.data', 'utf8')) : nonplanarNativeFixture();
+  const meta = sample ? JSON.parse(readFileSync(sample + '.meta', 'utf8')) : {};
+  const removed = sample ? 11 : 1;
+  const expected = data.vehicles.vehicles.reduce((sum, vehicle) => ({
+    components: sum.components + vehicle.grids.reduce((n, grid) => n + grid.components.length, 0),
+    nodes: sum.nodes + vehicle.nodes.length, edges: sum.edges + vehicle.edges.length, plates: sum.plates + vehicle.plates.length,
+  }), { components: 0, nodes: 0, edges: 0, plates: 0 });
+  await page.locator('#native-input').setInputFiles(['data', 'meta'].map(extension => ({ name: 'nonplanar.' + extension, mimeType: 'application/json', buffer: Buffer.from(JSON.stringify(extension === 'data' ? data : meta)) })));
+  await expect(page.locator('#object-count')).toHaveText(expected.components + ' 个组件');
+  await expect(page.locator('#topology-count')).toHaveText(`${expected.nodes} 节点 · ${expected.edges} 梁 · ${expected.plates - removed} 面板`);
+  await expect(page.locator('#native-import-notice')).toBeVisible();
+  await expect(page.locator('#native-import-notice')).toContainText(`已删除 ${removed} 个不共面的面板`);
+  const saved = await saveProject(page);
+  expect(saved.topology.nodes).toHaveLength(expected.nodes); expect(saved.topology.edges).toHaveLength(expected.edges); expect(saved.topology.plates).toHaveLength(expected.plates - removed);
+  const rendered = await page.evaluate(() => {
+    const { scene } = window.__renderTestState; const layer = scene.getObjectByName('topology-overlay');
+    const plates = layer.children.filter(object => object.userData.topology === 'plate');
+    return { components: scene.children.filter(object => object.userData.id && object.visible).length, plates: plates.length, nonempty: plates.every(object => object.visible && object.geometry.attributes.position.count > 0) };
+  });
+  expect(rendered).toEqual({ components: expected.components, plates: expected.plates - removed, nonempty: true });
+  await page.locator('#viewport').screenshot({ path: testInfo.outputPath('native-import-cleaned.png') });
+  await page.locator('#language-select').selectOption('en');
+  await expect(page.locator('#native-import-notice')).toContainText(`Removed ${removed} nonplanar plate(s)`);
+  await page.getByRole('button', { name: 'Dismiss import notice' }).click(); await expect(page.locator('#native-import-notice')).toBeHidden();
+  await page.locator('#undo-btn').click(); expect((await saveProject(page)).objects).toHaveLength(0);
+  await page.locator('#redo-btn').click(); expect((await saveProject(page)).topology).toEqual(saved.topology);
+  const downloads = []; page.on('download', download => downloads.push(download)); await page.locator('#save-btn').click(); await expect.poll(() => downloads.length).toBe(2);
+  const exported = [];
+  for (const download of downloads) { let text = ''; for await (const chunk of await download.createReadStream()) text += chunk; exported.push({ name: download.suggestedFilename(), mimeType: 'application/json', buffer: Buffer.from(text) }); }
+  await page.locator('#native-input').setInputFiles(exported);
+  await expect(page.locator('#native-summary')).toContainText('Imported nonplanar.data / nonplanar.meta');
+  expect((await saveProject(page)).topology.plates).toHaveLength(expected.plates - removed);
+  await expect(page.locator('#native-import-notice')).toBeHidden(); expect(errors).toEqual([]);
+});
+
+test('native import failures are visible with the sidebar closed and preserve the loaded project', async ({ page }) => {
+  await page.goto('./'); await expect(page.locator('#viewport')).toHaveAttribute('data-ready', 'true');
+  const files = data => ['data', 'meta'].map(extension => ({ name: 'native-error.' + extension, mimeType: 'application/json', buffer: Buffer.from(JSON.stringify(extension === 'data' ? data : {})) }));
+  await page.locator('#native-input').setInputFiles(files(nonplanarNativeFixture()));
+  await expect(page.locator('#object-count')).toHaveText('2 个组件'); const before = await saveProject(page); const count = await page.locator('#history-list button').count();
+  const invalid = nonplanarNativeFixture(); invalid.vehicles.vehicles[0].plates[1].nodes = [52, 44, 52];
+  await page.locator('#native-input').setInputFiles(files(invalid));
+  await expect(page.locator('#native-import-notice')).toBeVisible(); await expect(page.locator('#native-import-notice')).toHaveAttribute('role', 'alert');
+  await expect(page.locator('#native-import-notice')).toContainText('面板节点不能重复');
+  expect((await saveProject(page)).topology).toEqual(before.topology); expect(await page.locator('#history-list button').count()).toBe(count);
+  await page.locator('#native-input').setInputFiles([{ name: 'broken.data', mimeType: 'application/json', buffer: Buffer.from('{') }, { name: 'broken.meta', mimeType: 'application/json', buffer: Buffer.from('{}') }]);
+  await expect(page.locator('#native-import-notice')).toContainText('无法导入原生文件');
+  expect((await saveProject(page)).topology).toEqual(before.topology);
+});
+
+test('native subgrid import removes noncoplanar plates before creating its placement preview', async ({ page }) => {
+  await page.goto('./'); await expect(page.locator('#viewport')).toHaveAttribute('data-ready', 'true');
+  const data = nonplanarNativeFixture();
+  await page.locator('#native-subgrid-input').setInputFiles(['data', 'meta'].map(extension => ({ name: 'nonplanar-addon.' + extension, mimeType: 'application/json', buffer: Buffer.from(JSON.stringify(extension === 'data' ? data : {})) })));
+  await expect(page.locator('#save-status')).toContainText('作为子网格虚像');
+  await expect(page.locator('#native-import-notice')).toContainText('已删除 1 个不共面的面板');
+  await page.getByRole('button', { name: '关闭导入提示' }).click();
+  await page.locator('#viewport canvas').click({ position: { x: 620, y: 440 } });
+  await expect(page.locator('#object-count')).toHaveText('2 个组件');
+  const saved = await saveProject(page); expect(saved.topology.nodes).toHaveLength(8); expect(saved.topology.edges).toHaveLength(7); expect(saved.topology.plates).toHaveLength(1);
+  await page.locator('#undo-btn').click(); expect((await saveProject(page)).objects).toHaveLength(0);
+});
+
 test('native JSON maps through the domain model and imports components', async ({ page }) => {
   await page.goto('./');
   await expect(page.locator('#viewport')).toHaveAttribute('data-ready', 'true');
@@ -1299,6 +2224,43 @@ test('multi-selection paints and deletes every selected component from the keybo
   await expect(page.locator('#object-count')).toHaveText('2 个组件');
 });
 
+test('subgrid check separates actual component and panel ownership with stable save and undo', async ({ page }) => {
+  await observeRendering(page);
+  const errors = []; page.on('pageerror', error => errors.push(error.message));
+  await page.goto('./'); await expect(page.locator('#viewport')).toHaveAttribute('data-ready', 'true');
+  const fixture = disconnectedSubgridsFixture();
+  await page.locator('#file-input').setInputFiles({ name: 'subgrids.json', mimeType: 'application/json', buffer: Buffer.from(JSON.stringify(fixture)) });
+  await expect(page.locator('#object-count')).toHaveText('2 个组件');
+  const before = await saveProject(page);
+  await page.locator('#left-tab-subgrids').click();
+  await expect(page.locator('.subgrid-row')).toHaveCount(1);
+  const historyCount = await page.locator('#history-list button').count();
+  await page.locator('#subgrid-check-btn').click();
+  await expect(page.locator('#save-status')).toHaveText('已检查并分离：2 个子网格；0 个错误；0 个警告');
+  await expect(page.locator('.subgrid-row')).toHaveCount(2);
+  await expect(page.locator('#history-list button')).toHaveCount(historyCount + 1);
+  const separated = await saveProject(page);
+  expect(separated.objects.map(object => object.gridId)).toEqual(['grid-1', 'grid-2']);
+  expect(separated.objects.map(object => object.position)).toEqual(before.objects.map(object => object.position));
+  for (const kind of ['nodes', 'edges', 'plates']) for (const item of separated.topology[kind]) expect(item.gridId).toBe(item.id.startsWith('left') ? 'grid-1' : 'grid-2');
+  const rendered = await page.evaluate(() => window.__renderTestState.scene.children.filter(object => ['left', 'right'].includes(object.userData.id)).map(object => ({ id: object.userData.id, gridId: object.userData.gridId })));
+  expect(rendered.sort((a, b) => a.id.localeCompare(b.id))).toEqual([{ id: 'left', gridId: 'grid-1' }, { id: 'right', gridId: 'grid-2' }]);
+  await page.locator('#undo-btn').click();
+  await expect(page.locator('.subgrid-row')).toHaveCount(1);
+  expect(await saveProject(page)).toEqual(before);
+  await page.locator('#redo-btn').click();
+  await expect(page.locator('.subgrid-row')).toHaveCount(2);
+  expect(await saveProject(page)).toEqual(separated);
+  await page.locator('#language-select').selectOption('en');
+  await page.locator('#subgrid-check-btn').click();
+  await expect(page.locator('#save-status')).toHaveText('Subgrid check complete: 2 subgrid(s); 0 error(s); 0 warning(s)');
+  await expect(page.locator('#history-list button')).toHaveCount(historyCount + 1);
+  await page.locator('#file-input').setInputFiles({ name: 'separated.json', mimeType: 'application/json', buffer: Buffer.from(JSON.stringify(separated)) });
+  await expect(page.locator('.subgrid-row')).toHaveCount(2);
+  expect(await saveProject(page)).toEqual(separated);
+  expect(errors).toEqual([]);
+});
+
 test('subgrid list deletes an authored subgrid as one undoable action', async ({ page }) => {
   await page.goto('./');
   await expect(page.locator('#viewport')).toHaveAttribute('data-ready', 'true');
@@ -1314,6 +2276,39 @@ test('subgrid list deletes an authored subgrid as one undoable action', async ({
   expect(saved.grids.map(grid => grid.id)).toEqual(['grid-1']);
   await page.locator('#undo-btn').click();
   await expect(page.locator('.subgrid-row', { hasText: 'Grid temporary-grid' })).toBeVisible();
+});
+
+test('subgrid names survive history and exported project code', async ({ page }) => {
+  test.setTimeout(90000);
+  await page.goto('./');
+  await expect(page.locator('#viewport')).toHaveAttribute('data-ready', 'true', { timeout: 30000 });
+  await page.locator('#language-select').selectOption('zh');
+  await page.locator('#left-tab-subgrids').click();
+  const row = page.locator('.subgrid-row').first();
+  await row.locator('.subgrid-rename').click();
+  await row.getByRole('textbox', { name: '子网格名称' }).fill('驾驶舱 & chassis');
+  await row.getByRole('textbox', { name: '子网格名称' }).press('Enter');
+  await expect(row.locator('strong')).toHaveText('驾驶舱 & chassis');
+  expect((await saveProject(page)).grids).toEqual([{ id: 'grid-1', name: '驾驶舱 & chassis' }]);
+  await page.locator('#undo-btn').click();
+  await expect(row.locator('strong')).toHaveText('Grid grid-1');
+  await page.locator('#redo-btn').click();
+  await expect(row.locator('strong')).toHaveText('驾驶舱 & chassis');
+  await page.locator('#language-select').selectOption('en');
+  await expect(row.locator('.subgrid-rename')).toHaveText('Rename');
+  await page.locator('#left-tab-archives').click();
+  const downloadPromise = page.waitForEvent('download');
+  await page.locator('#archive-code-export').click();
+  const download = await downloadPromise;
+  const stream = await download.createReadStream(); let code = '';
+  for await (const chunk of stream) code += chunk;
+  const named = await saveProject(page);
+  expect((await decodeProjectCode(code)).grids).toEqual(named.grids);
+  await page.locator('#new-btn').click();
+  expect((await saveProject(page)).grids).toEqual([{ id: 'grid-1' }]);
+  await page.locator('#archive-code').fill(code);
+  await page.locator('#archive-code-import').click();
+  await expect.poll(async () => (await saveProject(page)).grids).toEqual(named.grids);
 });
 
 test('extendable components expose native linear dimensions instead of transform scale', async ({ page }) => {
@@ -1471,8 +2466,8 @@ test('paint and connection context toolbars expose saved colors, network ports a
   await expect(page.locator('#connection-visibility-options')).toBeHidden();
   await connectionVisibilityToggle.click();
   await expect(connectionVisibilityToggle).toHaveAttribute('aria-expanded', 'true');
-  await expect(page.locator('#connection-visibility-options [data-connection-kind]')).toHaveCount(6);
-  await expect(page.locator('#connection-visibility-options [data-connection-kind]:checked')).toHaveCount(6);
+  await expect(page.locator('#connection-visibility-options [data-connection-kind]')).toHaveCount(7);
+  await expect(page.locator('#connection-visibility-options [data-connection-kind]:checked')).toHaveCount(7);
   await page.locator('[data-connection-kind="liquid"]').uncheck();
   await expect.poll(() => page.evaluate(() => JSON.parse(localStorage.getItem('anymaker:' + location.pathname + ':settings:v1'))?.connectionVisibility?.liquid)).toBe(false);
   const canvas = page.locator('canvas');
@@ -1582,6 +2577,20 @@ test('registered reference vehicle imports every component and structural record
     expect(handle.type).toBe('mechanical_handle');
     // The evidence uses native coordinates; the editor reflects X (see the domain-model unit test).
     for (const [index, axis] of ['x', 'y', 'z'].entries()) expect(handle.position[axis] - hinge.position[axis]).toBeCloseTo((axis === 'x' ? -1 : 1) * (expected.worldPosition[index] - hingePosition[index]), 10);
+  }
+  await page.locator('#left-tab-subgrids').click();
+  await expect(page.locator('.subgrid-row')).toHaveCount(4);
+  const historyCount = await page.locator('#history-list button').count();
+  await page.locator('#subgrid-check-btn').click();
+  await expect(page.locator('#subgrid-summary')).toHaveText('子网格检查结果：4 个子网格；0 个错误；0 个警告');
+  await expect(page.locator('.subgrid-row')).toHaveCount(4);
+  await expect(page.locator('#history-list button')).toHaveCount(historyCount);
+  const checked = await saveProject(page);
+  expect(checked.objects).toEqual(imported.objects);
+  expect(checked.topology).toEqual(imported.topology);
+  for (const handle of checked.objects.filter(object => object.type === 'mechanical_handle')) {
+    expect(handle.gridId).toBe('grid-' + handle.id.split(':')[0] + '-1');
+    expect(checked.topology.plates.some(plate => plate.gridId === handle.gridId)).toBe(true);
   }
   await page.locator('canvas').screenshot({ path: 'test-results/reference-vehicle-import.png' });
   await page.locator('#library-btn').click();
@@ -1969,6 +2978,7 @@ test('structural selection is enabled by default and can be disabled without aff
 });
 
 test('glass tool closes selected edges into an offset window panel and paint stores Hex RGB colors', async ({ page }) => {
+  await observeRendering(page);
   await page.goto('./');
   await expect(page.locator('#viewport')).toHaveAttribute('data-ready', 'true');
   await page.locator('[data-view="front"]').click();
@@ -1999,11 +3009,19 @@ test('glass tool closes selected edges into an offset window panel and paint sto
   expect(saved.topology.plates[0].type).toBe('window');
   await openRightSidebar(page);
   await page.locator('[data-tool="paint"]').click();
-  await canvas.hover({ position: { x: 580, y: 560 } });
-  // The finished panel covers the boundary beam and has paint priority.
+  // The old arbitrary cube-corner expansion covered the unsnapped click.
+  // Use the real snapped boundary, 2 cm inside its bottom edge: both the
+  // plate and its supporting beam are present at this point.
+  const platePoints = saved.topology.plates[0].nodeIds.map(id => saved.topology.nodes.find(node => node.id === id).position);
+  const overlap = await projectWorldPoint(page, {
+    x: platePoints.reduce((sum, p) => sum + p.x, 0) / platePoints.length,
+    y: Math.min(...platePoints.map(p => p.y)) + .02,
+    z: platePoints[0].z + .04,
+  });
+  await page.mouse.move(overlap.x, overlap.y);
   await expect(page.locator('#viewport')).toHaveAttribute('data-edge-center-highlight-count', '0');
   await expect(page.locator('#viewport')).toHaveAttribute('data-plate-boundary-highlight-count', '1');
-  await canvas.click({ position: { x: 580, y: 560 } });
+  await page.mouse.click(overlap.x, overlap.y);
   saved = await saveProject(page);
   expect(saved.topology.plates.some(plate => plate.color_front === '#bd2636')).toBe(true);
   await canvas.hover({ position: { x: 560, y: 400 } });
@@ -2039,6 +3057,7 @@ test('glass tool closes selected edges into an offset window panel and paint sto
 });
 
 test('erase tool removes the highlighted front panel before its supporting edge', async ({ page }) => {
+  await observeRendering(page);
   await page.goto('./');
   await expect(page.locator('#viewport')).toHaveAttribute('data-ready', 'true');
   await page.locator('[data-view="front"]').click();
@@ -2055,16 +3074,23 @@ test('erase tool removes the highlighted front panel before its supporting edge'
   await expect(page.locator('#topology-count')).toHaveText('4 节点 · 4 梁 · 1 面板');
 
   await page.locator('[data-tool="erase"]').click();
-  await canvas.hover({ position: { x: 580, y: 560 } });
+  const before = await saveProject(page);
+  const points = before.topology.nodes.map(node => node.position);
+  const overlap = await projectWorldPoint(page, {
+    x: points.reduce((sum, p) => sum + p.x, 0) / points.length,
+    y: Math.min(...points.map(p => p.y)) + .02,
+    z: points[0].z + .04,
+  });
+  await page.mouse.move(overlap.x, overlap.y);
   await expect(page.locator('#viewport')).toHaveAttribute('data-plate-boundary-highlight-count', '1');
-  await canvas.click({ position: { x: 580, y: 560 } });
+  await page.mouse.click(overlap.x, overlap.y);
   let saved = await saveProject(page);
   expect(saved.topology.plates).toHaveLength(0);
   expect(saved.topology.edges).toHaveLength(4);
 
-  await canvas.hover({ position: { x: 580, y: 560 } });
+  await page.mouse.move(overlap.x, overlap.y);
   await expect(page.locator('#viewport')).toHaveAttribute('data-edge-center-highlight-count', '1');
-  await canvas.click({ position: { x: 580, y: 560 } });
+  await page.mouse.click(overlap.x, overlap.y);
   saved = await saveProject(page);
   expect(saved.topology.edges).toHaveLength(3);
 });

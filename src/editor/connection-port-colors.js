@@ -11,6 +11,7 @@ export const NATIVE_PORT_COLORS = Object.freeze({
   gas: '#cc9900',
   belt: '#98a2b3',
   data: '#1860ff',
+  hydraulic: '#64748b', // Editor diagnostic color; not a native Mesh claim.
   fallback: '#f1c232',
 });
 

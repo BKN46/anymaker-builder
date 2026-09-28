@@ -4,6 +4,14 @@ import { readFileSync, readdirSync } from 'node:fs';
 import { createHash } from 'node:crypto';
 import { gunzipSync } from 'node:zlib';
 import { meshFixture, modelGlbFixture } from './fixtures.js';
+import './hydraulic.test.js';
+import './inclined.test.js';
+import './tracks.test.js';
+import './belts.test.js';
+import './selection-transform.test.js';
+import './subgrids.test.js';
+import './plates.test.js';
+import './native-import.test.js';
 import { parseModel } from '../src/assets/model-import.js';
 import { simplifyModel, convertModel, modelBounds, MODEL_VERTEX_TARGETS } from '../src/editor/model-conversion.js';
 import { prepareModelShell } from '../src/assets/model-shell.js';
@@ -555,7 +563,7 @@ test('mirror mode reflects integer-grid points on every plane without moving poi
 });
 
 test('project code round-trips a serializable document without editor-only view state', async () => {
-  const document = { format: 'anymaker-web-project', version: 1, projectName: 'share-test', objects: [], topology: { nodes: [], edges: [], plates: [], links: [] } };
+  const document = { format: 'anymaker-web-project', version: 1, projectName: 'share-test', grids: [{ id: 'grid-1', name: 'Cab & chassis' }], objects: [], topology: { nodes: [], edges: [], plates: [], links: [] } };
   const code = await encodeProjectCode(document);
   assert.match(code, /^AMB1\.[A-Za-z0-9_-]+$/);
   assert.deepEqual(await decodeProjectCode(code), document);
@@ -826,9 +834,12 @@ test('microcontroller state preserves the observed script and typed global varia
 test('project grids retain empty authored grids and infer structural grid membership', () => {
   const definitions = new Map([['engine', {}]]);
   const object = { id: 'one', type: 'engine', gridId: 'grid-a', position: { x: 0, y: 0, z: 0 }, rotation: { x: 0, y: 0, z: 0 }, scale: { x: 1, y: 1, z: 1 } };
-  const document = validateDocument(project([object], { nodes: [], edges: [], plates: [] }, undefined, [{ id: 'grid-empty' }]), definitions);
-  assert.deepEqual(document.grids, [{ id: 'grid-empty' }, { id: 'grid-a' }]);
+  const document = validateDocument(project([object], { nodes: [], edges: [], plates: [] }, undefined, [{ id: 'grid-empty', name: '  Spare frame  ' }]), definitions);
+  assert.deepEqual(document.grids, [{ id: 'grid-empty', name: 'Spare frame' }, { id: 'grid-a' }]);
   assert.throws(() => validateDocument(project([], undefined, undefined, [{ id: 'grid-a' }, { id: 'grid-a' }]), definitions), /Duplicate grid ID/);
+  for (const name of ['', ' '.repeat(3), 'x'.repeat(81), 'bad\nname', 3]) {
+    assert.throws(() => validateDocument(project([], undefined, undefined, [{ id: 'grid-a', name }]), definitions), /Invalid grid name/);
+  }
 });
 
 test('grid closure includes touching and linked same-grid structure only', () => {
@@ -903,7 +914,7 @@ test('reference primary vehicle converts every renderable record into an editor 
   assert.equal(document.topology.edges.length, 493);
   assert.equal(document.topology.plates.length, 138);
   assert.equal(document.topology.links.length, 73);
-  assert.deepEqual(Object.fromEntries(LINK_KINDS.map(kind => [kind, document.topology.links.filter(link => link.kind === kind).length])), { electric: 17, mechanical: 20, liquid: 6, gas: 6, belt: 6, data: 18 });
+  assert.deepEqual(Object.fromEntries(LINK_KINDS.map(kind => [kind, document.topology.links.filter(link => link.kind === kind).length])), { electric: 17, mechanical: 20, liquid: 6, gas: 6, belt: 6, data: 18, hydraulic: 0 });
   assert.ok(document.topology.links.every(link => document.objects.some(object => object.id === link.from.componentId) && document.objects.some(object => object.id === link.to.componentId)));
   const node69 = document.topology.nodes.find(node => node.id === 'grid-553-1:69')?.position;
   assert.deepEqual(Object.fromEntries(['x', 'y', 'z'].map(axis => [axis, worldToCell(node69[axis])])), { x: -69, y: 17, z: 247 });
@@ -1002,7 +1013,7 @@ test('UI preferences default to English and reject unsafe or unsupported values'
   for (const invalid of ['true', 1, null, {}]) assert.equal(normalizeSettings({ version: 1, hideMirrorPlane: invalid }).hideMirrorPlane, false);
   assert.equal(normalizeSettings({ version: 1, edgeSize: 3 }).edgeSize, 3);
   assert.equal(normalizeSettings({ version: 1, edgeSize: 2 }).edgeSize, 1);
-  assert.deepEqual(defaults.connectionVisibility, { electric: true, mechanical: true, liquid: true, gas: true, belt: true, data: true });
+  assert.deepEqual(defaults.connectionVisibility, { electric: true, mechanical: true, liquid: true, gas: true, belt: true, data: true, hydraulic: true });
   assert.equal(defaults.paintColor, '#dddddd');
   assert.deepEqual(defaults.paintQuickColors, ['#ecece7', '#861a22', '#3e2022', '#191e28', '#374345']);
   assert.equal(normalizeSettings({ version: 1, paintColor: '#7C3AED' }).paintColor, '#7c3aed');
@@ -1869,20 +1880,21 @@ test('edge splitting inserts the new node into every affected panel boundary', (
   assert.notEqual(index, -1);
   assert.deepEqual(validateTopologyState({ nodes: split.nodes, edges: split.edges, plates: split.plates }).plates, split.plates);
 });
-test('connection commands preserve six link families and validate endpoints', () => {
+test('connection commands preserve networks and hydraulic cylinders and validate endpoints', () => {
   assert.deepEqual(LINK_COLORS, {
     electric: '#f1c232', mechanical: '#f2994a', liquid: '#2f80ed',
-    gas: '#27ae60', belt: '#98a2b3', data: '#9b51e0',
+    gas: '#27ae60', belt: '#98a2b3', data: '#9b51e0', hydraulic: '#64748b',
   });
   assert.deepEqual(LINK_RENDER_STYLES, {
     electric: { radius: .009, radialSegments: 8 }, mechanical: { radius: .022, radialSegments: 8 },
     liquid: { radius: .021, radialSegments: 8 }, gas: { radius: .019, radialSegments: 8 },
     belt: { linewidth: 3, dashSize: .04, gapSize: .025 }, data: { radius: .0075, radialSegments: 8 },
+    hydraulic: { radius: .035, radialSegments: 12 },
   });
   const componentIds = new Set(['source', 'target']);
   let links = [];
   for (const kind of LINK_KINDS) {
-    const result = createLink(links, { kind, from: { componentId: 'source', port: 0 }, to: { componentId: 'target', port: 1 }, points: [{ x: cell(1), y: 0, z: 0 }] }, componentIds);
+    const result = createLink(links, { kind, from: { componentId: 'source', port: 0 }, to: { componentId: 'target', port: 1 }, ...(kind === 'hydraulic' ? { points: [], lengthMax: 8, extensionFactor: 1 } : { points: [{ x: cell(1), y: 0, z: 0 }] }) }, componentIds);
     links = result.links;
   }
   assert.equal(validateLinks(links, componentIds).length, LINK_KINDS.length);
@@ -2133,7 +2145,7 @@ test('spatial diagonal edge bridge has finite projected geometry', () => {
   }
   edge.geometry.dispose(); edge.material.dispose();
 });
-test('plate surfaces use the camera-facing vertices of their node cubes', () => {
+test('plate inner surfaces use normal-facing node support points without tangential expansion', () => {
   const size = CELL_SIZE_WORLD * 4;
   const positions = new Map([
     ['a', new THREE.Vector3(0, 0, 0)], ['b', new THREE.Vector3(size, 0, 0)],
@@ -2145,10 +2157,10 @@ test('plate surfaces use the camera-facing vertices of their node cubes', () => 
   const boundary = plateSurfaceBoundary(ids, positions, { surfaceDirection: new THREE.Vector3(0, 0, 1) });
   assert.equal(boundary.length, ids.length);
   const expectedBoundary = [
-    [-CELL_SIZE_WORLD / 2, -CELL_SIZE_WORLD / 2, CELL_SIZE_WORLD / 2],
-    [size + CELL_SIZE_WORLD / 2, -CELL_SIZE_WORLD / 2, CELL_SIZE_WORLD / 2],
-    [size + CELL_SIZE_WORLD / 2, size + CELL_SIZE_WORLD / 2, CELL_SIZE_WORLD / 2],
-    [-CELL_SIZE_WORLD / 2, size + CELL_SIZE_WORLD / 2, CELL_SIZE_WORLD / 2],
+    [0, 0, CELL_SIZE_WORLD / 2],
+    [size, 0, CELL_SIZE_WORLD / 2],
+    [size, size, CELL_SIZE_WORLD / 2],
+    [0, size, CELL_SIZE_WORLD / 2],
   ];
   boundary.forEach((point, index) => point.toArray().forEach((value, axis) => {
     assert.ok(Math.abs(value - expectedBoundary[index][axis]) < 1e-9);
@@ -2158,32 +2170,32 @@ test('plate surfaces use the camera-facing vertices of their node cubes', () => 
   const uniqueFront = [...new Map(frontCorners.map(point => [point.join(','), point])).values()];
   assert.equal(uniqueFront.length, 4);
   uniqueFront.forEach(point => assert.ok(
-    point[0] <= -CELL_SIZE_WORLD / 2 + 1e-9 || point[0] >= size + CELL_SIZE_WORLD / 2 - 1e-9,
+    Math.abs(point[0]) < 1e-9 || Math.abs(point[0] - size) < 1e-9,
   ));
   const back = plateSurfaceVertices(ids, positions, { surfaceDirection: new THREE.Vector3(0, 0, -1) });
   assert.ok(back.every((value, index) => index % 3 !== 2 || Math.abs(value + CELL_SIZE_WORLD / 2) < 1e-9));
 });
-test('plate surfaces choose the true nearest corner on spatial diagonal closures', () => {
+test('spatial plates use the normal-facing support corner, independent of camera tangents', () => {
   const positions = new Map([
     ['a', new THREE.Vector3(0, 0, 0)],
     ['b', new THREE.Vector3(CELL_SIZE_WORLD * 3, CELL_SIZE_WORLD, CELL_SIZE_WORLD)],
     ['c', new THREE.Vector3(CELL_SIZE_WORLD * 2, CELL_SIZE_WORLD * 4, CELL_SIZE_WORLD * 2)],
-    ['d', new THREE.Vector3(-CELL_SIZE_WORLD, CELL_SIZE_WORLD * 2, CELL_SIZE_WORLD)],
+    ['d', new THREE.Vector3(-CELL_SIZE_WORLD, CELL_SIZE_WORLD * 3, CELL_SIZE_WORLD)],
   ]);
-  const direction = new THREE.Vector3(3, 2, 1).normalize();
+  const direction = new THREE.Vector3(-2, -4, 10).normalize();
   for (const ids of [['a', 'b', 'c'], ['a', 'b', 'c', 'd']]) {
     const boundary = plateSurfaceBoundary(ids, positions, { surfaceDirection: direction });
     assert.equal(boundary.length, ids.length);
     assert.ok(boundary.every(point => point.toArray().every(Number.isFinite)));
     boundary.forEach((point, index) => {
       const source = positions.get(ids[index]);
-      for (const axis of ['x', 'y', 'z']) assert.ok(Math.abs(point[axis] - source[axis] - CELL_SIZE_WORLD / 2) < 1e-9);
+      for (const axis of ['x', 'y', 'z']) assert.ok(Math.abs(point[axis] - source[axis] - Math.sign(direction[axis]) * CELL_SIZE_WORLD / 2) < 1e-9);
     });
     const vertices = plateSurfaceVertices(ids, positions, { surfaceDirection: direction });
     assert.ok(vertices.length >= 9 && vertices.every(Number.isFinite));
   }
 });
-test('plate boundaries never add non-node-cube miter points at acute closures', () => {
+test('acute plate corners retain the node loop without miter expansion', () => {
   const positions = new Map([
     ['a', new THREE.Vector3(0, 0, 0)],
     ['b', new THREE.Vector3(.8, 0, 0)],
@@ -2195,7 +2207,7 @@ test('plate boundaries never add non-node-cube miter points at acute closures', 
   boundary.forEach((point, index) => {
     const source = positions.get(ids[index]);
     for (const axis of ['x', 'y', 'z']) assert.ok(
-      Math.abs(Math.abs(point[axis] - source[axis]) - CELL_SIZE_WORLD / 2) < 1e-9,
+      Math.abs(point[axis] - source[axis] - (axis === 'z' ? CELL_SIZE_WORLD / 2 : 0)) < 1e-9,
       `${axis} is not a node-cube vertex`,
     );
   });

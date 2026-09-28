@@ -2,6 +2,7 @@
 import fs from 'node:fs';
 import path from 'node:path';
 import { createHash } from 'node:crypto';
+import { TRACK_TYPES } from '../src/editor/track-profiles.js';
 
 const root = process.cwd();
 const manifestFile = path.join(root, 'public', 'assets', 'manifests', 'mesh-manifest.json');
@@ -16,6 +17,10 @@ if (typeof index.translationSource !== 'string' || !/^rom\/languages_components\
 if (manifest.format !== 'anymaker-mesh-manifest' || manifest.version !== 1) throw new Error('Unsupported Mesh manifest');
 const referenced = new Set();
 const errors = [];
+for (const { mesh } of Object.values(TRACK_TYPES)) {
+  referenced.add(mesh);
+  if (!manifest.entries?.[mesh]?.parsed) errors.push('missing parsed runtime track Mesh: ' + mesh);
+}
 for (const file of fs.readdirSync(bindingsRoot)) {
   if (!file.endsWith('.json')) continue;
   const binding = JSON.parse(fs.readFileSync(path.join(bindingsRoot, file), 'utf8'));
@@ -42,6 +47,11 @@ for (const source of Object.keys(manifest.entries || {})) {
   const bytes = fs.readFileSync(file);
   if (createHash('sha256').update(bytes).digest('hex') !== entry.outputSha256) errors.push(`hash mismatch: ${entry.url}`);
 }
+const beltTexture = JSON.parse(fs.readFileSync(path.join(root, 'public/assets/textures/belt.json'), 'utf8'));
+if (beltTexture.url !== 'assets/textures/belt.png' || beltTexture.source !== 'textures/belt.txtr') errors.push('invalid belt texture metadata');
+const beltBytes = fs.readFileSync(path.join(root, 'public/assets/textures/belt.png'));
+if (createHash('sha256').update(beltBytes).digest('hex') !== beltTexture.outputSha256 || beltBytes.length !== beltTexture.outputBytes) errors.push('belt texture hash/size mismatch');
+if (beltBytes.readUInt32BE(16) !== beltTexture.width || beltBytes.readUInt32BE(20) !== beltTexture.height) errors.push('belt texture dimensions mismatch');
 if (manifest.count !== Object.keys(manifest.entries || {}).length) errors.push('manifest count does not match entries');
 if (errors.length) throw new Error(errors.join('\n'));
 console.log(`Published asset check passed: ${referenced.size} referenced Meshes, ${manifest.count} manifest entries, ${manifest.opaque || 0} opaque native-layout assets`);

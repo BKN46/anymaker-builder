@@ -7,6 +7,11 @@ import { logicNodePort, orientMechanicalLink } from '../editor/connection-ports.
 import { nativeMechanicalPortRole } from '../editor/connection-port-colors.js';
 import { detectMechanicalConnections, mechanicalMateRule, mechanicalMateError, NATIVE_MECHANICAL_MATE_RULES } from '../editor/mechanical-connections.js';
 import { partitionMechanicalBodies } from '../editor/mechanical-bodies.js';
+import { orientHydraulicLink, hydraulicError } from '../editor/hydraulic-connections.js';
+import { HYDRAULIC_PROFILES } from '../editor/hydraulic-profiles.js';
+import { validateLinks } from '../editor/connections.js';
+import { nativeSurfaceMount } from '../editor/surface-mount.js';
+import { isTrackLink } from '../editor/track-profiles.js';
 
 const vector = value => ({ x: Number(value?.[0] ?? 0), y: Number(value?.[1] ?? 0), z: Number(value?.[2] ?? 0) });
 const matrix = value => Array.isArray(value) && value.length === 9 && value.every(number => Number.isFinite(number)) ? [...value] : null;
@@ -360,11 +365,13 @@ export function toNativePairFromEditor(document, { vehicleId = 1, componentDefin
   if (!document || !Array.isArray(document.objects) || !Number.isInteger(vehicleId)) throw new Error('Native export requires a valid editor project');
   const topology = document.topology || { nodes: [], edges: [], plates: [], links: [] };
   const hostObjects = document.objects;
+  const objectsById = new Map(hostObjects.map(object => [object.id, object]));
+  const hydraulicLinks = validateLinks((topology.links || []).filter(link => link.kind === 'hydraulic'), new Set(objectsById.keys())).map(link => orientHydraulicLink(link, objectsById, componentDefinitions));
   const { connections, diagnostics } = detectMechanicalConnections(hostObjects, componentDefinitions);
   if (diagnostics.length) throw mechanicalMateError(diagnostics[0].code, 'Cannot export physical mates (' + diagnostics[0].code + ')', diagnostics[0].components.join(' / '));
-  const partition = connections.length ? partitionMechanicalBodies(document, connections, componentDefinitions) : null;
+  const physicalConnections = [...connections, ...hydraulicLinks.map(link => ({ from: link.from.componentId, to: link.to.componentId }))];
+  const partition = physicalConnections.length ? partitionMechanicalBodies(document, physicalConnections, componentDefinitions) : null;
   const bodyId = id => vehicleId + (partition?.componentBody.get(id) ?? 0);
-  const objectsById = new Map(hostObjects.map(object => [object.id, object]));
   const definitions = [...new Set(hostObjects.map(object => object.type))];
   const definitionIndex = new Map(definitions.map((id, index) => [id, index]));
   const componentIds = new Map(hostObjects.map((object, index) => [object.id, index + 1]));
@@ -378,6 +385,7 @@ export function toNativePairFromEditor(document, { vehicleId = 1, componentDefin
   if (exportNodes.length !== referencedNodeIds.size) throw new Error('Native export has a structural reference to a missing node');
   const nodeIds = new Map(exportNodes.map((node, index) => [node.id, index + 1]));
   const nativePoints = new Map(exportNodes.map(node => [node.id, nativeCells(node.position)]));
+  const mounted = new Map();
   const components = hostObjects.map(object => {
     const result = {
       def: definitionIndex.get(object.type),
@@ -385,12 +393,20 @@ export function toNativePairFromEditor(document, { vehicleId = 1, componentDefin
       pos: nativeCells(object.position),
       rot: nativeRotation(object.rotation),
     };
+    if (object.surfaceMount) {
+      const mount = nativeSurfaceMount(object, result.rot);
+      mounted.set(result.id, mount);
+      result.pos = mount.pos; result.rot = mount.rot;
+    }
     const paintedIndex = nativePaintIndex(object.paintColor, undefined, 'component paint');
     if (paintedIndex !== undefined) result.colors = Array.from({ length: object.colors?.length || 1 }, () => paintedIndex);
     else if (Array.isArray(object.colors) && object.colors.every(color => nativeColor(color) !== undefined)) result.colors = [...object.colors];
     if (Array.isArray(object.nativeExtension) && object.nativeExtension.length === 3 && object.nativeExtension.every(Number.isInteger)) result.ext = [...object.nativeExtension];
     const nativeProperties = validateNativeProperties(object.nativeProperties);
     if (nativeProperties) Object.assign(result, nativeProperties);
+    if (HYDRAULIC_PROFILES[object.type]) {
+      delete result.connected_node_index; delete result.length_max; delete result.extension_factor;
+    }
     if (NATIVE_MECHANICAL_MATE_RULES.some(rule => rule.a === object.type || rule.b === object.type)) {
       // Relationship IDs are derived from the current snapshot, never copied
       // from imported simulation state or a previous rail slider list.
@@ -426,6 +442,13 @@ export function toNativePairFromEditor(document, { vehicleId = 1, componentDefin
       if (connection.type === 'mounting') { a.con_orient_index = connection.orientationIndices[0]; b.con_orient_index = connection.orientationIndices[1]; }
     }
   }
+  for (const link of hydraulicLinks) {
+    const base = objectsById.get(link.from.componentId); const rod = objectsById.get(link.to.componentId);
+    if ([base, rod].some(object => object.mirror || object.localMirrorAxes?.length)) throw hydraulicError('reflection');
+    const a = components[componentIds.get(base.id) - 1]; const b = components[componentIds.get(rod.id) - 1];
+    Object.assign(a, { connected_vehicle: bodyId(rod.id), connected_component: b.id, connected_node_index: link.to.port ?? 0, length_max: link.lengthMax, extension_factor: link.extensionFactor });
+    Object.assign(b, { connected_vehicle: bodyId(base.id), connected_component: a.id, connected_node_index: link.from.port ?? 0 });
+  }
   const nodes = exportNodes.map(node => ({ id: nodeIds.get(node.id), pos: nativeCells(node.position) }));
   const edges = (topology.edges || []).map(edge => {
     const result = { n0: nodeIds.get(edge.a), n1: nodeIds.get(edge.b) };
@@ -448,9 +471,23 @@ export function toNativePairFromEditor(document, { vehicleId = 1, componentDefin
     const first = componentIds.get(link.from?.componentId); const second = componentIds.get(link.to?.componentId);
     if (!first || !second) return [];
     const endpoint = (value, id) => ({ comp: id, ...(Number.isInteger(value?.port) && value.port !== 0 ? { pos: value.port } : {}) });
+    // Tracks are generated from wheel endpoint links in the game; no sampled
+    // track pieces, route points or diagnostic colors belong in their save.
+    if (isTrackLink(link, objectsById, componentDefinitions)) return [{ p0: endpoint(link.from, first), p1: endpoint(link.to, second) }];
     const color = nativePaintIndex(link.paintColor, link.color, 'connection paint');
     return [{ p0: endpoint(link.from, first), p1: endpoint(link.to, second), ...(Array.isArray(link.points) ? { points: link.points.map(nativeCells) } : {}), ...(color !== undefined ? { color } : {}) }];
   })]));
+  const componentGrids = values => {
+    const grids = [{ components: [] }]; const byFrame = new Map();
+    for (const component of values) {
+      const mount = mounted.get(component.id);
+      if (!mount) { grids[0].components.push(component); continue; }
+      const key = JSON.stringify([mount.origin, mount.dir]);
+      if (!byFrame.has(key)) { const grid = { origin: mount.origin, dir: mount.dir, components: [] }; byFrame.set(key, grid); grids.push(grid); }
+      byFrame.get(key).components.push(component);
+    }
+    return grids;
+  };
   const vehicle = {
     id: vehicleId,
     transform: { m: [...nativeIdentity], t: [0, 0, 0] },
@@ -458,7 +495,7 @@ export function toNativePairFromEditor(document, { vehicleId = 1, componentDefin
     edges,
     plates,
     plate_paint: [],
-    grids: [{ components }],
+    grids: componentGrids(components),
     ...links,
     loot_locations: [],
     creature_locations: [],
@@ -471,13 +508,13 @@ export function toNativePairFromEditor(document, { vehicleId = 1, componentDefin
     nodes: nodes.filter((node, i) => partition.nodeBody.get(exportNodes[i].id) === index),
     edges: edges.filter((edge, i) => partition.nodeBody.get(topology.edges[i].a) === index),
     plates: plates.filter((plate, i) => partition.nodeBody.get(topology.plates[i].nodeIds[0]) === index),
-    grids: [{ components: components.filter((component, i) => partition.componentBody.get(hostObjects[i].id) === index) }],
+    grids: componentGrids(components.filter((component, i) => partition.componentBody.get(hostObjects[i].id) === index)),
     ...Object.fromEntries(Object.entries(links).map(([kind, values]) => [kind, values.filter(link => partition.componentBody.get(hostObjects[link.p0.comp - 1].id) === index)])),
   })) : [vehicle];
   return {
     data: { definitions: { components: definitions }, vehicles: { vehicles } },
     meta: { vehicles: { vehicles: vehicles.map(body => {
-      const points = [...body.grids.flatMap(grid => grid.components).map(component => component.pos.map(value => value * CELL_SIZE_WORLD)), ...body.nodes.map(node => node.pos.map(value => value * CELL_SIZE_WORLD))];
+      const points = [...body.grids.flatMap(grid => grid.components).map(component => nativeCells(hostObjects[component.id - 1].position).map(value => value * CELL_SIZE_WORLD)), ...body.nodes.map(node => node.pos.map(value => value * CELL_SIZE_WORLD))];
       return { id: body.id, transform: structuredClone(body.transform), bounds: nativeBounds(points) };
     }) } },
   };

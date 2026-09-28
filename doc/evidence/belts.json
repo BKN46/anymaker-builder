@@ -1,0 +1,201 @@
+{
+  "checkedOn": "2026-09-28",
+  "source": {
+    "file": "bin/game.gcl",
+    "bytes": 81870449,
+    "sha256": "d9725681f1b0bff321c58fcadc0d2e12104919a541eef074cf12945b283edb75"
+  },
+  "functions": [
+    {
+      "name": "client_scene.vehicle_belt.rebuild",
+      "signature": "() client_scene.vehicle_belt.rebuild (client_scene.vehicle_belt, client_scene.vehicle)",
+      "signatureOffset": "0xf3876f",
+      "codeOffset": "0xf39fcf",
+      "codeSize": "0x72a8",
+      "codeSha256": "28f81921e3421acd86c857e6a71bfd33d4e89d557a4c8ad3c6afa57e4e1328f5"
+    },
+    {
+      "name": "client_scene.vehicle_belt.rebuild",
+      "signature": "() client_scene.vehicle_belt.rebuild (client_scene.vehicle)",
+      "signatureOffset": "0xf468d4",
+      "codeOffset": "0xf486e8",
+      "codeSize": "0x1d88",
+      "codeSha256": "2bd21fb9827a5b377470d51940881f8982cbfd4fcce3addc508253ec2c3a40e0"
+    },
+    {
+      "name": "client_scene.vehicle_belt.tick",
+      "signature": "() client_scene.vehicle_belt.tick (client_scene.vehicle_belt, client_scene.vehicle, const f64)",
+      "signatureOffset": "0xf4b79a",
+      "codeOffset": "0xf4ba14",
+      "codeSize": "0x198",
+      "codeSha256": "be41d92ff8f95cd5e3bd557bdbc98759da294ba2f9b4c712afdba6a50a49234e"
+    },
+    {
+      "name": "client_scene.vehicle_component.engine_wheel.get_belt_data",
+      "signature": "() client_scene.vehicle_component.engine_wheel.get_belt_data (const client_scene.vehicle_component.engine_wheel, f64, bool, f64)",
+      "signatureOffset": "0x105b02b",
+      "codeOffset": "0x105b1bc",
+      "codeSize": "0xe0",
+      "codeSha256": "5c881e4a0271ddf1191ffa8d4c0b732f567086ebc7348ebdbbde17435d9ed36d"
+    },
+    {
+      "name": "client_scene.vehicle_component.engine_wheel_b.get_belt_data",
+      "signature": "() client_scene.vehicle_component.engine_wheel_b.get_belt_data (const client_scene.vehicle_component.engine_wheel_b, f64, bool, f64)",
+      "signatureOffset": "0x105cb4f",
+      "codeOffset": "0x105cce4",
+      "codeSize": "0xe0",
+      "codeSha256": "c54c8c1f6976c042bf605881f4371edc7a3affe6f927d880578f584d6e04c69f"
+    },
+    {
+      "name": "client_scene.vehicle_component.engine_wheel_c.get_belt_data",
+      "signature": "() client_scene.vehicle_component.engine_wheel_c.get_belt_data (const client_scene.vehicle_component.engine_wheel_c, f64, bool, f64)",
+      "signatureOffset": "0x105cefd",
+      "codeOffset": "0x105d092",
+      "codeSize": "0xe0",
+      "codeSha256": "72a12d955950f6082b7305ea9a91fdac7440a0fe572877b12131b1227ef49f64"
+    },
+    {
+      "name": "client_scene.vehicle_component.pulley_wheel.get_belt_data",
+      "signature": "() client_scene.vehicle_component.pulley_wheel.get_belt_data (const client_scene.vehicle_component.pulley_wheel, f64, bool, f64)",
+      "signatureOffset": "0x114bafc",
+      "codeOffset": "0x114bc8d",
+      "codeSize": "0xe0",
+      "codeSha256": "25f72246b65b370590c4193ef6dfcf71717c7fb96badb796d27e570f35e01f7f"
+    },
+    {
+      "name": "server_scene.vehicle_component.engine_wheel.parse_save_data",
+      "signature": "() server_scene.vehicle_component.engine_wheel.parse_save_data (server_scene.vehicle_component.engine_wheel, server_scene.save_data.parser)",
+      "signatureOffset": "0x3397cb7",
+      "codeOffset": "0x3397eb0",
+      "codeSize": "0xc0",
+      "codeSha256": "6f9656f396d687770c6e511c214db430bd82dada9d90ae8902b87358f3d3e688"
+    },
+    {
+      "name": "server_scene.vehicle_component.pulley_wheel.parse_save_data",
+      "signature": "() server_scene.vehicle_component.pulley_wheel.parse_save_data (server_scene.vehicle_component.pulley_wheel, server_scene.save_data.parser)",
+      "signatureOffset": "0x3610655",
+      "codeOffset": "0x361084e",
+      "codeSize": "0xc0",
+      "codeSha256": "6f9656f396d687770c6e511c214db430bd82dada9d90ae8902b87358f3d3e688"
+    }
+  ],
+  "constants": [
+    {
+      "name": "pulley_wheel",
+      "address": "0x114bd65",
+      "format": "f64",
+      "value": 0.04
+    },
+    {
+      "name": "engine_wheel",
+      "address": "0x105b294",
+      "format": "f64",
+      "value": 0.1
+    },
+    {
+      "name": "engine_wheel_b",
+      "address": "0x105cdbc",
+      "format": "f64",
+      "value": 0.155
+    },
+    {
+      "name": "engine_wheel_c",
+      "address": "0x105d16a",
+      "format": "f64",
+      "value": 0.267
+    },
+    {
+      "name": "halfWidth",
+      "address": "0xf4125f",
+      "format": "f64",
+      "value": 0.028
+    },
+    {
+      "name": "halfThickness",
+      "address": "0xf41267",
+      "format": "f64",
+      "value": 0.006
+    },
+    {
+      "name": "uvDensity",
+      "address": "0xf4126f",
+      "format": "f64",
+      "value": 16.0
+    },
+    {
+      "name": "angleMultiplier",
+      "address": "0xf411df",
+      "format": "f64",
+      "value": -2.0
+    },
+    {
+      "name": "tangentTolerance",
+      "address": "0xf411ef",
+      "format": "f64",
+      "value": 0.0001
+    },
+    {
+      "name": "tangents",
+      "address": "0xf411bf",
+      "format": "s32",
+      "value": 32
+    }
+  ],
+  "catalog": [
+    {
+      "file": "public/data/definitions/pulley_wheel.json",
+      "sha256": "1eb9930adf2cf6c63afb51c57c3e2ed6a0c563113f8461431e800d6acf392d8c"
+    },
+    {
+      "file": "public/data/definitions/engine_wheel.json",
+      "sha256": "cf07f646bf6b685dcf6181c84be22df026f72c6f1623c4dda65741150e846caf"
+    },
+    {
+      "file": "public/data/definitions/engine_wheel_b.json",
+      "sha256": "d69328efa61daef10e5cca1f2f3b68c7fee0fdd1ea7a68d05326015bc4d30ad9"
+    },
+    {
+      "file": "public/data/definitions/engine_wheel_c.json",
+      "sha256": "827287605230dfbec7d61f694488239ecb1e2f343935005c595b979e3e59ff29"
+    }
+  ],
+  "texture": {
+    "source": "textures/belt.txtr",
+    "sourceSha256": "71455c7625963a1b66353d3229ecea120ab8c1380aab2a0f081cf36d1e4b9779",
+    "sourceBytes": 5504,
+    "format": "TXTR v2 RGBA8",
+    "width": 32,
+    "height": 32,
+    "sourceMipLevels": 6,
+    "url": "assets/textures/belt.png",
+    "outputSha256": "5a763f5388e7abeeb864a80fabd74acc3b8237c3b54704bba5a2a5c8e0128852",
+    "outputBytes": 109,
+    "rgbaSha256": "cbc86395cf8c5c04533a85c2c91c6c076bfa5f82dee7807dd3ca366612988c4c"
+  },
+  "sample": {
+    "file": "test-vehicle/vehicle.data",
+    "sha256": "89844924ac0b99c714b90ee2055beae478f8e0f0ea10433ae4dc855975302210",
+    "vehicle": 553,
+    "links": 6,
+    "wheels": [
+      27,
+      30,
+      14,
+      29,
+      31,
+      28
+    ],
+    "reverseWheels": [
+      31
+    ]
+  },
+  "decompilation": {
+    "file": "tmp/tracks/client_scene.vehicle_belt.rebuild_links.named.c",
+    "codeOffset": "0xf39fcf",
+    "notes": "Existing named decompilation; matching GCL code hashes rechecked for this task. Local raw output is not published."
+  },
+  "limitations": [
+    "Static geometry and texture only; no simulated speed or animated phase",
+    "Game loading and identical-camera visual comparison have not been performed"
+  ]
+}

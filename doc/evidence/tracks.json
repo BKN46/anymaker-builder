@@ -1,0 +1,521 @@
+{
+  "checkedOn": "2026-09-28",
+  "source": {
+    "file": "bin/game.gcl",
+    "bytes": 81870449,
+    "sha256": "d9725681f1b0bff321c58fcadc0d2e12104919a541eef074cf12945b283edb75"
+  },
+  "functions": [
+    {
+      "name": "client_scene.vehicle_belt.G_TRACK_NODE_TANGENT_COUNT.$ctor",
+      "signature": "() client_scene.vehicle_belt.G_TRACK_NODE_TANGENT_COUNT.$ctor ()",
+      "signatureOffset": "0xf35856",
+      "codeOffset": "0xf358e6",
+      "codeSize": "0x18",
+      "codeSha256": "35674fd81a586ee946dd62a66a78cf058d615238dcca3a41d060f6a50d9e7600"
+    },
+    {
+      "name": "client_scene.vehicle_belt.rebuild",
+      "signature": "() client_scene.vehicle_belt.rebuild (client_scene.vehicle_belt, client_scene.vehicle)",
+      "signatureOffset": "0xf3876f",
+      "codeOffset": "0xf39fcf",
+      "codeSize": "0x72a8",
+      "codeSha256": "28f81921e3421acd86c857e6a71bfd33d4e89d557a4c8ad3c6afa57e4e1328f5"
+    },
+    {
+      "name": "client_scene.vehicle_belt.rebuild",
+      "signature": "() client_scene.vehicle_belt.rebuild (client_scene.vehicle)",
+      "signatureOffset": "0xf468d4",
+      "codeOffset": "0xf486e8",
+      "codeSize": "0x1d88",
+      "codeSha256": "2bd21fb9827a5b377470d51940881f8982cbfd4fcce3addc508253ec2c3a40e0"
+    },
+    {
+      "name": "client_scene.vehicle_belt_track._push_track_data",
+      "signature": "() client_scene.vehicle_belt_track._push_track_data (const client_scene.vehicle_belt_track, scene_renderer, const bitset, const mat34)",
+      "signatureOffset": "0xf4e2a8",
+      "codeOffset": "0xf4e4b6",
+      "codeSize": "0x360",
+      "codeSha256": "456b546c5949d0ee1648d78a07e3542a16efcbc96140a0705073e641d3b19d09"
+    },
+    {
+      "name": "client_scene.vehicle_belt_track.angle_to_segment",
+      "signature": "(s32) client_scene.vehicle_belt_track.angle_to_segment (const f64)",
+      "signatureOffset": "0xf4eaa3",
+      "codeOffset": "0xf4eb68",
+      "codeSize": "0x88",
+      "codeSha256": "d6d49350bc2641d6d01cfc42d26d234861eb4367b5b9dc0070c4f6605a48e9c7"
+    },
+    {
+      "name": "client_scene.vehicle_belt_track.get_track_piece_length",
+      "signature": "(f64) client_scene.vehicle_belt_track.get_track_piece_length (const vehicle_component_definition.e_logic_node_type)",
+      "signatureOffset": "0xf52f58",
+      "codeOffset": "0xf53009",
+      "codeSize": "0x118",
+      "codeSha256": "2a335410826809735451606e3a35dd5027e65e555327e6b6e949f0fc3676547e"
+    },
+    {
+      "name": "client_scene.vehicle_belt_track.get_track_transforms",
+      "signature": "() client_scene.vehicle_belt_track.get_track_transforms (client_scene.vehicle_belt_track, const mat34, vector<mat34>)",
+      "signatureOffset": "0xf5325a",
+      "codeOffset": "0xf53838",
+      "codeSize": "0x1430",
+      "codeSha256": "334c88be955200f02d03fb90445dd1b87be9ecb724632b9971de1c7bfc88ed24"
+    },
+    {
+      "name": "client_scene.vehicle_belt_track.rebuild",
+      "signature": "() client_scene.vehicle_belt_track.rebuild (client_scene.vehicle_belt_track, client_scene.vehicle)",
+      "signatureOffset": "0xf55cbe",
+      "codeOffset": "0xf56d60",
+      "codeSize": "0x3308",
+      "codeSha256": "97dbcdc67dfb59fe64e014529139beef1172b44b4184459e00f8d11d39ca7fae"
+    },
+    {
+      "name": "client_scene.vehicle_belt_track.segment_to_angle",
+      "signature": "(f64) client_scene.vehicle_belt_track.segment_to_angle (const s32)",
+      "signatureOffset": "0xf5c71d",
+      "codeOffset": "0xf5c7be",
+      "codeSize": "0x50",
+      "codeSha256": "466fe7e46012434ff96c5324a13bab9d3a907ecc2ac7e78b6766304ba18a9744"
+    },
+    {
+      "name": "client_scene.vehicle_belt_track.segment_to_angle",
+      "signature": "(f64) client_scene.vehicle_belt_track.segment_to_angle (const f64)",
+      "signatureOffset": "0xf5c8b3",
+      "codeOffset": "0xf5c954",
+      "codeSize": "0x50",
+      "codeSha256": "696b2735bf8a41e6a6abaef505a75e8d9b6203f67fe5e30c6b14057cc7e2975d"
+    },
+    {
+      "name": "client_scene.vehicle_component.roller_wheel_fixed.get_belt_track_data",
+      "signature": "() client_scene.vehicle_component.roller_wheel_fixed.get_belt_track_data (const client_scene.vehicle_component.roller_wheel_fixed, f64, f64, vec3)",
+      "signatureOffset": "0x116305d",
+      "codeOffset": "0x11632b0",
+      "codeSize": "0xe8",
+      "codeSha256": "1ecafaad00ef51534582b7061bcaadc64557423ea6c5bb1a1a1d35368835e700"
+    },
+    {
+      "name": "client_scene.vehicle_component.roller_wheel_fixed.get_radius",
+      "signature": "(f64) client_scene.vehicle_component.roller_wheel_fixed.get_radius (const client_scene.vehicle_component.roller_wheel_fixed)",
+      "signatureOffset": "0x11643b4",
+      "codeOffset": "0x1164444",
+      "codeSize": "0x30",
+      "codeSha256": "6008fa737668051eae83f517f4dfcbb79038ff28a4e34ac900d1e165bd0552ca"
+    },
+    {
+      "name": "client_scene.vehicle_component.roller_wheel_suspension.get_belt_track_data",
+      "signature": "() client_scene.vehicle_component.roller_wheel_suspension.get_belt_track_data (const client_scene.vehicle_component.roller_wheel_suspension, f64, f64, vec3)",
+      "signatureOffset": "0x116c2ba",
+      "codeOffset": "0x116c580",
+      "codeSize": "0x168",
+      "codeSha256": "c90e0ae3af577e814c6827b204347191761ef744df1e562afe6c62f1f11ae275"
+    },
+    {
+      "name": "client_scene.vehicle_component.roller_wheel_suspension.get_radius",
+      "signature": "(f64) client_scene.vehicle_component.roller_wheel_suspension.get_radius (const client_scene.vehicle_component.roller_wheel_suspension)",
+      "signatureOffset": "0x116df8c",
+      "codeOffset": "0x116e026",
+      "codeSize": "0x30",
+      "codeSha256": "6008fa737668051eae83f517f4dfcbb79038ff28a4e34ac900d1e165bd0552ca"
+    },
+    {
+      "name": "client_scene.vehicle_component.sprocket.get_belt_track_data",
+      "signature": "() client_scene.vehicle_component.sprocket.get_belt_track_data (const client_scene.vehicle_component.sprocket, f64, f64, vec3)",
+      "signatureOffset": "0x11970b5",
+      "codeOffset": "0x1197261",
+      "codeSize": "0xd0",
+      "codeSha256": "3915d7f205286f4f617c91161df2714a4611d749aef7b8970bae51b282d0e954"
+    },
+    {
+      "name": "server_scene.save_data.vehicle_belt_link.parse_save_data",
+      "signature": "() server_scene.save_data.vehicle_belt_link.parse_save_data (server_scene.save_data.vehicle_belt_link, server_scene.save_data.parser)",
+      "signatureOffset": "0x30f5133",
+      "codeOffset": "0x30f52e6",
+      "codeSize": "0x120",
+      "codeSha256": "473a7d374258c4d0469a2997dbf541ec1be2aac24cd0bf196f468e9e379f97af"
+    },
+    {
+      "name": "server_scene.vehicle_component.sprocket_large.G_RADIUS.$ctor",
+      "signature": "() server_scene.vehicle_component.sprocket_large.G_RADIUS.$ctor ()",
+      "signatureOffset": "0x3688639",
+      "codeOffset": "0x36886cd",
+      "codeSize": "0x20",
+      "codeSha256": "f160b197bd18b667e3d8ba21a4ecdc879f5f325459e31d41271398cbcc70150f"
+    },
+    {
+      "name": "server_scene.vehicle_component.sprocket_large_narrow.G_RADIUS.$ctor",
+      "signature": "() server_scene.vehicle_component.sprocket_large_narrow.G_RADIUS.$ctor ()",
+      "signatureOffset": "0x3688c05",
+      "codeOffset": "0x3688ca7",
+      "codeSize": "0x20",
+      "codeSha256": "e6ba1f3b1cbb87f38de7811ba5ad721a1e64f2bc92bc4b582256604e02455349"
+    },
+    {
+      "name": "server_scene.vehicle_component.sprocket_large_wide.G_RADIUS.$ctor",
+      "signature": "() server_scene.vehicle_component.sprocket_large_wide.G_RADIUS.$ctor ()",
+      "signatureOffset": "0x3689241",
+      "codeOffset": "0x36892df",
+      "codeSize": "0x20",
+      "codeSha256": "21a9ff396c0496a70e82cef0118978fe9593ae64aa9a61791af7693ba13a6a00"
+    },
+    {
+      "name": "server_scene.vehicle_component.sprocket_small.G_RADIUS.$ctor",
+      "signature": "() server_scene.vehicle_component.sprocket_small.G_RADIUS.$ctor ()",
+      "signatureOffset": "0x368985d",
+      "codeOffset": "0x36898f1",
+      "codeSize": "0x20",
+      "codeSha256": "1fb25d8fd59257ae2e2ef992fce713588223724a293bbe5bbb2892f535b84a37"
+    },
+    {
+      "name": "server_scene.vehicle_component.sprocket_small_narrow.G_RADIUS.$ctor",
+      "signature": "() server_scene.vehicle_component.sprocket_small_narrow.G_RADIUS.$ctor ()",
+      "signatureOffset": "0x3689e29",
+      "codeOffset": "0x3689ecb",
+      "codeSize": "0x20",
+      "codeSha256": "b8fe5f027019f2f3891444cce2e9a8919c0b0f21bd6b626950347b31aec5f04d"
+    },
+    {
+      "name": "server_scene.vehicle_component.sprocket_small_wide.G_RADIUS.$ctor",
+      "signature": "() server_scene.vehicle_component.sprocket_small_wide.G_RADIUS.$ctor ()",
+      "signatureOffset": "0x368a465",
+      "codeOffset": "0x368a503",
+      "codeSize": "0x20",
+      "codeSha256": "d4364b0a46c7627ec3a1b0be593eb6839453c71a80203886996814d90b8946ec"
+    }
+  ],
+  "constants": [
+    {
+      "name": "tangent-count",
+      "address": "0xf358f6",
+      "format": "s32",
+      "value": 32
+    },
+    {
+      "name": "narrow-enum",
+      "address": "0xf530f1",
+      "format": "s32",
+      "value": 4
+    },
+    {
+      "name": "normal-enum",
+      "address": "0xf53101",
+      "format": "s32",
+      "value": 5
+    },
+    {
+      "name": "wide-enum",
+      "address": "0xf53111",
+      "format": "s32",
+      "value": 6
+    },
+    {
+      "name": "pitch-factor",
+      "address": "0xf530f9",
+      "format": "f64",
+      "value": 0.25
+    },
+    {
+      "name": "normal-width-factor",
+      "address": "0xf53109",
+      "format": "f64",
+      "value": 2
+    },
+    {
+      "name": "wide-width-factor",
+      "address": "0xf53119",
+      "format": "f64",
+      "value": 3
+    },
+    {
+      "name": "radius-small-narrow",
+      "address": "0x3689ee3",
+      "format": "f64",
+      "value": 0.08
+    },
+    {
+      "name": "radius-large-narrow",
+      "address": "0x3688cbf",
+      "format": "f64",
+      "value": 0.16
+    },
+    {
+      "name": "radius-small",
+      "address": "0x3689909",
+      "format": "f64",
+      "value": 0.18
+    },
+    {
+      "name": "radius-large",
+      "address": "0x36886e5",
+      "format": "f64",
+      "value": 0.34
+    },
+    {
+      "name": "radius-small-wide",
+      "address": "0x368a51b",
+      "format": "f64",
+      "value": 0.23
+    },
+    {
+      "name": "radius-large-wide",
+      "address": "0x36892f7",
+      "format": "f64",
+      "value": 0.43
+    }
+  ],
+  "meshes": [
+    {
+      "source": "meshes/components/tank_track_a.mesh",
+      "url": "assets/meshes/6a27efb143ab4a5f.json.gz",
+      "sourceSha256": "8da68e04c7e5d4f0aaaf20ac42051d024ec326148e1e21a23bfd93d27e6bd602",
+      "outputSha256": "a219674d2846fb7abe3d2f605075e7af7747c133ddf4eec5e63b92e0f7d6efbe",
+      "vertices": 376,
+      "triangles": 224
+    },
+    {
+      "source": "meshes/components/tank_track_b.mesh",
+      "url": "assets/meshes/3c13bbe1d9f10912.json.gz",
+      "sourceSha256": "2fda6d8e8346d55b4087732934266a57764c4abd151d6c98a53bdf7551202382",
+      "outputSha256": "2859b19b8253ba7523f276cfc694996370dc78681e6e2d4ca33496d41d0e2d81",
+      "vertices": 541,
+      "triangles": 305
+    },
+    {
+      "source": "meshes/components/tank_track_c.mesh",
+      "url": "assets/meshes/d63b4e94e03d7119.json.gz",
+      "sourceSha256": "78910588c06e356d66ca39fdb849291c6efd026b53cad51237fcaf6db0e183d6",
+      "outputSha256": "bd9cb966a0d3f7bcefb52f997b143e4bf949b4a2d317227f2dbd0b74ea31161c",
+      "vertices": 696,
+      "triangles": 404
+    }
+  ],
+  "catalog": [
+    {
+      "file": "public/data/definitions/sprocket_a.json",
+      "sha256": "63cb39e75ce2ccd156732580e10e5ee415a01dc3988af80c3cf6210ce2c0b07b",
+      "class": "sprocket_small_narrow",
+      "port": 0,
+      "nodeType": "belt_track_narrow",
+      "wheelCenter": [
+        0,
+        0,
+        0
+      ]
+    },
+    {
+      "file": "public/data/definitions/sprocket_b.json",
+      "sha256": "194e27263a1eea9e26a5ee367f8bcfe3fab91e9cc9e7211d49289aaff0eb6748",
+      "class": "sprocket_large_narrow",
+      "port": 0,
+      "nodeType": "belt_track_narrow",
+      "wheelCenter": [
+        0,
+        0,
+        0
+      ]
+    },
+    {
+      "file": "public/data/definitions/sprocket_c.json",
+      "sha256": "1153c2a2a37b7ef0d8e098f7f52db950aa32ea1c857c6dcc8daef4d6ca4f5d98",
+      "class": "sprocket_small",
+      "port": 0,
+      "nodeType": "belt_track",
+      "wheelCenter": [
+        0,
+        0,
+        0
+      ]
+    },
+    {
+      "file": "public/data/definitions/sprocket_d.json",
+      "sha256": "df3d986745b5a2d655da760b933516bca4b4aaeb464caa3d9509a8853a15df69",
+      "class": "sprocket_large",
+      "port": 0,
+      "nodeType": "belt_track",
+      "wheelCenter": [
+        0,
+        0,
+        0
+      ]
+    },
+    {
+      "file": "public/data/definitions/sprocket_e.json",
+      "sha256": "e37c87507a320440e593eb18d473f0798bc391c9cbdb5c856ca91179c0f38a46",
+      "class": "sprocket_small_wide",
+      "port": 0,
+      "nodeType": "belt_track_wide",
+      "wheelCenter": [
+        0,
+        0,
+        0
+      ]
+    },
+    {
+      "file": "public/data/definitions/sprocket_f.json",
+      "sha256": "c4706478f520e9be998dd1a837282bd4fe6c21159690a9b57f5a6b1b3c811655",
+      "class": "sprocket_large_wide",
+      "port": 0,
+      "nodeType": "belt_track_wide",
+      "wheelCenter": [
+        0,
+        0,
+        0
+      ]
+    },
+    {
+      "file": "public/data/definitions/roller_wheel_fixed_a.json",
+      "sha256": "d82d05f34d9cc97259bab36613dbccac510db6de2cd2ef110c7667398fae82a6",
+      "class": "roller_wheel_fixed_small_narrow",
+      "port": 0,
+      "nodeType": "belt_track_narrow",
+      "wheelCenter": [
+        0,
+        0,
+        0
+      ]
+    },
+    {
+      "file": "public/data/definitions/roller_wheel_fixed_b.json",
+      "sha256": "51cc60887e4d84a57e276ae1a6b2cc72c21c5e2ec2fface7de1c71c237ece9d0",
+      "class": "roller_wheel_fixed_large_narrow",
+      "port": 0,
+      "nodeType": "belt_track_narrow",
+      "wheelCenter": [
+        0,
+        0,
+        0
+      ]
+    },
+    {
+      "file": "public/data/definitions/roller_wheel_fixed_c.json",
+      "sha256": "bcaf71d6ee24cbb74742d9e544d5b8bab905bce518dc23c2d2072fde1198c7ee",
+      "class": "roller_wheel_fixed_small",
+      "port": 0,
+      "nodeType": "belt_track",
+      "wheelCenter": [
+        0,
+        0,
+        0
+      ]
+    },
+    {
+      "file": "public/data/definitions/roller_wheel_fixed_d.json",
+      "sha256": "c8488b905c31e4a43940c190e649a27d5e9f8039253dd0905cf5f0f9202b4f54",
+      "class": "roller_wheel_fixed_large",
+      "port": 0,
+      "nodeType": "belt_track",
+      "wheelCenter": [
+        0,
+        0,
+        0
+      ]
+    },
+    {
+      "file": "public/data/definitions/roller_wheel_fixed_e.json",
+      "sha256": "45f81c8681ce05cc3758ad5318a9a7d80e978111fbe9dfc4352c8ba506d443be",
+      "class": "roller_wheel_fixed_small_wide",
+      "port": 0,
+      "nodeType": "belt_track_wide",
+      "wheelCenter": [
+        0,
+        0,
+        0
+      ]
+    },
+    {
+      "file": "public/data/definitions/roller_wheel_fixed_f.json",
+      "sha256": "fe9d4a942894fc92cecf92927787eaee76a0bed6b16e0ebf9f6d8d9752e42450",
+      "class": "roller_wheel_fixed_large_wide",
+      "port": 0,
+      "nodeType": "belt_track_wide",
+      "wheelCenter": [
+        0,
+        0,
+        0
+      ]
+    },
+    {
+      "file": "public/data/definitions/roller_wheel_suspension_a.json",
+      "sha256": "67531bdc9bdfef89ce729b208879dfd2ee1fbbef4c78cdfea9f9ef532b5ddc4e",
+      "class": "roller_wheel_suspension_small_narrow",
+      "port": 0,
+      "nodeType": "belt_track_narrow",
+      "wheelCenter": [
+        0,
+        -0.016,
+        0
+      ]
+    },
+    {
+      "file": "public/data/definitions/roller_wheel_suspension_b.json",
+      "sha256": "b4ffc0e32dbf2dae9055008fa0effcda98c48300d342f2640956de9bc3dc9042",
+      "class": "roller_wheel_suspension_large_narrow",
+      "port": 0,
+      "nodeType": "belt_track_narrow",
+      "wheelCenter": [
+        -0.08,
+        -0.032,
+        0
+      ]
+    },
+    {
+      "file": "public/data/definitions/roller_wheel_suspension_c.json",
+      "sha256": "b676eb2a9510aa13b492b34f81a1b369960841b11ecf7fe191f4dde41ef4b227",
+      "class": "roller_wheel_suspension_small",
+      "port": 0,
+      "nodeType": "belt_track",
+      "wheelCenter": [
+        0,
+        0,
+        0
+      ]
+    },
+    {
+      "file": "public/data/definitions/roller_wheel_suspension_d.json",
+      "sha256": "ee4c5d9e13bb563a85bb1491ba68a0d8dd6f84bf0ef474f05f6a36eade5bd832",
+      "class": "roller_wheel_suspension_large",
+      "port": 0,
+      "nodeType": "belt_track",
+      "wheelCenter": [
+        -0.16,
+        0,
+        0
+      ]
+    },
+    {
+      "file": "public/data/definitions/roller_wheel_suspension_e.json",
+      "sha256": "42a8f3683224eff8d5cec831eae06ea9fa1d763ea14f064d830dc8bc1ea102e0",
+      "class": "roller_wheel_suspension_small_wide",
+      "port": 0,
+      "nodeType": "belt_track_wide",
+      "wheelCenter": [
+        -0.08,
+        0,
+        0
+      ]
+    },
+    {
+      "file": "public/data/definitions/roller_wheel_suspension_f.json",
+      "sha256": "92de5779ffcedbbcf752b762896aaae2c0fecfa4ae9b1ac40a2046f5616c8eaa",
+      "class": "roller_wheel_suspension_large_wide",
+      "port": 0,
+      "nodeType": "belt_track_wide",
+      "wheelCenter": [
+        -0.24,
+        0,
+        0
+      ]
+    }
+  ],
+  "nativeLink": {
+    "collection": "vehicles[].belt_links",
+    "endpointFields": [
+      "p0.comp",
+      "p0.pos",
+      "p1.comp",
+      "p1.pos"
+    ],
+    "defaultPort": 0
+  },
+  "validationBoundary": "Game-code research and synthetic fixtures; no track-bearing native save or in-game loading validation. Suspension offset and track phase use the static construction pose."
+}

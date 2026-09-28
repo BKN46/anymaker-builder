@@ -6,6 +6,11 @@ import { AXES, assertGridScalar, assertGridVector } from './grid.js';
 const clone = value => structuredClone(value);
 const vector = (value, fallback = 0) => Object.fromEntries(AXES.map(axis => [axis, Number(value?.[axis] ?? fallback)]));
 const add = (a, b) => Object.fromEntries(AXES.map(axis => [axis, a[axis] + b[axis]]));
+const componentPosition = (object, value, label) => {
+  if (!object.surfaceMount) return assertGridVector(value, label);
+  if (AXES.some(axis => !Number.isFinite(value[axis]) || Math.abs(value[axis]) > 10000)) throw new Error('Invalid inclined component position');
+  return vector(value);
+};
 
 export function allocateIds(objects, suffix = 'copy') {
   const used = new Set(objects.map(object => object.id));
@@ -29,7 +34,7 @@ export function copyObjects(objects, ids, delta = { x: 0, y: 0, z: 0 }) {
     if (!selected.has(object.id)) continue;
     const copy = clone(object);
     copy.id = allocate(object.id);
-    copy.position = assertGridVector(add(assertGridVector(vector(copy.position), '组件位置'), shift), '复制后的组件位置');
+    copy.position = componentPosition(copy, add(componentPosition(copy, vector(copy.position), '组件位置'), shift), '复制后的组件位置');
     idMap[object.id] = copy.id;
     next.push(copy);
   }
@@ -41,7 +46,7 @@ export function moveObjects(objects, ids, delta) {
   const shift = assertGridVector(vector(delta), '移动位移');
   return {
     objects: clone(objects).map(object => selected.has(object.id)
-      ? { ...object, position: assertGridVector(add(assertGridVector(vector(object.position), '组件位置'), shift), '移动后的组件位置') }
+      ? { ...object, position: componentPosition(object, add(componentPosition(object, vector(object.position), '组件位置'), shift), '移动后的组件位置') }
       : object),
   };
 }

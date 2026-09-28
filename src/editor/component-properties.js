@@ -6,6 +6,7 @@
 const blockedKeys = new Set([
   'id', 'def', 'pos', 'rot', 'colors', 'ext',
   'connected_vehicle', 'connected_component',
+  'connected_node_index',
 ]);
 const keyPattern = /^[A-Za-z][A-Za-z0-9_]{0,79}$/;
 // Native typed values use `_type` (for example a microcontroller's f64 or
@@ -99,7 +100,7 @@ const known = {
   gas_tank_a: [content('gas', ['air'])],
   gas_tank_b: [content('gas', ['air'])],
   gas_tank_c: [content('gas', ['air'])],
-  pulley_wheel: [descriptor('reverse', 'boolean', { defaultValue: false })],
+  ...forTypes(['pulley_wheel', 'engine_wheel', 'engine_wheel_b', 'engine_wheel_c'], [descriptor('reverse', 'boolean', { defaultValue: false })]),
   electric_motor_a: [descriptor('reverse', 'boolean', { defaultValue: false }), number('power', { min: 0, max: 1, defaultValue: 1 })],
   electric_motor_b: [descriptor('reverse', 'boolean', { defaultValue: false }), number('power', { min: 0, max: 1, defaultValue: 1 })],
   electric_motor_c: [descriptor('reverse', 'boolean', { defaultValue: false }), number('power', { min: 0, max: 1, defaultValue: 1 })],
