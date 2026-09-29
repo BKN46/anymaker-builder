@@ -228,23 +228,28 @@ button:focus-visible, input:focus-visible, select:focus-visible { outline: 2px s
 .subgrid-options { display: flex; flex-wrap: wrap; align-items: center; gap: 8px; margin: 7px 0 10px; }
 .subgrid-options button { flex: 1 1 100%; }
 .subgrid-options label { display: inline-flex; align-items: center; gap: 4px; color: var(--muted); font-size: 11px; white-space: nowrap; }
-.subgrid-row { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); align-items: center; gap: 6px; padding: 8px; border: 1px solid var(--line); border-radius: 7px; background: var(--panel-soft); }
-.subgrid-detail { grid-column: 1 / -1; min-width: 0; display: grid; gap: 2px; }
+.subgrid-row { display: grid; gap: 5px; padding: 6px; border: 1px solid var(--line); border-radius: 7px; background: var(--panel-soft); }
+.subgrid-detail { min-width: 0; display: grid; gap: 2px; }
 .subgrid-detail strong { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; font-size: 12px; }
 .subgrid-detail input { width: 100%; min-width: 0; font-size: 12px; }
 .subgrid-detail span { overflow: hidden; color: var(--muted); font-size: 10px; text-overflow: ellipsis; white-space: nowrap; }
-.subgrid-row button { min-width: 0; padding: 5px 3px; font-size: 11px; }
+.subgrid-actions { display: grid; grid-template-columns: repeat(4, minmax(0, 1fr)); gap: 3px; min-width: 0; }
+.subgrid-actions button { min-width: 0; padding: 3px 2px; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; font-size: 10px; }
 .subgrid-row .subgrid-delete:not(:disabled) { color: var(--danger, #c53d4b); }
 .archive-create { display: flex; gap: 6px; margin: 8px 0; }
 .archive-create input { min-width: 0; flex: 1; }
 .archive-create button { flex: none; }
 .archive-list { display: grid; gap: 7px; }
-.archive-row { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); align-items: center; gap: 5px; padding: 8px; border: 1px solid var(--line); border-radius: 7px; background: var(--panel-soft); }
-.archive-detail { min-width: 0; display: grid; gap: 2px; grid-column: 1 / -1; }
-.archive-drive-sync { grid-column: 1 / -1; }
+.archive-row { display: grid; gap: 5px; padding: 6px; border: 1px solid var(--line); border-radius: 7px; background: var(--panel-soft); }
+.archive-detail { min-width: 0; display: grid; gap: 2px; }
+.archive-actions { display: grid; grid-template-columns: minmax(28px, .75fr) minmax(48px, 1.55fr) minmax(52px, 1.4fr) minmax(36px, .9fr) 24px; gap: 2px; min-width: 0; }
+.archive-actions.archive-actions-auto { grid-template-columns: minmax(0, .8fr) minmax(0, 1.5fr) minmax(0, 1.25fr) 25px; }
+.archive-drive-sync { display: inline-flex; align-items: center; justify-content: center; padding: 3px; }
+.archive-drive-sync svg { width: 15px; height: 15px; fill: none; stroke: currentColor; stroke-width: 1.8; stroke-linecap: round; stroke-linejoin: round; }
 .drive-archives { border-top: 1px solid var(--line); margin: 14px 0; padding-top: 12px; }
 .drive-archives h3 { margin: 0 0 5px; font-size: 13px; }
 .drive-archives details { margin: 10px 0; }
+.drive-archives details[hidden] { display: none; }
 .drive-archives summary { cursor: pointer; margin-bottom: 6px; font-size: 11px; }
 .drive-archives label { display: block; margin-bottom: 5px; font-size: 11px; }
 .drive-archives input { width: 100%; min-width: 0; padding: 7px; color: inherit; border: 1px solid #d0d5dd; border-radius: 5px; font-size: 11px; }
@@ -254,10 +259,10 @@ button:focus-visible, input:focus-visible, select:focus-visible { outline: 2px s
 #drive-refresh { flex-basis: 100%; }
 #drive-list { max-height: 260px; overflow: auto; }
 .drive-actions button, .drive-archives > .status { white-space: normal; overflow-wrap: anywhere; }
-.drive-download { grid-column: 1 / -1; }
 .archive-detail strong { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; font-size: 12px; }
-.archive-detail span { color: var(--muted); font-size: 10px; }
-.archive-action, .archive-delete { padding: 5px 7px; font-size: 11px; white-space: nowrap; }
+.archive-detail span { overflow: hidden; color: var(--muted); font-size: 10px; text-overflow: ellipsis; white-space: nowrap; }
+.archive-action, .archive-delete { padding: 3px 2px; font-size: 10px; white-space: nowrap; }
+.archive-actions button { min-width: 0; padding-inline: 1px; overflow: hidden; text-overflow: ellipsis; }
 .archive-delete:not(:disabled) { color: var(--danger, #c53d4b); }
 .archive-code-panel { margin-top: 14px; padding-top: 12px; border-top: 1px solid var(--line); }
 .archive-code-panel h3 { margin: 0 0 5px; font-size: 13px; }

@@ -2804,7 +2804,8 @@ function renderSubgridList() {
     remove.title = t(gridId === 'grid-1' ? '主网格不可删除' : '删除子网格');
     remove.setAttribute('aria-label', t('删除子网格') + ': ' + title.textContent);
     remove.onclick = () => { void deleteSubgrid(gridId); };
-    detail.append(title, meta); row.append(detail, select, action, rename, remove); host.append(row);
+    const actions = document.createElement('div'); actions.className = 'subgrid-actions';
+    detail.append(title, meta); actions.append(select, action, rename, remove); row.append(detail, actions); host.append(row);
   }
 }
 function archiveId() {
@@ -2831,20 +2832,22 @@ function renderArchiveList() {
     detail.append(title, meta);
     const load = document.createElement('button'); load.type = 'button'; load.className = 'archive-action'; setText(load, '读取'); load.title = t('读取存档'); load.setAttribute('aria-label', `${t('读取存档')}: ${record.name}`); load.disabled = busy;
     load.onclick = () => { void readArchive(record); };
-    const subgrid = document.createElement('button'); subgrid.type = 'button'; subgrid.className = 'archive-action'; setText(subgrid, '作为子网格'); subgrid.title = t('作为子网格导入'); subgrid.setAttribute('aria-label', `${t('作为子网格导入')}: ${record.name}`); subgrid.disabled = busy;
+    const subgrid = document.createElement('button'); subgrid.type = 'button'; subgrid.className = 'archive-action'; setText(subgrid, '导入网格'); subgrid.title = t('作为子网格导入'); subgrid.setAttribute('aria-label', `${t('作为子网格导入')}: ${record.name}`); subgrid.disabled = busy;
     subgrid.onclick = () => { void importArchiveAsSubgrid(record); };
-    const overwrite = document.createElement('button'); overwrite.type = 'button'; overwrite.className = 'archive-action archive-overwrite'; setText(overwrite, '覆盖'); overwrite.setAttribute('aria-label', `${t('覆盖存档')}: ${record.name}`); overwrite.disabled = busy || Boolean(driveArchives?.isBusy());
+    const overwrite = document.createElement('button'); overwrite.type = 'button'; overwrite.className = 'archive-action archive-overwrite'; setText(overwrite, '覆盖'); overwrite.title = t('覆盖存档'); overwrite.setAttribute('aria-label', `${t('覆盖存档')}: ${record.name}`); overwrite.disabled = busy || Boolean(driveArchives?.isBusy());
     overwrite.onclick = () => { void overwriteArchive(record); };
-    const sync = document.createElement('button'); sync.type = 'button'; sync.className = 'archive-action archive-drive-sync'; setText(sync, '同步到谷歌云盘'); sync.disabled = busy || Boolean(driveArchives?.isBusy());
+    const sync = document.createElement('button'); sync.type = 'button'; sync.className = 'archive-action archive-drive-sync'; sync.innerHTML = '<svg viewBox="0 0 24 24" aria-hidden="true" focusable="false"><path d="M6 18.5h11a4 4 0 0 0 .4-8 5.5 5.5 0 0 0-10.5-1.4A4.8 4.8 0 0 0 6 18.5Z"/><path d="M12 16V9m-2.5 2.5L12 9l2.5 2.5"/></svg>'; sync.title = t('同步到谷歌云盘'); sync.setAttribute('aria-label', `${t('同步到谷歌云盘')}: ${record.name}`); sync.disabled = busy || Boolean(driveArchives?.isBusy());
     sync.onclick = () => { void driveArchives?.upload(record.id); };
-    row.append(detail, load, subgrid, overwrite);
+    const actions = document.createElement('div'); actions.className = 'archive-actions';
+    actions.append(load, subgrid, overwrite);
     if (record.kind !== 'auto') {
-      const remove = document.createElement('button'); remove.type = 'button'; remove.className = 'archive-delete'; setText(remove, '删除'); remove.title = t('删除存档'); remove.setAttribute('aria-label', `${t('删除存档')}: ${record.name}`); remove.disabled = busy;
-      remove.disabled = busy || Boolean(driveArchives?.isBusy());
+      const remove = document.createElement('button'); remove.type = 'button'; remove.className = 'archive-delete'; setText(remove, '删除'); remove.title = t('删除存档'); remove.setAttribute('aria-label', `${t('删除存档')}: ${record.name}`); remove.disabled = busy || Boolean(driveArchives?.isBusy());
       remove.onclick = () => { void removeArchive(record); };
-      row.append(remove);
+      actions.append(remove);
+    } else {
+      actions.classList.add('archive-actions-auto');
     }
-    row.append(sync);
+    actions.append(sync); row.append(detail, actions);
     host.append(row);
   }
 }
@@ -3060,7 +3063,7 @@ async function handleShareLink() {
 $('#archive-save').onclick = () => { void saveNamedArchive(); };
 driveArchives = mountGoogleDriveArchives({
   host: $('#archive-panel > .section'), store: archiveStore,
-  clientId: settings.googleClientId || import.meta.env.VITE_GOOGLE_CLIENT_ID || '',
+  clientId: settings.googleClientId, siteClientId: import.meta.env.VITE_GOOGLE_CLIENT_ID || '',
   saveClientId: value => { settings.googleClientId = value; saveSettings(); },
   validateDocument: value => migrateDocument(value, catalog.index),
   refreshArchives: refreshArchiveList, renderArchives: renderArchiveList, createId: archiveId, editorBusy: () => busy,

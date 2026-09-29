@@ -87,6 +87,13 @@ test('archives overwrite, sign in, create and update Drive files, list metadata 
   const cloud = await mockGoogle(page); await open(page);
   expect(cloud.scriptLoads).toBe(0); await configure(page);
   await importProject(page, sample('Original')); const row = await save(page);
+  await expect(row.locator('.archive-actions button')).toHaveCount(5);
+  await expect(row.locator('.archive-drive-sync svg')).toHaveCount(1);
+  await expect(row.locator('.archive-drive-sync')).toHaveAttribute('aria-label', 'Sync to Google Drive: My vehicle');
+  await page.locator('#workspace').evaluate(element => element.style.setProperty('--left-sidebar-width', '240px'));
+  expect(new Set(await row.locator('.archive-actions button').evaluateAll(buttons => buttons.map(button => Math.round(button.getBoundingClientRect().top)))).size).toBe(1);
+  expect(await row.evaluate(element => element.scrollWidth <= element.clientWidth)).toBe(true);
+  expect(await row.locator('.archive-actions button').evaluateAll(buttons => buttons.filter(button => button.scrollWidth > button.clientWidth).map(button => ({ text: button.textContent, width: button.clientWidth, needed: button.scrollWidth })))).toEqual([]);
   const id = await row.getAttribute('data-archive-id');
   await importProject(page, sample('Edited', 1));
   page.once('dialog', dialog => dialog.accept()); await row.locator('.archive-overwrite').click();
@@ -117,6 +124,9 @@ test('archives overwrite, sign in, create and update Drive files, list metadata 
   expect(persisted).toContain(CLIENT_ID); expect(persisted).not.toContain('browser-test-only-token'); expect(JSON.stringify(await records(page))).not.toContain('browser-test-only-token');
   await page.reload(); await expect(page.locator('#viewport')).toHaveAttribute('data-ready', 'true');
   await expect(page.locator('#drive-client-id')).toHaveValue(CLIENT_ID); await expect(page.locator('#drive-connect')).toBeVisible(); await expect(page.locator('.drive-row')).toHaveCount(0);
+  await expect(page.locator('#drive-connect')).toBeEnabled();
+  await page.locator('#drive-connect').click(); await expect(page.locator('#drive-status')).toContainText('已连接 Google 云盘');
+  expect(await page.evaluate(() => window.googleTestCalls)).toBe(1);
   expect(errors).toEqual([]);
 });
 

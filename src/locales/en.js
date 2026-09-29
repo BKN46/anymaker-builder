@@ -8,6 +8,7 @@ export const englishMessages = {
   '使用当前载具覆盖存档“{name}”？': 'Overwrite archive "{name}" with the current vehicle?',
   '已覆盖存档 {name}': 'Overwrote archive {name}',
   '同步到谷歌云盘': 'Sync to Google Drive',
+  '导入网格': 'Add grid', '作为子网格导入': 'Import archive as subgrid',
   '按类型隐藏': 'Hide by type',
   '展开按类型隐藏': 'Expand hide by type',
   '收起按类型隐藏': 'Collapse hide by type',

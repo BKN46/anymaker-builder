@@ -3,12 +3,15 @@ import { createGoogleDriveAuth, loadGoogleIdentity, validGoogleClientId } from '
 import { createGoogleDrive } from './google-drive.js';
 import { decodeDriveArchive, encodeDriveArchive } from './drive-archive-format.js';
 
-export function mountGoogleDriveArchives({ host, store, clientId = '', saveClientId, validateDocument, refreshArchives, renderArchives, createId, editorBusy }) {
+export function mountGoogleDriveArchives({ host, store, clientId = '', siteClientId = '', saveClientId, validateDocument, refreshArchives, renderArchives, createId, editorBusy }) {
+  const siteConfigured = validGoogleClientId(siteClientId);
+  if (siteConfigured) clientId = siteClientId;
   const panel = document.createElement('section'); panel.className = 'drive-archives';
   panel.innerHTML = '<h3 data-i18n="Google 云盘"></h3><p class="status" data-i18n="同步已保存的存档；编辑后请先覆盖。云端目录：anymaker-builder-vehicles"></p><details id="drive-config"><summary data-i18n="Google 登录配置"></summary><label for="drive-client-id" data-i18n="OAuth Client ID（公开）"></label><input id="drive-client-id" type="text" maxlength="240" autocomplete="off" spellcheck="false"><p class="status" data-i18n="由站点维护者提供 Web OAuth Client ID；无需客户端密钥。"></p><button id="drive-config-save" type="button" data-i18n="保存登录配置"></button></details><div class="drive-actions"><button id="drive-connect" type="button" data-i18n="登录 Google"></button><button id="drive-disconnect" type="button" data-i18n="断开 Google 连接"></button><button id="drive-refresh" type="button" data-i18n="从谷歌云盘同步"></button></div><p id="drive-status" class="status" role="status" aria-live="polite"></p><div id="drive-list" class="archive-list"></div>';
   host.insertBefore(panel, host.querySelector('#archive-list')); applyTranslations(panel);
   const find = selector => panel.querySelector(selector);
   const input = find('#drive-client-id'); input.value = clientId;
+  find('#drive-config').hidden = siteConfigured;
   let auth = null; let loading = false; let working = false; let files = []; let listed = false;
   const drive = createGoogleDrive({ invalidate: () => { auth?.invalidate(); files = []; listed = false; } });
   const message = (key, params) => setText(find('#drive-status'), key, params);
@@ -72,7 +75,7 @@ export function mountGoogleDriveArchives({ host, store, clientId = '', saveClien
     working = true; render(); message('正在连接 Google 云盘…');
     return authorization.then(action).catch(fail).finally(() => { working = false; render(); });
   }
-  find('#drive-config').open = !validGoogleClientId(clientId);
+  find('#drive-config').open = !siteConfigured && !validGoogleClientId(clientId);
   find('#drive-config-save').onclick = () => {
     const value = input.value.trim();
     if (value && !validGoogleClientId(value)) { fail(new Error('请配置有效的 Google OAuth Client ID')); return; }
@@ -88,6 +91,7 @@ export function mountGoogleDriveArchives({ host, store, clientId = '', saveClien
     message('已获取 {count} 个云盘存档，点击下载后才读取文件内容', { count: files.length });
   });
   render();
+  if (validGoogleClientId(clientId)) void prepare();
   return {
     prepare, isBusy, relabel: render,
     upload(id) {

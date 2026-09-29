@@ -2360,6 +2360,11 @@ test('subgrid list deletes an authored subgrid as one undoable action', async ({
   await page.locator('#subgrid-create-btn').click();
   const row = page.locator('.subgrid-row', { hasText: 'Grid temporary-grid' });
   await expect(row).toBeVisible();
+  await page.locator('#workspace').evaluate(element => element.style.setProperty('--left-sidebar-width', '240px'));
+  await expect(row.locator('.subgrid-actions button')).toHaveCount(4);
+  expect(new Set(await row.locator('.subgrid-actions button').evaluateAll(buttons => buttons.map(button => Math.round(button.getBoundingClientRect().top)))).size).toBe(1);
+  expect(await row.evaluate(element => element.scrollWidth <= element.clientWidth)).toBe(true);
+  expect(await row.locator('.subgrid-actions button').evaluateAll(buttons => buttons.filter(button => button.scrollWidth > button.clientWidth).map(button => ({ text: button.textContent, width: button.clientWidth, needed: button.scrollWidth })))).toEqual([]);
   page.once('dialog', dialog => dialog.accept());
   await row.locator('.subgrid-delete').click();
   await expect(row).toHaveCount(0);
