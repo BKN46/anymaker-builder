@@ -15,6 +15,7 @@ const edgeKey = (a, b) => [a, b].sort().join('::');
 const validColorIndex = value => value === undefined || (Number.isInteger(value) && value >= 0 && value <= 255);
 const validColor = value => value === undefined || (typeof value === 'string' && /^#[\da-f]{6}$/i.test(value));
 const validEdgeSize = value => value === undefined || value === 1 || value === 3;
+const validSurfaceLimitBypass = value => value === undefined || value === true;
 
 function normalizedSurfaceDirection(value) {
   if (value === undefined) return undefined;
@@ -71,10 +72,12 @@ export function validateTopologyState(state = {}, componentIds = null) {
   const normalizedPlates = [];
   for (const plate of plates) {
     if (!plate || typeof plate.id !== 'string' || !plate.id || plateIds.has(plate.id)) throw new Error('面板 ID 无效或重复');
-    validatePlate(plate.nodeIds, nodes, plate.normalOffset);
+    if (plate.surfaceFanAnchor !== undefined && (plate.surfaceLimitBypass !== true || typeof plate.surfaceFanAnchor !== 'string' || !Array.isArray(plate.nodeIds) || !plate.nodeIds.includes(plate.surfaceFanAnchor))) throw new Error('单面扇心必须是边界节点');
+    validatePlate(plate.nodeIds, nodes, plate.normalOffset, { allowNonPlanar: plate.surfaceLimitBypass === true });
     if (!validColorIndex(plate.col_front) || !validColorIndex(plate.col_back)) throw new Error('面板颜色编号无效');
     if (!validColor(plate.color_front) || !validColor(plate.color_back)) throw new Error('面板 RGB 颜色无效');
     if (plate.type !== undefined && plate.type !== 'window') throw new Error('面板类型无效');
+    if (!validSurfaceLimitBypass(plate.surfaceLimitBypass)) throw new Error('面板曲面限制旁路标记无效');
     if (plate.hidden !== undefined && typeof plate.hidden !== 'boolean') throw new Error('面板可见性无效');
     plateIds.add(plate.id);
     const surfaceDirection = normalizedSurfaceDirection(plate.surfaceDirection);
@@ -160,7 +163,7 @@ export function mergeNodes(nodes, edges, plates, sourceId, targetId, links) {
     seenEdges.add(key);
     nextEdges.push({ ...clone(edge), a, b });
   }
-  const nextPlates = clone(plates).map(plate => ({ ...plate, nodeIds: plate.nodeIds.map(id => id === sourceId ? targetId : id) }))
+  const nextPlates = clone(plates).map(plate => ({ ...plate, nodeIds: plate.nodeIds.map(id => id === sourceId ? targetId : id), ...(plate.surfaceFanAnchor ? { surfaceFanAnchor: plate.surfaceFanAnchor === sourceId ? targetId : plate.surfaceFanAnchor } : {}) }))
     .map(plate => ({ ...plate, nodeIds: plate.nodeIds.filter((id, index, ids) => ids.indexOf(id) === index) }))
     .filter(plate => plate.nodeIds.length >= 3);
   const nextNodes = nodes.filter(node => node.id !== sourceId).map(node => node.id === targetId && sourceNode.standalone === true
@@ -261,20 +264,21 @@ export function splitEdge(nodes, edges, edgeId, point, plates = []) {
   return { nodes: nextNodes, edges: second, plates: nextPlates, node, replaced: edge };
 }
 
-export function validatePlate(nodeIds, nodes, normalOffset = 0) {
+export function validatePlate(nodeIds, nodes, normalOffset = 0, { allowNonPlanar = false } = {}) {
   if (!Array.isArray(nodeIds) || nodeIds.length < 3) throw new Error('面板至少需要三个节点');
   if (new Set(nodeIds).size !== nodeIds.length) throw new Error('面板节点不能重复');
   if (!Number.isFinite(normalOffset) || Math.abs(normalOffset) > 10000) throw new Error('面板法向偏移无效');
   const byId = new Map(nodes.map(node => [node.id, node]));
   const points = nodeIds.map(id => { const node = byId.get(id); if (!node) throw new Error('面板引用未知节点：' + id); return position(node); });
-  const { normal } = validatePlatePolygon(points);
+  const { normal } = validatePlatePolygon(points, { allowNonPlanar });
   return { points, normal };
 }
 
 export function createPlate(plates, nodeIds, nodes, properties = {}) {
-  validatePlate(nodeIds, nodes, properties.normalOffset);
+  if (properties.surfaceFanAnchor !== undefined && (properties.surfaceLimitBypass !== true || typeof properties.surfaceFanAnchor !== 'string' || !Array.isArray(nodeIds) || !nodeIds.includes(properties.surfaceFanAnchor))) throw new Error('单面扇心必须是边界节点');
+  validatePlate(nodeIds, nodes, properties.normalOffset, { allowNonPlanar: properties.surfaceLimitBypass === true });
   const surfaceDirection = normalizedSurfaceDirection(properties.surfaceDirection);
-  if (plates.some(plate => Array.isArray(plate.nodeIds) && sameBoundary(plate.nodeIds, nodeIds))) throw new Error('该闭合梁环已有面板或玻璃');
+  if (properties.surfaceLimitBypass !== true && plates.some(plate => Array.isArray(plate.nodeIds) && sameBoundary(plate.nodeIds, nodeIds))) throw new Error('该闭合梁环已有面板或窗');
   const plate = { id: newId(plates, 'plate'), nodeIds: [...nodeIds], ...clone(properties), ...(surfaceDirection ? { surfaceDirection } : {}) };
   return { plates: [...clone(plates), plate], plate };
 }
@@ -316,14 +320,14 @@ export function createPlateFromEdges(plates, edgeIds, edges, nodes, properties =
   return createPlate(plates, nodeIds, nodes, properties);
 }
 
-// Native samples identify glass surfaces as a window plate. They use the same
+// Native samples identify window surfaces as a window plate. They use the same
 // closed structural edge loop as ordinary panels; impact simulation remains a
 // game-runtime concern and is not fabricated in the editor.
-export function createGlassPlateFromEdges(plates, edgeIds, edges, nodes, properties = {}) {
+export function createWindowPlateFromEdges(plates, edgeIds, edges, nodes, properties = {}) {
   return createPlateFromEdges(plates, edgeIds, edges, nodes, { ...properties, type: 'window' });
 }
 
 export function triangulatePlate(plate, nodes) {
-  const { points } = validatePlate(plate.nodeIds, nodes);
-  return triangulatePlatePolygon(points).map(triangle => triangle.map(index => plate.nodeIds[index]));
+  const { points } = validatePlate(plate.nodeIds, nodes, plate.normalOffset, { allowNonPlanar: plate.surfaceLimitBypass === true });
+  return triangulatePlatePolygon(points, { allowNonPlanar: plate.surfaceLimitBypass === true }).map(triangle => triangle.map(index => plate.nodeIds[index]));
 }

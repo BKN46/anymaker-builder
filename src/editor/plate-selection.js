@@ -20,7 +20,7 @@ function closedLoop(edges) {
   return used.size === edges.length ? ids : null;
 }
 
-export function extendPlateSelection(draft, edgeId, edges, nodes) {
+export function extendPlateSelection(draft, edgeId, edges, nodes, { allowNonPlanar = false } = {}) {
   const byEdgeId = new Map(edges.map(edge => [edge.id, edge]));
   const edge = byEdgeId.get(edgeId);
   if (!edge || edge.hidden) throw new Error('面板需要选择可见的梁');
@@ -39,7 +39,7 @@ export function extendPlateSelection(draft, edgeId, edges, nodes) {
   if (loop) {
     if (selected.some(value => (value.gridId || byId.get(value.a).gridId || 'grid-1') !== gridId)
       || loop.some(id => byId.get(id).gridId && byId.get(id).gridId !== gridId)) throw new Error('面板不能跨越子网格');
-    validatePlatePolygon(loop.map(id => byId.get(id).position));
+    validatePlatePolygon(loop.map(id => byId.get(id).position), { allowNonPlanar });
   }
   return { edgeIds, nodeIds: loop || uniqueIds, gridId, size: Math.max(1, ...selected.map(value => value.size || 1)), closed: Boolean(loop) };
 }

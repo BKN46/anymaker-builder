@@ -4,6 +4,7 @@ import { LineGeometry } from 'three/addons/lines/LineGeometry.js';
 import { CELL_SIZE_WORLD, AXES, assertGridVector, quantizeWorldVector, worldToCell } from './grid.js';
 import { createPlacementPicker } from './placement-picking.js';
 import { triangulatePlatePolygon } from './plate-polygon.js';
+import { predictNativeSurface, nativeSurfacePreviewVertices } from './two-plane-surface.js';
 
 export const GRID_SIZE = 20;
 export const GRID_DIVISIONS = GRID_SIZE / CELL_SIZE_WORLD;
@@ -386,9 +387,14 @@ export function plateSurfaceBoundary(nodeIds, positions, surface = EDGE_WIDTH / 
 }
 
 export function plateSurfaceVertices(nodeIds, positions, surface = EDGE_WIDTH / 2) {
+  if (typeof surface === 'object' && surface.surfaceFanAnchor) {
+    const nodes = [...positions].map(([id, position]) => ({ id, position }));
+    return nativeSurfacePreviewVertices(predictNativeSurface({ ...surface, nodeIds }, { nodes, edges: surface.boundaryEdges || [] }));
+  }
   const corners = plateSurfaceBoundary(nodeIds, positions, surface);
   const vertices = [];
-  for (const triangle of triangulatePlatePolygon(corners)) for (const index of triangle) vertices.push(...corners[index].toArray());
+  const allowNonPlanar = typeof surface === 'object' && surface?.surfaceLimitBypass === true;
+  for (const triangle of triangulatePlatePolygon(corners, { allowNonPlanar })) for (const index of triangle) vertices.push(...corners[index].toArray());
   return vertices;
 }
 

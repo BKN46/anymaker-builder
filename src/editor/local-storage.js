@@ -79,7 +79,10 @@ export function normalizeSettings(input = {}) {
     catalogCardSize: finite(s.catalogCardSize, 64, 156, 72),
     favoriteComponents: componentIds(s.favoriteComponents),
     query: text(s.query, 200), category: text(s.category, 80), selectedType: text(s.selectedType, 100, 'engine'),
-    tool: ['select', 'place', 'erase', 'translate', 'rotate', 'scale', 'node', 'edge', 'plate', 'glass', 'connect', 'paint'].includes(s.tool) ? s.tool : 'select',
+    tool: (() => {
+      const storedTool = s.tool === 'glass' ? 'window' : s.tool;
+      return ['select', 'place', 'erase', 'translate', 'rotate', 'scale', 'node', 'edge', 'plate', 'window', 'connect', 'paint'].includes(storedTool) ? storedTool : 'select';
+    })(),
     sidebarTabs: {
       left: ['catalog', 'subgrids', 'archives'].includes(s.sidebarTabs?.left) ? s.sidebarTabs.left : 'catalog',
       right: ['editor', 'inspector', 'resources', 'history'].includes(s.sidebarTabs?.right) ? s.sidebarTabs.right : 'editor',

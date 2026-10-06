@@ -1,7 +1,8 @@
 // _split_islands uses every node's first incident beam to find its island.
 // A corner referenced only by plates therefore crashes the native loader.
-// Complete just those corners' boundary beams; existing triangulation seams
-// between beam-supported nodes do not need extra geometry.
+// Complete just those corners' boundary beams. This repairs island safety
+// only; add_plate also requires EVERY boundary beam during game loading.
+// assertPlateBoundariesForNative separately rejects remaining missing sides.
 export function completeNativePlateEdges({ nodes = [], edges = [], plates = [] }) {
   const nodeIds = new Set();
   for (const node of nodes) {

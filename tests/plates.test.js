@@ -4,6 +4,7 @@ import * as THREE from 'three';
 import { extendPlateSelection } from '../src/editor/plate-selection.js';
 import { createPlate, validatePlate, triangulatePlate } from '../src/editor/topology.js';
 import { plateSurfaceBoundary, plateSurfaceVertices, cameraFacingPlateDirection } from '../src/editor/construction-view.js';
+import { analyzeStructuralTopology } from '../src/editor/structural-topology.js';
 import { englishMessages } from '../src/locales/en.js';
 import { editorMessages } from '../src/editor/ui-messages.js';
 import { modelImportMessages } from '../src/locales/model-import-en.js';
@@ -104,6 +105,36 @@ test('plate duplicate detection is invariant to every cyclic start and winding',
     assert.throws(() => createPlate(plates, rotated, nodes), /已有面板/);
     assert.throws(() => createPlate(plates, [...rotated].reverse(), nodes), /已有面板/);
   }
+});
+
+test('surface-limit bypass allows an additional plate on an existing loop and preserves the marker', () => {
+  const { nodes } = square(); const ids = nodes.map(node => node.id);
+  const { plates } = createPlate([], ids, nodes);
+  const result = createPlate(plates, [...ids].reverse(), nodes, { type: 'window', surfaceLimitBypass: true });
+  assert.equal(result.plates.length, 2);
+  assert.equal(result.plate.type, 'window');
+  assert.equal(result.plate.surfaceLimitBypass, true);
+});
+
+test('surface-limit bypass allows a nonplanar loop while preserving projected safety checks', () => {
+  const nodes = nodesAt([[0, 0, 0], [.32, 0, 0], [.32, .32, 0], [0, .32, .08]]);
+  const edges = nodes.map((node, i) => ({ id: 'e' + i, a: node.id, b: nodes[(i + 1) % nodes.length].id, gridId: 'surface' }));
+  let draft = null;
+  for (const id of ['e0', 'e2', 'e1']) draft = extendPlateSelection(draft, id, edges, nodes);
+  assert.throws(() => extendPlateSelection(draft, 'e3', edges, nodes), /共面/);
+  draft = extendPlateSelection(draft, 'e3', edges, nodes, { allowNonPlanar: true });
+  assert.equal(draft.closed, true);
+  const result = createPlate([], draft.nodeIds, nodes, { type: 'window', surfaceLimitBypass: true });
+  assert.equal(result.plate.surfaceLimitBypass, true);
+  const triangles = triangulatePlate(result.plate, nodes);
+  assert.equal(triangles.length, 2);
+  const positions = new Map(nodes.map(node => [node.id, new THREE.Vector3(node.position.x, node.position.y, node.position.z)]));
+  const vertices = plateSurfaceVertices(result.plate.nodeIds, positions, { normalOffset: 0, surfaceLimitBypass: true });
+  assert.equal(vertices.length, 18);
+  assert.ok(vertices.every(Number.isFinite));
+  const topology = analyzeStructuralTopology({ nodes, edges, plates: result.plates });
+  assert.equal(topology.validPlates.has(result.plate.id), true);
+  assert.equal(topology.diagnostics.some(item => item.code === 'invalid-plate-geometry'), false);
 });
 
 test('concave saved plates triangulate without filling their notch in either winding', () => {

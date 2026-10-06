@@ -63,7 +63,7 @@ node scripts/check-native-grid-evidence.mjs 'I:\SteamLibrary\steamapps\common\An
 
 第一条命令核对整个 GCL 指纹、七个函数记录的签名/大小/所有者/重定位/代码哈希、八项常量及测试载具指纹。它验证静态证据，不能替代运行时游戏验收。待验证：真实游戏同机位像素对照、动态开门状态、完整材质和任意原生导出加载。
 
-本次实际验证：`npm run check` 的 71 项单元测试和生产构建通过；证据复核命令通过。编辑器浏览器套件首次为 14 通过、6 失败：把手新增断言未考虑整车居中，改为相对位置后专项通过；历史面板页面加载超时单独重跑通过。其余四项（单组件原生导入、选择筛选工具栏遮挡、旧目录 DOM 断言、玻璃流程涂色）在保留原有用户改动、仅撤去本次变换修复的副本中也复现，未作为本次回归修复。日志保留在忽略目录 `tmp/door-grid/{check,browser,browser-reference,browser-history,browser-baseline}.log`，实际渲染截图为 `tmp/door-grid/reference-vehicle-door-handles.png`；不能把完整浏览器套件称为通过。
+本次实际验证：`npm run check` 的 71 项单元测试和生产构建通过；证据复核命令通过。编辑器浏览器套件首次为 14 通过、6 失败：把手新增断言未考虑整车居中，改为相对位置后专项通过；历史面板页面加载超时单独重跑通过。其余四项（单组件原生导入、选择筛选工具栏遮挡、旧目录 DOM 断言、窗流程涂色）在保留原有用户改动、仅撤去本次变换修复的副本中也复现，未作为本次回归修复。日志保留在忽略目录 `tmp/door-grid/{check,browser,browser-reference,browser-history,browser-baseline}.log`，实际渲染截图为 `tmp/door-grid/reference-vehicle-door-handles.png`；不能把完整浏览器套件称为通过。
 
 ### 面板节点绕序与导出（2026-09-26）
 

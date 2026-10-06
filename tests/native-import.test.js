@@ -6,13 +6,14 @@ import { toEditorDocument } from '../src/editor/model.js';
 import { History, validateDocument } from '../src/editor/document.js';
 import { nonplanarNativeFixture } from './native-import-fixtures.js';
 
-test('native import removes only noncoplanar plates and retains shared nodes, beams and the raw save', () => {
+test('native import preserves curved plates with editor permission and keeps the raw save intact', () => {
   const data = nonplanarNativeFixture(); const model = parseNativePair(data, {});
   const original = JSON.stringify(model); const unfiltered = toEditorDocument(model);
   const result = prepareNativeImport(model, { vehicleIds: ['1'] }); const next = result.document;
-  assert.deepEqual(result.removedPlateIds, ['grid-1-1:13']);
-  assert.equal(next.topology.plates.length, 1); assert.equal(next.topology.plates[0].id, 'grid-1-1:14');
-  assert.deepEqual(next.topology.plates[0], unfiltered.topology.plates[1]);
+  assert.deepEqual(result.removedPlateIds, []);
+  assert.deepEqual(result.curvedPlateIds, ['grid-1-1:13']);
+  assert.equal(next.topology.plates.length, 2); assert.equal(next.topology.plates[0].surfaceLimitBypass, true);
+  assert.deepEqual(next.topology.plates[1], unfiltered.topology.plates[1]);
   assert.deepEqual(next.topology.nodes, unfiltered.topology.nodes);
   assert.deepEqual(next.topology.edges, unfiltered.topology.edges);
   assert.deepEqual(next.objects, unfiltered.objects);
@@ -23,8 +24,12 @@ test('native import removes only noncoplanar plates and retains shared nodes, be
   assert.equal(history.peekUndo().objects.length, 0);
   const saved = JSON.parse(JSON.stringify(valid));
   assert.deepEqual(validateDocument(saved, definitions), saved);
-  const exported = toNativePairFromEditor(valid);
-  assert.equal(exported.data.vehicles.vehicles.reduce((sum, vehicle) => sum + vehicle.plates.length, 0), 1);
+  assert.equal(result.nativeLoadDiagnostics.length, 1);
+  assert.throws(() => toNativePairFromEditor(valid), /缺少边界梁/);
+  const bounded = structuredClone(valid);
+  result.nativeLoadDiagnostics[0].missing.forEach(([a, b], i) => bounded.topology.edges.push({ id: 'explicit-boundary-' + i, a, b }));
+  const exported = toNativePairFromEditor(bounded);
+  assert.equal(exported.data.vehicles.vehicles.reduce((sum, vehicle) => sum + vehicle.plates.length, 0), 2);
   assert.equal(prepareNativeImport(parseNativePair(exported.data, exported.meta)).removedPlateIds.length, 0);
 });
 

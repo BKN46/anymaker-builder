@@ -56,6 +56,7 @@ export function stageImportedSubgrid(document, existing = {}) {
   const plates = (topology.plates || []).map(plate => ({
     ...copy(plate), id: nextId(`${gridId}-plate`, usedPlates),
     nodeIds: plate.nodeIds.map(id => nodeIds.get(id)), gridId,
+    ...(plate.surfaceFanAnchor ? { surfaceFanAnchor: nodeIds.get(plate.surfaceFanAnchor) } : {}),
   }));
   const links = (topology.links || []).map(link => ({
     ...copy(link), id: nextId(`${gridId}-link`, usedLinks),

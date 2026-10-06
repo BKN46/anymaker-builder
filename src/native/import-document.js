@@ -1,21 +1,31 @@
 import { toEditorDocument } from '../editor/model.js';
 import { validatePlate } from '../editor/topology.js';
+import { missingPlateBoundaries } from '../editor/plate-boundary-coverage.js';
+import { assertTwoPlanePrediction, predictNativeSurface } from '../editor/two-plane-surface.js';
 
-// Native saves may contain warped faces that the editor cannot represent.
-// Remove only those faces from the imported copy; keep their nodes, beams,
-// other faces and the raw native model intact. Other validation errors fail.
+// Keep representable native curved surfaces so an exported curve can be
+// reopened and split. The permission is inferred from geometry, never a
+// private game field. Malformed boundaries still fail before scene mutation.
 export function prepareNativeImport(model, options = {}) {
   const document = toEditorDocument(model, options);
   const removedPlateIds = [];
-  if (document.topology) document.topology.plates = document.topology.plates.filter(plate => {
+  const curvedPlateIds = [];
+  if (document.topology) document.topology.plates = document.topology.plates.map(plate => {
     try {
       validatePlate(plate.nodeIds, document.topology.nodes, plate.normalOffset);
-      return true;
+      return plate;
     } catch (error) {
       if (error.code !== 'nonplanar-plate') throw error;
-      removedPlateIds.push(plate.id);
-      return false;
+      validatePlate(plate.nodeIds, document.topology.nodes, plate.normalOffset, { allowNonPlanar: true });
+      curvedPlateIds.push(plate.id);
+      const curved = { ...plate, surfaceLimitBypass: true };
+      const candidate = { ...curved, surfaceFanAnchor: plate.nodeIds.at(-1) };
+      try {
+        if (missingPlateBoundaries({ ...document.topology, plates: [candidate] }).length) return curved;
+        assertTwoPlanePrediction(predictNativeSurface(candidate, document.topology));
+        return candidate;
+      } catch { return curved; }
     }
   });
-  return { document, removedPlateIds };
+  return { document, removedPlateIds, curvedPlateIds, nativeLoadDiagnostics: missingPlateBoundaries(document.topology || {}) };
 }

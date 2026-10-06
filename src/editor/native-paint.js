@@ -26,4 +26,4 @@ export function nearestNativePaintIndex(color) {
   return closest;
 }
 
-export function isGlassPlate(plate) { return plate?.type === 'window'; }
+export function isWindowPlate(plate) { return plate?.type === 'window'; }

@@ -58,6 +58,8 @@ test('plates follow boundary beams rather than welding every referenced node int
   assert.deepEqual(document, before);
   document.topology.edges.push({ id: 'bc', a: 'n1', b: 'n2' });
   assert.equal(analyzeSubgridIntegrity({ topology: document.topology }).isValid, true);
+  assert.throws(() => toNativePairFromEditor(document), error => error.structuralDiagnostics?.some(item => item.code === 'native-plate-missing-boundary'));
+  document.topology.edges.push({ id: 'ca', a: 'n2', b: 'n0' });
   assert.doesNotThrow(() => toNativePairFromEditor(document));
 });
 

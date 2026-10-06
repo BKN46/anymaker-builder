@@ -50,7 +50,7 @@ export function analyzeStructuralTopology({ nodes = [], edges = [], plates = [] 
     if (missing.length) { report('missing-plate-node', 'error', [plate.id, ...missing], 'Plate references a missing node.', ids); continue; }
     const points = ids.map(id => nodeById.get(id).position);
     if (!points.every(finitePoint)) continue;
-    try { validatePlatePolygon(points); }
+    try { validatePlatePolygon(points, { allowNonPlanar: plate.surfaceLimitBypass === true }); }
     catch { report('invalid-plate-geometry', 'error', [plate.id, ...ids], 'Plate boundary is degenerate, nonplanar or self-intersecting.', ids); continue; }
     validPlates.add(plate.id);
     let missingSides = 0;

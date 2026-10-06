@@ -171,7 +171,7 @@ export function applySelectionTransform(plan, { translation = { x: 0, y: 0, z: 0
       direction = vector(transformVector(rotation, array(direction)));
       if (secondaryPlates.has(plate.id)) direction = mirrorSurfaceDirection(direction, plane);
     }
-    return { ...plate, nodeIds: plate.nodeIds.map(id => nodeMap.get(id)), ...(direction ? { surfaceDirection: direction } : {}) };
+    return { ...plate, nodeIds: plate.nodeIds.map(id => nodeMap.get(id)), ...(plate.surfaceFanAnchor ? { surfaceFanAnchor: nodeMap.get(plate.surfaceFanAnchor) } : {}), ...(direction ? { surfaceDirection: direction } : {}) };
   });
   candidate.objects = candidate.objects.map(object => {
     if (!members.components.has(object.id)) return object;
@@ -252,7 +252,7 @@ export function mirrorSelection(document, selection, plane) {
     if (match) idMaps.plates.set(plate.id, match.id);
     else {
       const id = allocatePlate(plate.id); idMaps.plates.set(plate.id, id);
-      next.topology.plates.push({ ...clone(plate), id, nodeIds, ...(plate.surfaceDirection ? { surfaceDirection: mirrorSurfaceDirection(plate.surfaceDirection, plane) } : {}) }); created++;
+      next.topology.plates.push({ ...clone(plate), id, nodeIds, ...(plate.surfaceFanAnchor ? { surfaceFanAnchor: nodeMap.get(plate.surfaceFanAnchor) } : {}), ...(plate.surfaceDirection ? { surfaceDirection: mirrorSurfaceDirection(plate.surfaceDirection, plane) } : {}) }); created++;
     }
   }
   const allocateLink = allocateIds(next.topology.links || [], 'mirror');

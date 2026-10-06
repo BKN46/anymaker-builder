@@ -1,7 +1,9 @@
+import { nativeCells, nativePlateNodeOrderForExport } from './plate-order.js';
+import { prepareTwoPlaneNativeSurfaces } from '../editor/two-plane-surface.js';
 import { Project, Vehicle, Grid, Component, Node, Edge, Plate, Link, validateProject } from '../editor/model.js';
 import { CELL_SIZE_WORLD } from '../editor/grid.js';
 import { validateNativeProperties } from '../editor/component-properties.js';
-import { reflectNativePoint, reflectNativeRotation } from './coordinates.js';
+import { reflectNativeRotation } from './coordinates.js';
 import { nearestNativePaintIndex } from '../editor/native-paint.js';
 import { logicNodePort, orientMechanicalLink } from '../editor/connection-ports.js';
 import { nativeMechanicalPortRole } from '../editor/connection-port-colors.js';
@@ -13,6 +15,7 @@ import { validateLinks } from '../editor/connections.js';
 import { nativeSurfaceMount } from '../editor/surface-mount.js';
 import { isTrackLink } from '../editor/track-profiles.js';
 import { completeNativePlateEdges } from './structural-edges.js';
+import { assertPlateBoundariesForNative } from '../editor/plate-boundary-coverage.js';
 import { analyzeSubgridIntegrity } from '../editor/subgrid-connectivity.js';
 
 const vector = value => ({ x: Number(value?.[0] ?? 0), y: Number(value?.[1] ?? 0), z: Number(value?.[2] ?? 0) });
@@ -200,15 +203,6 @@ export function verifyNativePairRoundTrip(dataInput, metaInput) {
 const nativeAxes = ['x', 'y', 'z'];
 const nativeIdentity = [1, 0, 0, 0, 1, 0, 0, 0, 1];
 
-function nativeCells(position) {
-  if (!position || nativeAxes.some(axis => !Number.isFinite(position[axis]))) throw new Error('Native export requires finite positions');
-  position = reflectNativePoint(position);
-  return nativeAxes.map(axis => {
-    const value = position[axis] / CELL_SIZE_WORLD;
-    return Math.abs(value - Math.round(value)) <= 1e-8 ? Math.round(value) : value;
-  });
-}
-
 function nativeRotation(rotation) {
   if (!rotation || nativeAxes.some(axis => !Number.isFinite(rotation[axis]))) return [...nativeIdentity];
   const cx = Math.cos(rotation.x); const sx = Math.sin(rotation.x);
@@ -245,53 +239,6 @@ function nativeBounds(points) {
     min: nativeAxes.map((_, index) => Math.min(...values.map(value => value[index]))),
     max: nativeAxes.map((_, index) => Math.max(...values.map(value => value[index]))),
   };
-}
-
-function nativePlateNodeOrderForExport(plate, nativePoints, edgeNodeIds) {
-  const order = [...plate.nodeIds].reverse();
-  const direction = plate.surfaceDirection;
-  if (direction && nativeAxes.every(axis => Number.isFinite(direction[axis]))) {
-    const desired = [-direction.x, direction.y, direction.z];
-    const normal = nativePlateNormal(order.map(id => nativePoints.get(id)));
-    if (normal && normal[0] * desired[0] + normal[1] * desired[1] + normal[2] * desired[2] < 0) order.reverse();
-  }
-  // A panel boundary in the game is a loop of structural edges. Older editor
-  // snapshots can retain a standalone node in that loop; remove it only when
-  // it is exactly collinear and lies between its two neighbouring boundary
-  // points. Non-collinear corners retain their geometry; their missing
-  // boundary beams are completed before partitioning and checked per body.
-  let changed = true;
-  while (changed) {
-    changed = false;
-    for (let index = 0; index < order.length; index++) {
-      const id = order[index];
-      if (edgeNodeIds.has(id)) continue;
-      if (order.length <= 3) continue;
-      const previous = nativePoints.get(order[(index - 1 + order.length) % order.length]);
-      const current = nativePoints.get(id);
-      const next = nativePoints.get(order[(index + 1) % order.length]);
-      if (!previous || !current || !next) continue;
-      const first = nativeAxes.map((_, axis) => current[axis] - previous[axis]);
-      const second = nativeAxes.map((_, axis) => next[axis] - current[axis]);
-      const cross = [
-        first[1] * second[2] - first[2] * second[1],
-        first[2] * second[0] - first[0] * second[2],
-        first[0] * second[1] - first[1] * second[0],
-      ];
-      const collinear = cross.every(value => Math.abs(value) <= 1e-9);
-      const between = nativeAxes.every((_, axis) => {
-        const min = Math.min(previous[axis], next[axis]);
-        const max = Math.max(previous[axis], next[axis]);
-        return current[axis] >= min - 1e-9 && current[axis] <= max + 1e-9;
-      });
-      if (!collinear || !between) continue;
-      order.splice(index, 1);
-      changed = true;
-      break;
-    }
-  }
-  if (order.length < 3) throw new Error(`Native export plate ${plate.id} has fewer than three boundary nodes`);
-  return order;
 }
 
 function mechanicalPortRole(component, port, componentDefinitions) {
@@ -340,32 +287,17 @@ function normalizeMechanicalExportLink(link, objectsById, componentDefinitions) 
 // The game derives a plate normal from the first non-collinear edge cross
 // product in the saved node order (vehicle_plate_util.calculate_plate_dir /
 // calculate_plate_normal). Keep the same sign when choosing an export order.
-function nativePlateNormal(points) {
-  if (!Array.isArray(points) || points.length < 3) return null;
-  // Match the game's calculate_plate_dir scan: try every pair anchored at
-  // the first node until a non-collinear pair produces a usable direction.
-  for (let firstIndex = 1; firstIndex < points.length - 1; firstIndex++) {
-    const first = points[firstIndex].map((value, axis) => value - points[0][axis]);
-    for (let secondIndex = firstIndex + 1; secondIndex < points.length; secondIndex++) {
-      const next = points[secondIndex].map((value, axis) => value - points[0][axis]);
-      const normal = [
-        first[1] * next[2] - first[2] * next[1],
-        first[2] * next[0] - first[0] * next[2],
-        first[0] * next[1] - first[1] * next[0],
-      ];
-      const magnitude = Math.hypot(...normal);
-      if (magnitude > 1e-9) return normal.map(value => value / magnitude);
-    }
-  }
-  return null;
-}
-
 // Build a complete observed-native-schema pair from an editor snapshot. This
 // deliberately has no dependency on a previously imported .data/.meta pair:
 // saving a new vehicle must not require users to supply a template first.
 export function toNativePairFromEditor(document, { vehicleId = 1, componentDefinitions = new Map() } = {}) {
   if (!document || !Array.isArray(document.objects) || !Number.isInteger(vehicleId)) throw new Error('Native export requires a valid editor project');
   let topology = document.topology || { nodes: [], edges: [], plates: [], links: [] };
+  const surfacePreparation = prepareTwoPlaneNativeSurfaces(topology);
+  topology = surfacePreparation.topology;
+  // Explicit surface authoring must not acquire hidden support beams during
+  // export repair. Loading rejects even a single missing boundary beam.
+  assertPlateBoundariesForNative({ ...topology, plates: (topology.plates || []).filter(plate => plate.surfaceLimitBypass) });
   const hostObjects = document.objects;
   const objectsById = new Map(hostObjects.map(object => [object.id, object]));
   const hydraulicLinks = validateLinks((topology.links || []).filter(link => link.kind === 'hydraulic'), new Set(objectsById.keys())).map(link => orientHydraulicLink(link, objectsById, componentDefinitions));
@@ -409,6 +341,7 @@ export function toNativePairFromEditor(document, { vehicleId = 1, componentDefin
   const partition = physicalConnections.length ? partitionMechanicalBodies({ ...document, topology }, physicalConnections, componentDefinitions) : null;
   const analysis = analyzeSubgridIntegrity({ components: hostObjects, topology, definitions: componentDefinitions });
   if (!analysis.isValid) throw Object.assign(new Error('Native export structural island check failed: ' + analysis.diagnostics.filter(item => item.severity === 'error').map(item => item.code + ' (' + item.entityIds.join(', ') + ')').join('; ')), { structuralDiagnostics: analysis.diagnostics.filter(item => item.severity === 'error') });
+  assertPlateBoundariesForNative(topology);
   const bodyId = id => vehicleId + (partition?.componentBody.get(id) ?? 0);
   const nativePoints = new Map(exportNodes.map(node => [node.id, nativeCells(node.position)]));
   const mounted = new Map();
@@ -478,6 +411,7 @@ export function toNativePairFromEditor(document, { vehicleId = 1, componentDefin
   const nodes = exportNodes.map(node => ({ id: nodeIds.get(node.id), pos: nativeCells(node.position) }));
   const edges = (topology.edges || []).map(edge => {
     const result = { n0: nodeIds.get(edge.a), n1: nodeIds.get(edge.b) };
+    if (edge.size === 3) result.size = 1;
     const color = nativePaintIndex(edge.color, edge.col, 'edge paint'); if (color !== undefined) result.col = color;
     return result;
   });

@@ -9,6 +9,8 @@ import { beltFixture, sampleBeltData } from '../belt-fixtures.js';
 import { disconnectedSubgridsFixture } from '../subgrid-fixtures.js';
 import { structureTransformFixture } from '../selection-transform-fixtures.js';
 import { nonplanarNativeFixture } from '../native-import-fixtures.js';
+import { curvedWindowFixture } from '../surface-split-fixtures.js';
+import { twoPlaneFixture, twoPlaneBoundaryFixture, userTwoPlaneCode } from '../two-plane-fixtures.js';
 import { unsupportedPlateCorners, crossIslandPlate } from '../native-export-fixtures.js';
 import { parseNativePair, toNativePairFromEditor } from '../../src/native/anymaker-data.js';
 import { toEditorDocument } from '../../src/editor/model.js';
@@ -1240,7 +1242,7 @@ for (const projection of ['perspective', 'orthographic']) test('all tool rays fo
   await expect.poll(() => page.evaluate(() => window.__pointerRayTestState.ready)).toBe(true);
   const historyCount = await page.locator('#history-list button').count();
   const nextFrames = () => page.evaluate(() => new Promise(resolve => requestAnimationFrame(() => requestAnimationFrame(resolve))));
-  for (const tool of ['select', 'place', 'erase', 'translate', 'rotate', 'scale', 'node', 'edge', 'plate', 'glass', 'connect', 'paint', 'hide']) {
+  for (const tool of ['select', 'place', 'erase', 'translate', 'rotate', 'scale', 'node', 'edge', 'plate', 'window', 'connect', 'paint', 'hide']) {
     await page.locator('[data-tool="' + tool + '"]').click();
     const box = await page.locator('#viewport canvas').boundingBox();
     await page.mouse.move(box.x + box.width * .48, box.y + box.height * .65);
@@ -1429,7 +1431,172 @@ test('plate tool accepts unordered boundary edges and preserves grid, shape and 
   expect(errors).toEqual([]);
 });
 
-for (const tool of ['plate', 'glass']) test(tool + ' creates a loop with eight split collinear beams in arbitrary order', async ({ page }) => {
+test('reported two-plane AMB1 code imports and downloads one window without adding beams', async ({ page }) => {
+  const errors = []; page.on('pageerror', error => errors.push(error.message));
+  await page.goto('./'); await expect(page.locator('#viewport')).toHaveAttribute('data-ready', 'true');
+  await page.locator('#language-select').selectOption('en');
+  await page.locator('#left-tab-archives').click();
+  await page.locator('#archive-code').fill(userTwoPlaneCode); await page.locator('#archive-code-import').click();
+  await expect(page.locator('#topology-count')).toContainText('12 nodes · 16 edges · 4 plates');
+  const before = await saveProject(page);
+  const downloads = []; const receive = download => downloads.push(download); page.on('download', receive);
+  await page.locator('#save-btn').click(); await expect.poll(() => downloads.length).toBe(2); page.off('download', receive);
+  await expect(page.locator('#save-status')).toContainText('bypass surfaces were exported as single faces with no added beams');
+  const dataDownload = downloads.find(download => download.suggestedFilename().endsWith('.data'));
+  const stream = await dataDownload.createReadStream(); let content = ''; for await (const chunk of stream) content += chunk;
+  const vehicle = JSON.parse(content).vehicles.vehicles[0];
+  expect(vehicle.plates).toHaveLength(1); expect(vehicle.plates[0].type).toBe('window'); expect(vehicle.plates[0].nodes).toHaveLength(6);
+  expect(vehicle.edges).toHaveLength(16); expect((await saveProject(page)).topology).toEqual(before.topology);
+  expect(errors).toEqual([]);
+});
+
+test('selected two-plane faces generate a single aperture and support undo and redo', async ({ page }, testInfo) => {
+  const errors = []; page.on('pageerror', error => errors.push(error.message));
+  await openStructureTransformFixture(page, twoPlaneFixture()); await page.locator('[data-view="top"]').focus(); await page.keyboard.press('Enter');
+  await clickStructurePoint(page, { x: .32, y: .32, z: 0 });
+  await clickStructurePoint(page, { x: -.32, y: .32, z: 0 }, true);
+  await expect(page.locator('#merge-selected-surface')).toBeVisible();
+  const before = await saveProject(page); await page.locator('#merge-selected-surface').click();
+  await expect(page.locator('#save-status')).toContainText('双平面');
+  await page.locator('#viewport').screenshot({ path: testInfo.outputPath('two-plane-aperture.png') });
+  const after = await saveProject(page); expect(after.topology.plates).toHaveLength(1); expect(after.topology.edges).toEqual(before.topology.edges);
+  expect(after.topology.plates[0].nodeIds).toContain(after.topology.plates[0].surfaceFanAnchor);
+  await page.locator('#undo-btn').click(); expect((await saveProject(page)).topology).toEqual(before.topology);
+  await page.locator('#redo-btn').click(); expect((await saveProject(page)).topology).toEqual(after.topology);
+  expect(errors).toEqual([]);
+});
+
+for (const type of ['plate', 'window']) test(type + ' creates an automatic fan from a single two-plane boundary without divider beams', async ({ page }, testInfo) => {
+  const fixture = twoPlaneBoundaryFixture({ type: type === 'window' ? 'window' : 'solid' }); fixture.topology.plates = [];
+  const errors = []; page.on('pageerror', error => errors.push(error.message));
+  await openStructureTransformFixture(page, fixture); await page.locator('[data-view="top"]').focus(); await page.keyboard.press('Enter');
+  const before = await saveProject(page);
+  await page.locator(`[data-tool="${type}"]`).click(); await page.locator(`#${type}-surface-limit-bypass`).check();
+  await expect(page.locator(`#${type}-toolbar [data-surface-single]`)).toHaveCount(0);
+  const byId = new Map(fixture.topology.nodes.map(node => [node.id, node.position]));
+  for (const index of [1, 4, 0, 3, 2, 5]) {
+    const edge = fixture.topology.edges[index]; const a = byId.get(edge.a); const b = byId.get(edge.b);
+    await clickStructurePoint(page, { x: (a.x + b.x) / 2, y: (a.y + b.y) / 2, z: (a.z + b.z) / 2 });
+  }
+  await expect(page.locator('#topology-count')).toHaveText('6 节点 · 6 梁 · 1 面板');
+  await expect(page.locator('#alert-host .app-alert-error')).toHaveCount(0);
+  const after = await saveProject(page);
+  expect(after.topology.nodes).toEqual(before.topology.nodes); expect(after.topology.edges).toEqual(before.topology.edges);
+  expect(['n0', 'n3']).toContain(after.topology.plates[0].surfaceFanAnchor);
+  const downloads = []; const receive = download => downloads.push(download); page.on('download', receive);
+  await page.locator('#save-btn').click(); await expect.poll(() => downloads.length).toBe(2); page.off('download', receive);
+  const stream = await downloads.find(download => download.suggestedFilename().endsWith('.data')).createReadStream();
+  let content = ''; for await (const chunk of stream) content += chunk;
+  const vehicle = JSON.parse(content).vehicles.vehicles[0];
+  expect(vehicle.plates).toHaveLength(1); expect(vehicle.plates[0].nodes).toHaveLength(6); expect(vehicle.edges).toHaveLength(6);
+  const canvas = await page.locator('#viewport canvas').boundingBox();
+  await page.mouse.move(canvas.x + canvas.width / 2, canvas.y + canvas.height / 2);
+  await page.mouse.down({ button: 'right' });
+  await page.mouse.move(canvas.x + canvas.width / 2 + 120, canvas.y + canvas.height / 2 + 90, { steps: 8 });
+  await page.mouse.up({ button: 'right' });
+  await page.locator('#viewport').screenshot({ path: testInfo.outputPath(type + '-automatic-two-plane.png') });
+  await page.locator('#undo-btn').click(); expect((await saveProject(page)).topology).toEqual(before.topology);
+  await page.locator('#redo-btn').click(); expect((await saveProject(page)).topology).toEqual(after.topology);
+  expect(errors).toEqual([]);
+});
+
+test('the bypass toolbars have no manual fan button and leave existing faces unchanged', async ({ page }) => {
+  await openStructureTransformFixture(page, twoPlaneFixture()); await page.locator('[data-view="top"]').focus(); await page.keyboard.press('Enter');
+  const before = await saveProject(page);
+  for (const type of ['plate', 'window']) {
+    await page.locator(`[data-tool="${type}"]`).click();
+    await page.locator(`#${type}-surface-limit-bypass`).check();
+    await expect(page.locator(`#${type}-toolbar`)).toBeVisible();
+    await expect(page.locator(`#${type}-toolbar [data-surface-single]`)).toHaveCount(0);
+    await page.locator(`#${type}-surface-limit-bypass`).uncheck();
+    await expect(page.locator(`#${type}-toolbar [data-surface-single]`)).toHaveCount(0);
+  }
+  await expect(page.locator('[data-surface-split]')).toHaveCount(0);
+  expect((await saveProject(page)).topology).toEqual(before.topology);
+});
+
+for (const type of ['plate', 'window']) test(type + ' bypass reports an alert when automatic fan construction cannot handle the surface', async ({ page }) => {
+  const fixture = curvedWindowFixture(type); fixture.topology.plates = [];
+  await openStructureTransformFixture(page, fixture); await page.locator('[data-view="right"]').click();
+  const before = await saveProject(page);
+  await page.locator(`[data-tool="${type}"]`).click();
+  await page.locator(`#${type}-surface-limit-bypass`).check();
+  await expect(page.locator('[data-surface-split]')).toHaveCount(0);
+  await expect(page.locator(`#${type}-toolbar [data-surface-single]`)).toHaveCount(0);
+  const byId = new Map(fixture.topology.nodes.map(node => [node.id, node.position]));
+  for (const edge of fixture.topology.edges) {
+    const a = byId.get(edge.a); const b = byId.get(edge.b);
+    await clickStructurePoint(page, { x: (a.x + b.x) / 2, y: (a.y + b.y) / 2, z: (a.z + b.z) / 2 });
+  }
+  await expect(page.locator('#alert-host .app-alert-error')).toBeVisible();
+  await expect(page.locator('#alert-host')).toContainText('双平面');
+  expect((await saveProject(page)).topology).toEqual(before.topology);
+});
+
+test('unsupported 3D bypass surfaces use the top alert and remain unchanged', async ({ page }) => {
+  const fixture = curvedWindowFixture();
+  fixture.topology.nodes.push({ id: 'via', position: { x: .8, y: .8, z: 0 }, gridId: 'grid-1', standalone: true });
+  await openStructureTransformFixture(page, fixture);
+  const before = await saveProject(page);
+  const downloads = []; const receive = download => downloads.push(download); page.on('download', receive);
+  await page.locator('#save-btn').click();
+  await expect(page.locator('#alert-host .app-alert-error')).toBeVisible();
+  await expect(page.locator('#alert-host .app-alert-error')).toHaveCount(0, { timeout: 7000 });
+  await expect(page.locator('#save-status')).toContainText('原生导出失败');
+  page.off('download', receive); expect(downloads).toHaveLength(0);
+  expect((await saveProject(page)).topology).toEqual(before.topology);
+});
+
+test('invalid construction shows a top warning for five seconds alongside the status', async ({ page }) => {
+  await page.goto('./'); await expect(page.locator('#viewport')).toHaveAttribute('data-ready', 'true');
+  await page.locator('#language-select').selectOption('en');
+  await page.locator('[data-tool="window"]').click();
+  await page.locator('#viewport canvas').click({ position: { x: 500, y: 450 } });
+  await expect(page.locator('#save-status')).toHaveText('Select a visible edge for the plate');
+  const warning = page.locator('#alert-host .app-alert-warning').filter({ hasText: 'Select a visible edge for the plate' });
+  await expect(warning).toHaveText('Select a visible edge for the plate');
+  const shown = Date.now();
+  await expect(warning).toHaveCount(0, { timeout: 7000 });
+  expect(Date.now() - shown).toBeGreaterThan(4000);
+  await expect(page.locator('#save-status')).toHaveText('Select a visible edge for the plate');
+});
+
+test('plate and window tools expose separate surface-limit toolbars', async ({ page }) => {
+  await page.goto('./');
+  await expect(page.locator('#viewport')).toHaveAttribute('data-ready', 'true');
+  await page.locator('[data-tool="plate"]').click();
+  await expect(page.locator('#plate-toolbar')).toBeVisible();
+  await expect(page.locator('#window-toolbar')).toBeHidden();
+  await expect(page.locator('#plate-toolbar [data-surface-single]')).toHaveCount(0);
+  await page.locator('#plate-surface-limit-bypass').check();
+  await expect(page.locator('#window-surface-limit-bypass')).toBeChecked();
+  await page.locator('[data-tool="window"]').click();
+  await expect(page.locator('#plate-toolbar')).toBeHidden();
+  await expect(page.locator('#window-toolbar')).toBeVisible();
+  await expect(page.locator('#window-toolbar [data-surface-single]')).toHaveCount(0);
+});
+
+test('curved window construction has no split tool and exposes automatic fan processing', async ({ page }) => {
+  const fixture = curvedWindowFixture(); fixture.topology.plates = [];
+  await openStructureTransformFixture(page, fixture); await page.locator('[data-view="right"]').click();
+  await page.locator('[data-tool="window"]').click();
+  await expect(page.locator('#window-toolbar [data-surface-split]')).toHaveCount(0);
+  const byId = new Map(fixture.topology.nodes.map(node => [node.id, node.position]));
+  const pick = async edge => {
+    const a = byId.get(edge.a); const b = byId.get(edge.b);
+    await clickStructurePoint(page, { x: (a.x + b.x) / 2, y: (a.y + b.y) / 2, z: (a.z + b.z) / 2 });
+  };
+  for (const edge of fixture.topology.edges) await pick(edge);
+  await expect(page.locator('#topology-count')).toHaveText('10 节点 · 10 梁 · 0 面板');
+  await expect(page.locator('#save-status')).toContainText('共面');
+  await page.locator('#window-surface-limit-bypass').check();
+  await pick(fixture.topology.edges.at(-1));
+  await expect(page.locator('#alert-host .app-alert-error')).toBeVisible();
+  await expect(page.locator('#topology-count')).toHaveText('10 节点 · 10 梁 · 0 面板');
+  await expect(page.locator('#window-toolbar [data-surface-single]')).toHaveCount(0);
+});
+
+for (const tool of ['plate', 'window']) test(tool + ' creates a loop with eight split collinear beams in arbitrary order', async ({ page }) => {
   const points = [[-.48, 0], [0, 0], [.48, 0], [.48, .48], [.48, .96], [0, .96], [-.48, .96], [-.48, .48]];
   const nodes = points.map(([x, y], i) => ({ id: 'n' + i, position: { x, y, z: 0 }, gridId: 'grid-1' }));
   const edges = nodes.map((node, i) => ({ id: 'e' + i, a: node.id, b: nodes[(i + 1) % nodes.length].id, gridId: 'grid-1', size: i === 4 ? 3 : 1 }));
@@ -1455,7 +1622,7 @@ for (const tool of ['plate', 'glass']) test(tool + ' creates a loop with eight s
   const saved = await saveProject(page); const plate = saved.topology.plates[0];
   expect(new Set(plate.nodeIds)).toEqual(new Set(nodes.map(node => node.id)));
   expect(plate.gridId).toBe('grid-1'); expect(plate.normalOffset).toBeCloseTo(.12);
-  if (tool === 'glass') expect(plate.type).toBe('window');
+  if (tool === 'window') expect(plate.type).toBe('window');
   expect(saved.topology.nodes).toEqual(before.topology.nodes); expect(saved.topology.edges).toEqual(before.topology.edges);
   const rendered = await page.evaluate(() => {
     const mesh = window.__renderTestState.scene.getObjectByName('topology-overlay').children.find(object => object.userData.topology === 'plate');
@@ -1469,7 +1636,7 @@ for (const tool of ['plate', 'glass']) test(tool + ' creates a loop with eight s
   await expect(page.locator('#topology-count')).toHaveText('8 节点 · 8 梁 · 1 面板');
 });
 
-test('plate and glass selection cannot pick through a foreground plate and cancel without mutation', async ({ page }) => {
+test('plate and window selection cannot pick through a foreground plate and cancel without mutation', async ({ page }) => {
   await observeRendering(page);
   const errors = []; page.on('pageerror', error => errors.push(error.message));
   await page.goto('./'); await expect(page.locator('#viewport')).toHaveAttribute('data-ready', 'true');
@@ -1484,7 +1651,7 @@ test('plate and glass selection cannot pick through a foreground plate and cance
   await expect(page.locator('#topology-count')).toHaveText('6 节点 · 1 梁 · 1 面板');
   const original = (await saveProject(page)).topology;
   await page.locator('#fit-btn').click();
-  for (const tool of ['plate', 'glass']) {
+  for (const tool of ['plate', 'window']) {
     await page.locator('[data-view="front"]').click(); await page.locator('[data-tool="' + tool + '"]').click();
     let point = await projectWorldPoint(page, { x: 0, y: 0, z: 0 });
     await page.mouse.move(point.x, point.y); await page.mouse.click(point.x, point.y);
@@ -2014,34 +2181,37 @@ test('erase tool deletes only its highlighted component from a multi-selection',
   expect((await saveProject(page)).objects.map(object => object.id)).toEqual([before.objects[1].id]);
 });
 
-test('native import removes noncoplanar plates and retains the visible vehicle through save and history', async ({ page }, testInfo) => {
+test('native import preserves curved plates through save and history', async ({ page }, testInfo) => {
   await observeRendering(page); const errors = []; page.on('pageerror', error => errors.push(error.message));
   await page.goto('./'); await expect(page.locator('#viewport')).toHaveAttribute('data-ready', 'true');
   // Set this only for an additional read-only regression against a local save.
   const sample = process.env.ANYMAKER_NATIVE_IMPORT_SAMPLE;
   const data = sample ? JSON.parse(readFileSync(sample + '.data', 'utf8')) : nonplanarNativeFixture();
+  // Keep the successful round-trip fixture fully bounded. Missing sides are
+  // exercised separately below; the real game rejects them during add_plate.
+  if (!sample) data.vehicles.vehicles[0].edges.push({ n0: 81, n1: 52 });
   const meta = sample ? JSON.parse(readFileSync(sample + '.meta', 'utf8')) : {};
-  const removed = sample ? 11 : 1;
+  const curved = sample ? 11 : 1;
   const expected = data.vehicles.vehicles.reduce((sum, vehicle) => ({
     components: sum.components + vehicle.grids.reduce((n, grid) => n + grid.components.length, 0),
     nodes: sum.nodes + vehicle.nodes.length, edges: sum.edges + vehicle.edges.length, plates: sum.plates + vehicle.plates.length,
   }), { components: 0, nodes: 0, edges: 0, plates: 0 });
   await page.locator('#native-input').setInputFiles(['data', 'meta'].map(extension => ({ name: 'nonplanar.' + extension, mimeType: 'application/json', buffer: Buffer.from(JSON.stringify(extension === 'data' ? data : meta)) })));
   await expect(page.locator('#object-count')).toHaveText(expected.components + ' 个组件');
-  await expect(page.locator('#topology-count')).toHaveText(`${expected.nodes} 节点 · ${expected.edges} 梁 · ${expected.plates - removed} 面板`);
+  await expect(page.locator('#topology-count')).toHaveText(`${expected.nodes} 节点 · ${expected.edges} 梁 · ${expected.plates} 面板`);
   await expect(page.locator('#native-import-notice')).toBeVisible();
-  await expect(page.locator('#native-import-notice')).toContainText(`已删除 ${removed} 个不共面的面板`);
+  await expect(page.locator('#native-import-notice')).toContainText(`已保留 ${curved} 个曲面；下载时将自动检查有限双平面扇形。`);
   const saved = await saveProject(page);
-  expect(saved.topology.nodes).toHaveLength(expected.nodes); expect(saved.topology.edges).toHaveLength(expected.edges); expect(saved.topology.plates).toHaveLength(expected.plates - removed);
+  expect(saved.topology.nodes).toHaveLength(expected.nodes); expect(saved.topology.edges).toHaveLength(expected.edges); expect(saved.topology.plates).toHaveLength(expected.plates);
   const rendered = await page.evaluate(() => {
     const { scene } = window.__renderTestState; const layer = scene.getObjectByName('topology-overlay');
     const plates = layer.children.filter(object => object.userData.topology === 'plate');
     return { components: scene.children.filter(object => object.userData.id && object.visible).length, plates: plates.length, nonempty: plates.every(object => object.visible && object.geometry.attributes.position.count > 0) };
   });
-  expect(rendered).toEqual({ components: expected.components, plates: expected.plates - removed, nonempty: true });
+  expect(rendered).toEqual({ components: expected.components, plates: expected.plates, nonempty: true });
   await page.locator('#viewport').screenshot({ path: testInfo.outputPath('native-import-cleaned.png') });
   await page.locator('#language-select').selectOption('en');
-  await expect(page.locator('#native-import-notice')).toContainText(`Removed ${removed} nonplanar plate(s)`);
+  await expect(page.locator('#native-import-notice')).toContainText(`Preserved ${curved} curved surface(s). Limited two-plane fans will be checked automatically on download.`);
   await page.getByRole('button', { name: 'Dismiss import notice' }).click(); await expect(page.locator('#native-import-notice')).toBeHidden();
   await page.locator('#undo-btn').click(); expect((await saveProject(page)).objects).toHaveLength(0);
   await page.locator('#redo-btn').click(); expect((await saveProject(page)).topology).toEqual(saved.topology);
@@ -2050,8 +2220,8 @@ test('native import removes noncoplanar plates and retains the visible vehicle t
   for (const download of downloads) { let text = ''; for await (const chunk of await download.createReadStream()) text += chunk; exported.push({ name: download.suggestedFilename(), mimeType: 'application/json', buffer: Buffer.from(text) }); }
   await page.locator('#native-input').setInputFiles(exported);
   await expect(page.locator('#native-summary')).toContainText('Imported nonplanar.data / nonplanar.meta');
-  expect((await saveProject(page)).topology.plates).toHaveLength(expected.plates - removed);
-  await expect(page.locator('#native-import-notice')).toBeHidden(); expect(errors).toEqual([]);
+  expect((await saveProject(page)).topology.plates).toHaveLength(expected.plates);
+  await expect(page.locator('#native-import-notice')).toContainText('Preserved'); expect(errors).toEqual([]);
 });
 
 test('native island checks locate unsupported plate nodes in both languages and verify repaired downloads', async ({ page }) => {
@@ -2116,16 +2286,21 @@ test('native import failures are visible with the sidebar closed and preserve th
   expect((await saveProject(page)).topology).toEqual(before.topology);
 });
 
-test('native subgrid import removes noncoplanar plates before creating its placement preview', async ({ page }) => {
+test('native subgrid import retains curved plates in its placement preview', async ({ page }) => {
   await page.goto('./'); await expect(page.locator('#viewport')).toHaveAttribute('data-ready', 'true');
   const data = nonplanarNativeFixture();
   await page.locator('#native-subgrid-input').setInputFiles(['data', 'meta'].map(extension => ({ name: 'nonplanar-addon.' + extension, mimeType: 'application/json', buffer: Buffer.from(JSON.stringify(extension === 'data' ? data : {})) })));
   await expect(page.locator('#save-status')).toContainText('作为子网格虚像');
-  await expect(page.locator('#native-import-notice')).toContainText('已删除 1 个不共面的面板');
+  await expect(page.locator('#native-import-notice')).toContainText('其中 1 个缺少边界梁');
   await page.getByRole('button', { name: '关闭导入提示' }).click();
   await page.locator('#viewport canvas').click({ position: { x: 620, y: 440 } });
   await expect(page.locator('#object-count')).toHaveText('2 个组件');
-  const saved = await saveProject(page); expect(saved.topology.nodes).toHaveLength(8); expect(saved.topology.edges).toHaveLength(7); expect(saved.topology.plates).toHaveLength(1);
+  const saved = await saveProject(page); expect(saved.topology.nodes).toHaveLength(8); expect(saved.topology.edges).toHaveLength(7); expect(saved.topology.plates).toHaveLength(2);
+  const downloads = []; page.on('download', value => downloads.push(value));
+  await page.locator('#save-btn').click();
+  await expect(page.locator('#save-status')).toContainText('游戏加载时会丢弃');
+  expect(downloads).toHaveLength(0);
+  expect((await saveProject(page)).topology).toEqual(saved.topology);
   await page.locator('#undo-btn').click(); expect((await saveProject(page)).objects).toHaveLength(0);
 });
 
@@ -3129,7 +3304,7 @@ test('structural selection is enabled by default and can be disabled without aff
   await expect(page.locator('#viewport')).toHaveAttribute('data-interaction-highlight-count', '0');
 });
 
-test('glass tool closes selected edges into an offset window panel and paint stores Hex RGB colors', async ({ page }) => {
+test('window tool closes selected edges into an offset window panel and paint stores Hex RGB colors', async ({ page }) => {
   await observeRendering(page);
   await page.goto('./');
   await expect(page.locator('#viewport')).toHaveAttribute('data-ready', 'true');
@@ -3151,7 +3326,7 @@ test('glass tool closes selected edges into an offset window panel and paint sto
   await canvas.click({ position: { x: 580, y: 560 } });
   let saved = await saveProject(page);
   expect(saved.topology.edges.some(edge => edge.color === '#bd2636')).toBe(true);
-  await page.locator('[data-tool="glass"]').click();
+  await page.locator('[data-tool="window"]').click();
   await canvas.click({ position: { x: 580, y: 560 } });
   await expect.poll(() => page.locator('#viewport').getAttribute('data-edge-center-highlight-count').then(Number)).toBeGreaterThanOrEqual(1);
   for (const [x, y] of [[730, 420], [580, 280], [430, 420]]) await canvas.click({ position: { x, y } });
@@ -3221,7 +3396,7 @@ test('erase tool removes the highlighted front panel before its supporting edge'
     const next = corners[(index + 1) % corners.length];
     await canvas.click({ position: { x: next[0], y: next[1] } });
   }
-  await page.locator('[data-tool="glass"]').click();
+  await page.locator('[data-tool="window"]').click();
   for (const [x, y] of [[580, 560], [730, 420], [580, 280], [430, 420]]) await canvas.click({ position: { x, y } });
   await expect(page.locator('#topology-count')).toHaveText('4 节点 · 4 梁 · 1 面板');
 

@@ -12,6 +12,10 @@ import './belts.test.js';
 import './selection-transform.test.js';
 import './subgrids.test.js';
 import './plates.test.js';
+import './surface-split.test.js';
+import './window-fan-analysis.test.js';
+import './single-window-fan.test.js';
+import './two-plane-surface.test.js';
 import './native-import.test.js';
 import './native-export.test.js';
 import './google-drive.test.js';
@@ -25,7 +29,7 @@ import { History, project, validateDocument, migrateDocument, toIntermediateXml 
 import { copyObjects, mirrorObjects, moveObjects, removeObjects, splitGrid, mergeGrids, gridIds } from '../src/editor/operations.js';
 import { Project, Vehicle, Grid, Component, Node, Edge, Plate, Link, fromEditorDocument, toEditorDocument, toEditorTopology, validateProject, nativeGridFrame, nativeGridLocalDelta } from '../src/editor/model.js';
 import { parseNativePair, nativeStats, toNativeData, toNativePair, toNativePairFromEditor, verifyNativePairRoundTrip } from '../src/native/anymaker-data.js';
-import { createNode, moveNode, moveNodeAndMerge, mergeNodes, removeNode, removeEdge, removePlate, createEdge, createEdgeFromPoints, splitEdge, createPlate, createPlateFromEdges, createGlassPlateFromEdges, triangulatePlate, validateTopologyState, pruneUnusedTopology } from '../src/editor/topology.js';
+import { createNode, moveNode, moveNodeAndMerge, mergeNodes, removeNode, removeEdge, removePlate, createEdge, createEdgeFromPoints, splitEdge, createPlate, createPlateFromEdges, createWindowPlateFromEdges, triangulatePlate, validateTopologyState, pruneUnusedTopology } from '../src/editor/topology.js';
 import { LINK_COLORS, LINK_KINDS, LINK_RENDER_STYLES, MAX_CONNECTION_ROUTE_SEGMENT, connectionRouteIsSafe, createLink, moveLinkPoint, pruneInvalidConnections, removeLink, validateLinks } from '../src/editor/connections.js';
 import * as THREE from 'three';
 import { LineMaterial } from 'three/addons/lines/LineMaterial.js';
@@ -1047,6 +1051,11 @@ test('UI preferences default to English and reject unsafe or unsupported values'
   assert.deepEqual(normalizeSettings({ version: 99, language: 'zh' }), defaults);
 });
 
+test('legacy glass tool preference migrates to the window tool', () => {
+  assert.equal(normalizeSettings({ version: 1, tool: 'glass' }).tool, 'window');
+  assert.equal(normalizeSettings({ version: 1, tool: 'window' }).tool, 'window');
+});
+
 test('local backup validates data, restores previous valid record and survives quota failure', () => {
   const records = new Map(); let blocked = false;
   const storage = { getItem: key => records.get(key) ?? null, setItem: (key, value) => { if (blocked) throw new Error('QuotaExceededError'); records.set(key, value); } };
@@ -1558,13 +1567,13 @@ test('component paint RGB values resolve to deterministic native palette slots',
 test('native export maps RGB paint across components, edges, plate faces and links', () => {
   const document = project([{ ...object, id: 'painted', colors: [79, 49], paintColor: '#861a22' }, { ...object, id: 'untouched', colors: [49] }], {
     nodes: [{ id: 'a', position: { x: 0, y: 0, z: 0 } }, { id: 'b', position: { x: cell(1), y: 0, z: 0 } }, { id: 'c', position: { x: 0, y: cell(1), z: 0 } }],
-    edges: [{ id: 'painted-edge', a: 'a', b: 'b', col: 49, color: '#861a22' }, { id: 'untouched-edge', a: 'b', b: 'c', col: 49 }],
+    edges: [{ id: 'painted-edge', a: 'a', b: 'b', col: 49, color: '#861a22' }, { id: 'untouched-edge', a: 'b', b: 'c', col: 49 }, { id: 'closing-edge', a: 'c', b: 'a', col: 49 }],
     plates: [{ id: 'plate', nodeIds: ['a', 'b', 'c'], col_front: 49, col_back: 79, color_front: '#861a22' }],
     links: [{ id: 'link', kind: 'electric', from: { componentId: 'painted' }, to: { componentId: 'untouched' }, points: [], color: 49, paintColor: '#861a22' }],
   });
   const vehicle = toNativePairFromEditor(document).data.vehicles.vehicles[0];
   assert.deepEqual(vehicle.grids[0].components.map(component => component.colors), [[26, 26], [49]]);
-  assert.deepEqual(vehicle.edges.map(edge => edge.col), [26, 49]);
+  assert.deepEqual(vehicle.edges.map(edge => edge.col), [26, 49, 49]);
   assert.deepEqual([vehicle.plates[0].col_front, vehicle.plates[0].col_back], [26, 79]);
   assert.equal(vehicle.electric_links[0].color, 26);
   assert.throws(() => toNativePairFromEditor(project([{ ...object, paintColor: 'red' }])), /Hex RGB/);
@@ -2040,16 +2049,16 @@ test('panels are created from one closed edge loop with a finite normal offset',
   assert.throws(() => createPlate([], result.plate.nodeIds, state.nodes, { surfaceDirection: { x: 2, y: 0, z: 0 } }), /镜头方向/);
   assert.throws(() => validateTopologyState({ ...state, edges: [{ ...state.edges[0], col: 256 }] }), /颜色编号/);
 });
-test('glass panels use the observed window type on the same closed edge loop', () => {
+test('window panels use the observed window type on the same closed edge loop', () => {
   const a = { x: 0, y: 0, z: 0 }; const b = { x: cell(2), y: 0, z: 0 };
   const c = { x: cell(2), y: cell(2), z: 0 }; const d = { x: 0, y: cell(2), z: 0 };
   let state = createEdgeFromPoints({}, a, b);
   state = createEdgeFromPoints(state, b, c); state = createEdgeFromPoints(state, c, d); state = createEdgeFromPoints(state, d, a);
-  const result = createGlassPlateFromEdges([], state.edges.map(edge => edge.id), state.edges, state.nodes, { normalOffset: CELL_SIZE_WORLD / 2 });
+  const result = createWindowPlateFromEdges([], state.edges.map(edge => edge.id), state.edges, state.nodes, { normalOffset: CELL_SIZE_WORLD / 2 });
   assert.equal(result.plate.type, 'window');
   assert.equal(result.plate.nodeIds.length, 4);
   assert.equal(validateTopologyState({ ...state, plates: result.plates }).plates[0].type, 'window');
-  assert.throws(() => createPlateFromEdges(result.plates, state.edges.map(edge => edge.id), state.edges, state.nodes), /已有面板或玻璃/);
+  assert.throws(() => createPlateFromEdges(result.plates, state.edges.map(edge => edge.id), state.edges, state.nodes), /已有面板或窗/);
   assert.throws(() => validateTopologyState({ ...state, plates: [{ ...result.plate, type: 'opaque' }] }), /类型/);
 });
 test('solid edges reject zero length and off-axis or endpoint splits', () => {

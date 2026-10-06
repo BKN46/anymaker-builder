@@ -25,6 +25,10 @@ button:focus-visible, input:focus-visible, select:focus-visible { outline: 2px s
 .github-link svg { width: 19px; height: 19px; fill: currentColor; }
 .github-build-time { flex: none; max-width: 190px; overflow: hidden; color: var(--muted); font-size: 9px; font-weight: 600; text-overflow: ellipsis; white-space: nowrap; }
 .status { color: var(--muted); font-size: 11px; line-height: 1.5; }
+.alert-host { position: fixed; top: 12px; left: 50%; z-index: 1000; display: grid; gap: 8px; width: min(560px, calc(100vw - 28px)); transform: translateX(-50%); pointer-events: none; }
+.app-alert { pointer-events: auto; padding: 10px 14px; border: 1px solid #d6a753; border-radius: 8px; background: #fff8e6; color: #704d0e; box-shadow: 0 5px 20px #2033452b; font-size: 12px; line-height: 1.45; overflow-wrap: anywhere; animation: app-alert-in 160ms ease-out; }
+.app-alert-error { border-color: #dc8989; background: #fff0f0; color: #912929; }
+@keyframes app-alert-in { from { opacity: 0; transform: translateY(-8px); } to { opacity: 1; transform: translateY(0); } }
 .top-actions { display: flex; flex: none; gap: 5px; align-items: center; }
 .top-actions button { padding: 7px 9px; font-size: 11px; }
 .top-actions #library-btn, .top-actions #subgrid-import-btn { color: var(--accent); }
@@ -64,6 +68,15 @@ button:focus-visible, input:focus-visible, select:focus-visible { outline: 2px s
 .top-tool-section h2 { display: none; }
 .context-toolbar { position: absolute; top: 68px; left: 50%; z-index: 5; display: flex; align-items: center; gap: 7px; max-width: calc(100% - 32px); padding: 6px 9px; transform: translateX(-50%); border: 1px solid var(--line); border-radius: 10px; background: rgba(255,255,255,.94); box-shadow: 0 4px 18px #20334518; backdrop-filter: blur(10px); }
 .context-toolbar[hidden] { display: none; }
+.surface-split-toolbar { flex-wrap: wrap; width: min(820px, calc(100% - 32px)); }
+.surface-split-toolbar label { display: flex; align-items: center; gap: 4px; }
+.surface-split-toolbar select { max-width: 145px; }
+.surface-split-toolbar #surface-output-mode { max-width: 235px; }
+.surface-split-toolbar [hidden] { display: none; }
+.surface-path-controls { display: flex; align-items: center; gap: 4px; flex-wrap: wrap; flex-basis: 100%; }
+.surface-split-toolbar [data-surface-load-note] { color: #9a3412; }
+.surface-split-toolbar .context-help { flex-basis: 100%; max-width: none; white-space: normal; order: 1; }
+.surface-split-toolbar #surface-split-summary { flex-basis: 100%; font-size: 12px; order: 1; }
 #native-import-notice { position: absolute; top: 116px; left: 50%; transform: translateX(-50%); z-index: 10; display: flex; align-items: start; gap: 12px; max-width: min(520px, calc(100% - 32px)); padding: 12px 14px; border: 1px solid #d6a753; border-radius: 8px; background: #fff8e6; color: #704d0e; box-shadow: 0 4px 18px #20334518; font-size: 12px; line-height: 1.5; overflow-wrap: anywhere; }
 #native-import-notice[hidden] { display: none; }
 #native-import-notice[data-state="error"] { border-color: #dc8989; background: #fff0f0; color: #912929; }
@@ -309,6 +322,8 @@ button:focus-visible, input:focus-visible, select:focus-visible { outline: 2px s
 .property input, .property select { width: 100%; padding: 6px; color: inherit; background: #fff; border: 1px solid #d0d5dd; border-radius: 5px; }
 .property textarea { width: 100%; min-height: 88px; resize: vertical; padding: 6px; color: inherit; background: #fff; border: 1px solid #d0d5dd; border-radius: 5px; font: 11px/1.4 ui-monospace, SFMono-Regular, Consolas, monospace; }
 .property input[type="checkbox"] { width: auto; justify-self: start; accent-color: var(--accent); }
+.plate-surface-toggle { display: inline-flex; align-items: center; gap: 6px; color: var(--muted); cursor: pointer; white-space: nowrap; }
+.plate-surface-toggle input { width: auto; margin: 0; accent-color: var(--accent); }
 .component-properties { margin-top: 18px; padding-top: 12px; border-top: 1px solid #d0d5dd; }
 .component-properties h3 { margin: 0; font-size: 13px; }
 .component-property code { overflow-wrap: anywhere; font-size: 11px; }

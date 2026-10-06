@@ -2,7 +2,7 @@ import { addMessages, applyTranslations, setText, t as translate } from '../i18n
 import { modelImportMessages } from '../locales/model-import-en.js';
 import { MODEL_VERTEX_TARGETS, DEFAULT_MODEL_LEVEL } from './model-import-settings.js';
 
-export function mountModelImportTool(host, { generate }) {
+export function mountModelImportTool(host, { generate, notify }) {
   addMessages(modelImportMessages);
   const section = document.createElement('section');
   section.className = 'section model-import-tool';
@@ -82,6 +82,7 @@ export function mountModelImportTool(host, { generate }) {
   function fail(message) {
     result = null; confirm.disabled = true; svg.setAttribute('hidden', '');
     section.dataset.state = 'error'; setText(status, '模型处理失败：{error}', () => ({ error: translate(message) }));
+    notify?.('模型处理失败：{error}', { error: translate(message) }, 'error');
   }
   function refreshOptions() {
     const value = options();
@@ -138,6 +139,7 @@ export function mountModelImportTool(host, { generate }) {
           setText($('#model-result-stats'), '生成：{nodes} 节点 / {edges} 梁 / {plates} 面板；清理 {dropped} 个塌缩或重复面。', { ...result.counts, dropped: result.droppedFaces });
           setText($('#model-face-stats'), '外壳分面：{quads} 四边面 / {triangles} 三角面', result.counts);
           setText(status, result.error || '预览已更新。拖动线框可旋转查看。');
+          if (result.error) notify?.(result.error, {}, 'error');
           confirm.disabled = !result.topology;
           section.dataset.state = result.topology ? 'ready' : 'error';
           drawPreview();
@@ -155,8 +157,14 @@ export function mountModelImportTool(host, { generate }) {
     try {
       const completed = await generate(result.topology, filename.replace(/\.[^.]+$/, ''));
       if (completed) { reset(); setText(status, '已新建模型载具，可使用撤销恢复原载具。'); }
-      else setText(status, '载具未生成，请等待当前操作完成后重试。');
-    } catch (error) { setText(status, '模型处理失败：{error}', () => ({ error: translate(error.message) })); }
+      else {
+        setText(status, '载具未生成，请等待当前操作完成后重试。');
+        notify?.('载具未生成，请等待当前操作完成后重试。', {}, 'warning');
+      }
+    } catch (error) {
+      setText(status, '模型处理失败：{error}', () => ({ error: translate(error.message) }));
+      notify?.('模型处理失败：{error}', { error: translate(error.message) }, 'error');
+    }
     finally {
       generating = false; controls.disabled = !loaded; confirm.disabled = !result?.topology;
       $('#model-file-btn').disabled = false; $('#model-cancel-btn').disabled = false;

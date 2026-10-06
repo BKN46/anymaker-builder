@@ -3,7 +3,7 @@ import { createGoogleDriveAuth, loadGoogleIdentity, validGoogleClientId } from '
 import { createGoogleDrive } from './google-drive.js';
 import { decodeDriveArchive, encodeDriveArchive } from './drive-archive-format.js';
 
-export function mountGoogleDriveArchives({ host, store, clientId = '', siteClientId = '', saveClientId, validateDocument, refreshArchives, renderArchives, createId, editorBusy }) {
+export function mountGoogleDriveArchives({ host, store, clientId = '', siteClientId = '', saveClientId, validateDocument, refreshArchives, renderArchives, createId, editorBusy, notify }) {
   const siteConfigured = validGoogleClientId(siteClientId);
   if (siteConfigured) clientId = siteClientId;
   const panel = document.createElement('section'); panel.className = 'drive-archives';
@@ -16,7 +16,11 @@ export function mountGoogleDriveArchives({ host, store, clientId = '', siteClien
   const drive = createGoogleDrive({ invalidate: () => { auth?.invalidate(); files = []; listed = false; } });
   const message = (key, params) => setText(find('#drive-status'), key, params);
   const isBusy = () => working || loading;
-  const fail = error => message('云盘操作失败：{error}', () => ({ error: t(error.message || String(error)) }));
+  const fail = error => {
+    const params = () => ({ error: t(error.message || String(error)) });
+    message('云盘操作失败：{error}', params);
+    notify?.('云盘操作失败：{error}', params, 'error');
+  };
   function render() {
     applyTranslations(panel);
     input.disabled = isBusy();
@@ -68,7 +72,7 @@ export function mountGoogleDriveArchives({ host, store, clientId = '', siteClien
     if (!auth) { void prepare(); return; }
     if (!auth.isAuthorized()) {
       files = []; listed = false;
-      if (download) { message('请刷新云盘列表后重新下载'); render(); return; }
+      if (download) { message('请刷新云盘列表后重新下载'); notify?.('请刷新云盘列表后重新下载', {}, 'warning'); render(); return; }
     }
     // Keep authorization before any await so browser popup permission survives.
     const authorization = auth.authorize();

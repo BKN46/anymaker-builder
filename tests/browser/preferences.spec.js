@@ -246,6 +246,7 @@ test('damaged local data does not crash the editor or get silently overwritten',
   await page.goto('./'); await ready(page);
   await expect(page.locator('#language-select')).toHaveValue('en');
   await expect(page.locator('#autosave-status')).toHaveAttribute('data-state', 'error');
+  await expect(page.locator('#alert-host .app-alert-error').first()).toBeVisible();
   await page.locator('[data-tool="node"]').click();
   await page.locator('canvas').click({ position: { x: 450, y: 400 } });
   await page.clock.fastForward(61000);
@@ -271,6 +272,7 @@ test('quota errors preserve the last saved vehicle and report a recoverable erro
   await page.locator('canvas').click({ position: { x: 680, y: 400 } });
   await page.clock.fastForward(61000);
   await expect(page.locator('#autosave-status')).toHaveAttribute('data-state', 'write-error');
+  await expect(page.locator('#alert-host .app-alert-error')).toContainText('Local save failed');
   expect(await page.evaluate(key => localStorage.getItem(key), projectKey)).toBe(saved);
   await expect(page.locator('#topology-count')).toHaveText('2 nodes · 0 edges · 0 plates');
 });
@@ -282,6 +284,7 @@ test('another tab saving pauses overwrites until the user explicitly resumes', a
   const incoming = { version: 1, savedAt: Date.now(), document: { format: 'anymaker-web-project', version: 1, objects: [], topology: { nodes: [{ id: 'other-node', position: { x: 1, y: 2, z: 3 } }], edges: [], plates: [] } } };
   await other.evaluate(({ key, value }) => localStorage.setItem(key, value), { key: projectKey, value: JSON.stringify(incoming) });
   await expect(page.locator('#autosave-status')).toHaveAttribute('data-state', 'conflict');
+  await expect(page.locator('#alert-host .app-alert-warning').filter({ hasText: 'Another tab saved' })).toBeVisible();
   await page.locator('[data-tool="node"]').click();
   await page.locator('canvas').click({ position: { x: 450, y: 400 } });
   await page.clock.fastForward(61000);

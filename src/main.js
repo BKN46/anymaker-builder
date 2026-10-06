@@ -11,6 +11,7 @@ import { createNode, moveNodeAndMerge, mergeNodes, removeNode, removeEdge, remov
 import { LINK_COLORS, LINK_RENDER_STYLES, MAX_CONNECTION_ROUTE_SEGMENT, connectionRouteIsSafe, createLink, moveLinkPoint, pruneInvalidConnections, removeLink } from './editor/connections.js';
 import { CELL_SIZE_WORLD, assertGridVector, cellToWorld, quantizeWorldVector, worldToCell } from './editor/grid.js';
 import { extendPlateSelection } from './editor/plate-selection.js';
+import { mergeTwoPlaneSurface, prepareTwoPlaneNativeSurfaces } from './editor/two-plane-surface.js';
 import { GRID_SIZE, GRID_DIVISIONS, STRUCTURE_COLOR, NODE_PLACEMENT_BOUNDS, cameraBuildFrame, projectBuildPoint, resolveEdgePoint, resolvePlacementPoint, createEdgeMesh, createEdgeJointMesh, createConnectionRoute, createDashedConnection, updateEdgeMesh, setEdgeOutline, plateSurfaceBoundary, plateSurfaceVertices, cameraFacingPlateOffset, cameraFacingPlateDirection, rayFacingPlateSide } from './editor/construction-view.js';
 import { createEdgeRuler, createEdgeLengthLabels } from './editor/edge-ruler.js';
 import { parseNativePair, nativeStats, toNativePairFromEditor, verifyNativePairRoundTrip } from './native/anymaker-data.js';
@@ -33,7 +34,7 @@ import { TYPE_VISIBILITY_KINDS, isKindVisible } from './editor/type-visibility.j
 import { startLocalSession } from './editor/local-session.js';
 import { createOrientationIndicator, orientCamera, applyGridStyle } from './editor/view-settings.js';
 import { RENDER_DEPTH_LAYERS, assignOpaqueDepthOrder, configureOpaqueDepth, configureOpaqueDepthLayer } from './editor/render-depth.js';
-import { nativePaintColor, nearestNativePaintIndex, officialPaintColors, isGlassPlate } from './editor/native-paint.js';
+import { nativePaintColor, nearestNativePaintIndex, officialPaintColors, isWindowPlate } from './editor/native-paint.js';
 import { paintColorValue } from './editor/paint-color.js';
 import { DEFAULT_PROJECT_NAME, normalizeProjectName, projectFileBaseName } from './editor/project-name.js';
 import { accessoryOptionsForComponent, createNativeAccessoryItem, defaultAccessoryForPlacement, nativeAccessoryContainerForComponent, nativeAccessoryDefinition } from './editor/native-accessories.js';
@@ -119,6 +120,7 @@ const TOPOLOGY_HELPER_DISTANCE = 12;
 let gridPreferenceVisible = settings.gridVisible;
 let plateEdgeIds = [];
 let plateDraft = null;
+let bypassSurfaceLimit = false;
 let connectionDraft = null;
 let selectedTopologyNode = null;
 let selectedLinkPoint = null;
@@ -179,6 +181,11 @@ $('#app').innerHTML = '<header class="topbar"><div class="brand" aria-label="ANY
   '<section id="viewport" tabindex="0" data-i18n-aria-label="三维建造视口"><button id="right-sidebar-toggle" class="sidebar-toggle right-toggle" aria-controls="right-sidebar" aria-expanded="false" data-i18n="打开右侧面板"></button><div class="view-controls"><button data-view="iso" data-i18n="正交"></button><button data-view="top" data-i18n="顶视"></button><button data-view="front" data-i18n="前视"></button><button id="fit-btn" data-i18n="回到中心"></button></div><span id="fps-display" class="fps-display" aria-label="Frame rate">FPS 0</span><div class="hud"><span class="badge" id="object-count"></span><span class="badge" id="vehicle-size"></span><span id="topology-count" hidden></span><span class="badge" id="cursor-pos" data-i18n="工作平面 Y = 0"></span></div></section><div id="right-sidebar-resizer" role="separator" aria-orientation="vertical" aria-controls="right-sidebar" data-i18n-aria-label="调整右侧面板宽度" aria-valuemin="240" aria-valuemax="720" aria-valuenow="304" tabindex="0" hidden></div>' +
   '<aside id="right-sidebar" class="sidebar right-sidebar" data-i18n-aria-label="编辑器面板" hidden><div class="sidebar-tabs" role="tablist" data-i18n-aria-label="编辑器面板"><button id="right-tab-editor" type="button" role="tab" aria-controls="editor-tab-panel" aria-selected="true" data-sidebar-tab="editor" data-i18n="编辑器参数"></button><button id="right-tab-inspector" type="button" role="tab" aria-controls="inspector-tab-panel" aria-selected="false" tabindex="-1" data-sidebar-tab="inspector" data-i18n="选中方块属性"></button><button id="right-tab-resources" type="button" role="tab" aria-controls="resources-tab-panel" aria-selected="false" tabindex="-1" data-sidebar-tab="resources" data-i18n="资源与校验"></button><button id="right-tab-history" type="button" role="tab" aria-controls="history-tab-panel" aria-selected="false" tabindex="-1" data-sidebar-tab="history" data-i18n="历史记录"></button></div><section id="editor-tab-panel" class="sidebar-tab-panel" role="tabpanel" aria-labelledby="right-tab-editor"><section id="grid-settings" class="section"><h2 data-i18n="工作网格 · 编辑器参数"></h2><p class="status" data-i18n="固定单位网格：1 格 = 8 cm；普通位置和位移按整格吸附，斜面安装及原生子网格投影可保留小数。"></p><button id="grid-btn" aria-pressed="true" data-i18n="隐藏网格"></button><p class="status"><span data-i18n="左键：当前工具 · 右键拖动：旋转视角"></span><br><span data-i18n="中键：平移 · 滚轮：缩放 · F：聚焦"></span><br><span data-i18n="Shift + 点击连续放置 · Ctrl / ⌘ + Z：撤销"></span></p></section></section><section id="inspector-tab-panel" class="sidebar-tab-panel" role="tabpanel" aria-labelledby="right-tab-inspector" hidden><section class="section"><div id="inspector-content" class="empty"></div></section></section><section id="resources-tab-panel" class="sidebar-tab-panel" role="tabpanel" aria-labelledby="right-tab-resources" hidden><section class="section"><h2 data-i18n="资源状态"></h2><p class="status" id="asset-status" data-i18n="尚未导入 Mesh。橙色线框仅是缺失资源标记，不代表游戏尺寸。"></p><button id="mesh-files-btn" class="full" data-i18n="选择 .mesh 文件"></button><p class="status" data-i18n="推荐选择游戏的 rom/meshes 文件夹。只在浏览器读取，不上传、不执行 EXE。仅渲染静态 Mesh，动态部件数量会单独提示。"></p></section><section class="section"><h2 data-i18n="本地原生载具"></h2><button id="native-btn" class="full" data-i18n="选择配套 .data / .meta"></button><p class="status" id="native-summary" data-i18n="选择同名的 .data 与 .meta JSON 文件。浏览器只读取，不上传；校验后立即替换当前场景。"></p></section><section class="section"><h2 data-i18n="校验"></h2><div id="validation" class="status"></div></section></section><section id="history-tab-panel" class="sidebar-tab-panel" role="tabpanel" aria-labelledby="right-tab-history" hidden><section class="section"><p class="status" data-i18n="最近 50 次已提交操作。选择任一项即可恢复到该状态。"></p><div id="history-list" class="history-list"></div></section></section></aside></main>' +
   '<input id="mesh-input" type="file" accept=".mesh" multiple hidden><input id="file-input" type="file" accept=".json" hidden><input id="native-input" type="file" accept=".data,.meta" multiple hidden><input id="native-subgrid-input" type="file" accept=".data,.meta" multiple hidden><input id="reference-image-input" type="file" accept="image/*" hidden><button id="project-save-btn" type="button" hidden></button>';
+const alertHost = document.createElement('div');
+alertHost.id = 'alert-host'; alertHost.className = 'alert-host';
+alertHost.dataset.i18nAriaLabel = '操作提示';
+alertHost.setAttribute('aria-live', 'polite'); alertHost.setAttribute('aria-atomic', 'false');
+document.body.append(alertHost);
 applyTranslations(document);
 const subgridCreate = document.createElement('div');
 subgridCreate.className = 'subgrid-create';
@@ -311,6 +318,22 @@ edgeToolbar.id = 'edge-toolbar'; edgeToolbar.className = 'context-toolbar edge-t
 edgeToolbar.innerHTML = '<strong data-i18n="梁工具"></strong><div class="edge-size-buttons" role="group" data-i18n-aria-label="梁截面"><button type="button" data-edge-size="1">1×1</button><button type="button" data-edge-size="3">3×3</button></div><label class="edge-micro-toggle"><input id="edge-micro-mode" type="checkbox"><span data-i18n="梁终点微操"></span></label><button id="edge-split-action" type="button" data-i18n="切分梁"></button><span class="context-help" data-i18n="梁截面尺寸与切分"></span>';
 applyTranslations(edgeToolbar);
 
+const createSurfaceLimitToolbar = (id, title, inputId) => {
+  const toolbar = document.createElement('section');
+  toolbar.id = id; toolbar.className = 'context-toolbar plate-surface-toolbar'; toolbar.hidden = true;
+  toolbar.innerHTML = '<strong data-i18n="' + title + '"></strong><label class="plate-surface-toggle" data-i18n-title="允许非平面闭环的编辑器曲面旁路；仍要求闭环、投影无自交、节点引用完整和可导出的结构"><input id="' + inputId + '" type="checkbox"><span data-i18n="规避游戏曲面限制"></span></label>';
+  applyTranslations(toolbar);
+  return toolbar;
+};
+const plateToolbar = createSurfaceLimitToolbar('plate-toolbar', '面板工具', 'plate-surface-limit-bypass');
+const windowToolbar = createSurfaceLimitToolbar('window-toolbar', '窗工具', 'window-surface-limit-bypass');
+const surfaceLimitInputs = [plateToolbar.querySelector('input'), windowToolbar.querySelector('input')];
+surfaceLimitInputs.forEach(input => input.addEventListener('change', () => {
+  bypassSurfaceLimit = input.checked;
+  surfaceLimitInputs.forEach(other => { other.checked = bypassSurfaceLimit; });
+  if (bypassSurfaceLimit) status('已启用曲面限制旁路；允许非平面闭环，但仍保留投影自交和结构安全检查', {}, { alert: false });
+}));
+
 const subgridToolbar = document.createElement('section');
 subgridToolbar.id = 'subgrid-toolbar'; subgridToolbar.className = 'context-toolbar subgrid-toolbar'; subgridToolbar.hidden = true;
 subgridToolbar.innerHTML = '<strong data-i18n="子网格操作"></strong><button id="subgrid-split-action" type="button" data-i18n="拆分子网格"></button><button id="subgrid-merge-action" type="button" data-i18n="合并子网格"></button>';
@@ -374,7 +397,7 @@ function setConnectionVisibilityCollapsed(collapsed) {
 connectionVisibilityToggle.addEventListener('click', () => setConnectionVisibilityCollapsed(!connectionVisibilityOptions.hidden));
 
 const workspace = $('#workspace');
-workspace.append(selectionFilterToolbar, selectionToolbar, paintToolbar, connectionToolbar, transparencyToolbar, edgeToolbar, subgridToolbar);
+workspace.append(selectionFilterToolbar, selectionToolbar, paintToolbar, connectionToolbar, transparencyToolbar, edgeToolbar, plateToolbar, windowToolbar, subgridToolbar);
 $('#viewport').append(selectionBox);
 function setSelectionAction(value) {
   selectionAction = selectionAction === value ? null : value;
@@ -559,18 +582,17 @@ rightSidebarResizer.addEventListener('keydown', event => {
 });
 new ResizeObserver(() => { if (!leftSidebar.hidden) setLeftSidebarWidth(leftSidebarWidth); }).observe(workspace);
 
-const tools = [['select', '选择', 'V'], ['place', '放置', 'P'], ['erase', '删除', 'E'], ['translate', '移动', 'G'], ['rotate', '旋转', 'R'], ['scale', '缩放', 'S'], ['node', '节点', 'N'], ['edge', '梁', 'B'], ['plate', '面板', 'L'], ['glass', '玻璃', 'J'], ['connect', '连接', 'K'], ['paint', '涂色', 'C'], ['hide', '隐藏', 'H']];
+const tools = [['select', '选择', 'V'], ['place', '放置', 'P'], ['erase', '删除', 'E'], ['translate', '移动', 'G'], ['rotate', '旋转', 'R'], ['scale', '缩放', 'S'], ['node', '节点', 'N'], ['edge', '梁', 'B'], ['plate', '面板', 'L'], ['window', '窗', 'J'], ['connect', '连接', 'K'], ['paint', '涂色', 'C'], ['hide', '隐藏', 'H']];
 for (const [id, name, key] of tools) {
   const button = document.createElement('button');
   button.className = 'tool'; button.dataset.tool = id;
-  const icons = { select: '↖', place: '＋', erase: '⌫', translate: '✥', rotate: '⟳', scale: '⤢', node: '●', edge: '／', split: '✂', plate: '◇', glass: '◫', connect: '⌁', paint: '◈', hide: '◌' };
+  const icons = { select: '↖', place: '＋', erase: '⌫', translate: '✥', rotate: '⟳', scale: '⤢', node: '●', edge: '／', split: '✂', plate: '◇', window: '◫', connect: '⌁', paint: '◈', hide: '◌' };
   button.innerHTML = '<span class="tool-icon">' + icons[id] + '</span><span class="tool-label" data-i18n="' + name + '"></span><kbd>' + key + '</kbd>';
   button.dataset.i18nTitle = name;
   applyTranslations(button);
   button.addEventListener('click', () => setTool(id));
   $('#tools').append(button);
 }
-
 // Structural operations are commands, so each action creates one history
 // snapshot and can be undone as a complete copy/mirror/split/merge operation.
 const structuralActions = [
@@ -609,14 +631,22 @@ nativeImportNotice.append(nativeImportNoticeText, dismissNativeImportNotice); vi
 function showNativeImportFailure(error) {
   const params = () => ({ error: t(error instanceof Error ? error.message : String(error)) });
   setText($('#native-summary'), '无法导入原生文件：{error}', params);
-  status('无法导入原生文件：{error}', params);
+  status('无法导入原生文件：{error}', params, { alert: false });
+  showTopAlert('无法导入原生文件：{error}', params, 'error');
   nativeImportNotice.dataset.state = 'error'; nativeImportNotice.setAttribute('role', 'alert'); nativeImportNotice.hidden = false;
   setText(nativeImportNoticeText, '无法导入原生文件：{error}', params);
 }
-function showRemovedNativePlates(removedPlateIds) {
-  if (!removedPlateIds.length) return;
+function showNativeCurvedPlates(curvedPlateIds, nativeLoadDiagnostics = []) {
+  if (nativeLoadDiagnostics.length) {
+    nativeImportNotice.dataset.state = 'warning'; nativeImportNotice.setAttribute('role', 'status'); nativeImportNotice.hidden = false;
+    setText(nativeImportNoticeText, '已保留全部面片；其中 {count} 个缺少边界梁，游戏加载会丢弃，原生导出将阻止保存。', { count: nativeLoadDiagnostics.length });
+    showTopAlert('已保留全部面片；其中 {count} 个缺少边界梁，游戏加载会丢弃，原生导出将阻止保存。', { count: nativeLoadDiagnostics.length }, 'warning');
+    return;
+  }
+  if (!curvedPlateIds.length) return;
   nativeImportNotice.dataset.state = 'warning'; nativeImportNotice.setAttribute('role', 'status'); nativeImportNotice.hidden = false;
-  setText(nativeImportNoticeText, '导入时已删除 {count} 个不共面的面板，其他内容已保留。', { count: removedPlateIds.length });
+  setText(nativeImportNoticeText, '已保留 {count} 个曲面；下载时将自动检查有限双平面扇形。', { count: curvedPlateIds.length });
+  showTopAlert('已保留 {count} 个曲面；下载时将自动检查有限双平面扇形。', { count: curvedPlateIds.length }, 'warning');
 }
 const subgridErrorOverlay = document.createElement('div');
 subgridErrorOverlay.id = 'subgrid-error-markers';
@@ -673,7 +703,7 @@ cameraLight.target = cameraLightTarget;
 camera.add(cameraLight, cameraLightTarget);
 let renderer;
 try { renderer = new THREE.WebGLRenderer({ antialias: settings.renderQuality.antialias, alpha: true, logarithmicDepthBuffer: true }); }
-catch { setText(viewport, '无法初始化 WebGL2。请启用硬件加速或更换浏览器。'); throw new Error('WebGL2 unavailable'); }
+catch { setText(viewport, '无法初始化 WebGL2。请启用硬件加速或更换浏览器。'); showTopAlert('无法初始化 WebGL2。请启用硬件加速或更换浏览器。', {}, 'error'); throw new Error('WebGL2 unavailable'); }
 renderer.setPixelRatio(Math.min(devicePixelRatio, 2));
 renderer.shadowMap.enabled = true;
 renderer.shadowMap.type = THREE.PCFSoftShadowMap;
@@ -1326,21 +1356,21 @@ function buildTopologyVisual(state, components = new Map(), changedKeys = null, 
       if (changedKeys && !changedKeys.has(`plate:${plate.id}`)) continue;
       const depthKey = `plate:${plate.id}`;
       const offset = plate.normalOffset ?? CELL_SIZE_WORLD / 2;
-      const surface = { normalOffset: offset, surfaceDirection: plate.surfaceDirection };
+      const surface = { ...plate, normalOffset: offset, boundaryEdges: state.edges };
       const vertices = plateSurfaceVertices(plate.nodeIds, positions, surface);
       const geometry = new THREE.BufferGeometry();
       geometry.setAttribute('position', new THREE.Float32BufferAttribute(vertices, 3));
       geometry.computeVertexNormals();
       geometry.computeBoundingBox(); geometry.computeBoundingSphere();
       const painted = typeof plate.color_front === 'string' || typeof plate.color_back === 'string' || Number.isInteger(plate.col_front) || Number.isInteger(plate.col_back);
-      const glass = isGlassPlate(plate);
+      const windowPlate = isWindowPlate(plate);
       if (painted) {
         geometry.addGroup(0, vertices.length / 3, 0);
         geometry.addGroup(0, vertices.length / 3, 1);
       }
       let material = painted ? [
-        structureMaterial(plate.color_front, plate.col_front, topologyMaterials.plate, THREE.FrontSide, { depthWrite: !glass, depthLayer: RENDER_DEPTH_LAYERS.plate, depthKey, gridId: plate.gridId }),
-        structureMaterial(plate.color_back, plate.col_back, topologyMaterials.plate, THREE.BackSide, { depthWrite: !glass, depthLayer: RENDER_DEPTH_LAYERS.plate, depthKey, gridId: plate.gridId }),
+        structureMaterial(plate.color_front, plate.col_front, topologyMaterials.plate, THREE.FrontSide, { depthWrite: !windowPlate, depthLayer: RENDER_DEPTH_LAYERS.plate, depthKey, gridId: plate.gridId }),
+        structureMaterial(plate.color_back, plate.col_back, topologyMaterials.plate, THREE.BackSide, { depthWrite: !windowPlate, depthLayer: RENDER_DEPTH_LAYERS.plate, depthKey, gridId: plate.gridId }),
       ] : topologyMaterials.plate.clone();
       if (subgridView && !painted) setSubgridMaterialColor(material, plate.gridId);
       // Native imports can contain deliberately adjacent and occasionally
@@ -1348,9 +1378,9 @@ function buildTopologyVisual(state, components = new Map(), changedKeys = null, 
       // bias so their rasterisation does not alternate between frames.
       for (const item of Array.isArray(material) ? material : [material]) {
         item.userData.topologyPaint = true;
-        if (!glass) configureOpaqueDepth(item, RENDER_DEPTH_LAYERS.plate, { key: depthKey });
+        if (!windowPlate) configureOpaqueDepth(item, RENDER_DEPTH_LAYERS.plate, { key: depthKey });
       }
-      if (glass) {
+      if (windowPlate) {
         for (const item of Array.isArray(material) ? material : [material]) {
           item.transparent = true; item.opacity = .42; item.depthTest = true; item.depthWrite = false;
         }
@@ -1359,8 +1389,10 @@ function buildTopologyVisual(state, components = new Map(), changedKeys = null, 
       mesh.userData.topology = 'plate'; mesh.userData.plateId = plate.id;
       mesh.userData.nodeIds = [...plate.nodeIds]; mesh.userData.normalOffset = offset;
       mesh.userData.surfaceDirection = plate.surfaceDirection;
+      mesh.userData.surfaceLimitBypass = plate.surfaceLimitBypass === true;
+      mesh.userData.surfaceFanAnchor = plate.surfaceFanAnchor; mesh.userData.type = plate.type;
       mesh.visible = !plate.hidden && isKindVisible('plate', hiddenKinds);
-      if (glass) mesh.renderOrder = 4;
+      if (windowPlate) mesh.renderOrder = 4;
       else configureOpaqueDepthLayer(mesh, RENDER_DEPTH_LAYERS.plate, { key: depthKey });
       layer.add(mesh);
     }
@@ -1432,6 +1464,8 @@ function updateTopologyPreview(nodeId, value, counterpartId = null, counterpartV
         vertices = plateSurfaceVertices(nodeIds, positions, {
           normalOffset: object.userData.normalOffset,
           surfaceDirection: object.userData.surfaceDirection,
+          surfaceLimitBypass: object.userData.surfaceLimitBypass === true,
+          surfaceFanAnchor: object.userData.surfaceFanAnchor, type: object.userData.type, boundaryEdges: topology.edges,
         });
       } catch {
         // A node drag can temporarily leave the plate plane or cross its
@@ -1611,7 +1645,22 @@ function cancelTopologyDraft() {
   refreshConnectionPorts();
 }
 
-function status(message, params = {}) { setText($('#save-status'), message, params); }
+const statusAlertPattern = /失败|错误|无效|无法|不能|缺少|需要|必须|请选择|请先|超出|未形成|不存在|不支持|警告|丢弃|阻止|退化|交叠|自交|invalid|error|failed|cannot|missing|unsupported|blocked|degenerate|overlap|warning/i;
+function showTopAlert(message, params = {}, severity = 'warning') {
+  const text = t(message, params);
+  if (!text.trim()) return;
+  const alert = document.createElement('div');
+  alert.className = `app-alert app-alert-${severity}`;
+  alert.setAttribute('role', severity === 'error' ? 'alert' : 'status');
+  setText(alert, message, params);
+  alertHost.append(alert);
+  const timer = window.setTimeout(() => { alert.remove(); }, 5000);
+  alert.addEventListener('click', () => { window.clearTimeout(timer); alert.remove(); });
+}
+function status(message, params = {}, { alert = statusAlertPattern.test(String(message)), severity = 'warning' } = {}) {
+  setText($('#save-status'), message, params);
+  if (alert) showTopAlert(message, params, severity);
+}
 const mechanicalMateErrorMessages = {
   'ambiguous-mate': '机械配合位置存在多个候选，请移开重叠组件：{components}',
   'scaled-mate': '机械配合需要原始尺寸，请将缩放恢复为 1：{components}',
@@ -1641,7 +1690,23 @@ const beltErrorMessages = {
   open: '多轮皮带尚未闭合', limit: '皮带几何数量超出编辑器上限',
 };
 function reportError(message, error) {
-  status(message, () => ({ error: t(beltErrorMessages[error.beltCode] || trackErrorMessages[error.trackCode] || hydraulicErrorMessages[error.hydraulicCode] || mechanicalMateErrorMessages[error.mechanicalMateCode] || error.message, { components: error.components }) }));
+  status(message, () => ({ error: t(beltErrorMessages[error.beltCode] || trackErrorMessages[error.trackCode] || hydraulicErrorMessages[error.hydraulicCode] || mechanicalMateErrorMessages[error.mechanicalMateCode] || error.message, { components: error.components, ...(error.cause ? { error: t(error.cause.message) } : {}) }) }), { alert: true, severity: 'error' });
+}
+function reportWarning(message, params = {}) {
+  status(message, params, { alert: true, severity: 'warning' });
+}
+function applyAutomaticTwoPlaneSurfaces(plateIds) {
+  try {
+    const result = mergeTwoPlaneSurface(topology, plateIds);
+    if (JSON.stringify(result.topology) !== JSON.stringify(topology)) {
+      commitTopology(result.topology, '已应用双平面单面');
+    } else {
+      status('双平面扇形已通过检查');
+    }
+    inspect();
+  } catch (error) {
+    reportError('双平面扇形处理失败：{error}', error);
+  }
 }
 function componentName(def) {
   if (!def) return '';
@@ -1928,7 +1993,7 @@ function updateInteractionHighlights(hovered = hoveredObject) {
   clearInteractionHighlights();
   // Reference preview suppresses grid and editing chrome, but must not hide
   // the affordance needed to identify what the active interaction will act on.
-  if (!['select', 'erase', 'paint', 'plate', 'glass', 'translate', 'rotate', 'scale', 'hide'].includes(tool)) {
+  if (!['select', 'erase', 'paint', 'plate', 'window', 'translate', 'rotate', 'scale', 'hide'].includes(tool)) {
     $('#viewport').dataset.interactionHighlightCount = '0';
     $('#viewport').dataset.edgeCenterHighlightCount = '0';
     $('#viewport').dataset.plateBoundaryHighlightCount = '0';
@@ -1983,7 +2048,7 @@ function updateInteractionHighlights(hovered = hoveredObject) {
     for (const object of selectedObjects()) add(object, 0x2787f5);
     for (const object of selectedTopologyObjects()) add(object, 0x2787f5);
   }
-  if (tool === 'plate' || tool === 'glass') {
+  if (tool === 'plate' || tool === 'window') {
     for (const edgeId of plateEdgeIds) add(topologyObject('edge', edgeId), 0x2787f5);
   }
   add(hovered, hovered?.userData.topology === 'edge' && tool !== 'hide' ? 0x2787f5 : ['erase', 'hide'].includes(tool) ? 0xe5484d : 0xf0a229);
@@ -2261,7 +2326,9 @@ function setTool(value) {
   if (value !== 'edge') cancelEdge();
   buildStatus.hidden = value !== 'edge';
   if (value === 'edge' && !edgeDraft) setText(buildStatus, '梁 1 格 · 点击起点');
-  if (!['plate', 'glass'].includes(value)) clearPlateSelection();
+  plateToolbar.hidden = value !== 'plate' || referencePreview;
+  windowToolbar.hidden = value !== 'window' || referencePreview;
+  if (!['plate', 'window'].includes(value)) clearPlateSelection();
   if (value !== 'connect') { connectionDraft = null; clearConnectionDraftPreview(); }
   if (!['node', 'translate'].includes(value)) clearNodeSelection();
   if (value !== 'translate') clearLinkPointSelection();
@@ -2852,8 +2919,10 @@ function renderArchiveList() {
   }
 }
 async function refreshArchiveList() {
+  const previousError = archiveLoadError;
   if (!archiveStore) {
     archiveLoadError = t('浏览器不支持 IndexedDB');
+    if (archiveLoadError !== previousError) showTopAlert('存档不可用：{error}', { error: archiveLoadError }, 'error');
     renderArchiveList();
     return;
   }
@@ -2862,6 +2931,7 @@ async function refreshArchiveList() {
     archiveLoadError = null;
   } catch (error) {
     archiveLoadError = error instanceof Error ? error.message : String(error);
+    if (archiveLoadError !== previousError) showTopAlert('存档不可用：{error}', { error: archiveLoadError }, 'error');
   }
   renderArchiveList();
 }
@@ -2915,14 +2985,17 @@ async function saveNamedArchive() {
   if (busy || !archiveStore || driveArchives?.isBusy()) return;
   const input = $('#archive-name');
   const name = input.value.trim();
-  if (!name || name.length > 120) { setText($('#archive-status'), '请输入有效的存档名称'); return; }
+  if (!name || name.length > 120) { setText($('#archive-status'), '请输入有效的存档名称'); showTopAlert('请输入有效的存档名称'); return; }
   try {
     const existing = archiveRecords.find(record => record.kind === 'manual' && record.name === name);
     await archiveStore.put({ ...existing, id: existing?.id || archiveId(), name, kind: 'manual', savedAt: Date.now(), document: currentProject() });
     input.value = '';
     await refreshArchiveList();
     setText($('#archive-status'), '已保存存档 {name}', { name });
-  } catch (error) { setText($('#archive-status'), '保存存档失败：{error}', { error: error instanceof Error ? error.message : String(error) }); }
+  } catch (error) {
+    const params = { error: error instanceof Error ? error.message : String(error) };
+    setText($('#archive-status'), '保存存档失败：{error}', params); showTopAlert('保存存档失败：{error}', params, 'error');
+  }
 }
 async function overwriteArchive(record) {
   if (busy || !archiveStore || driveArchives?.isBusy()) return;
@@ -2932,7 +3005,9 @@ async function overwriteArchive(record) {
     await archiveStore.put({ ...record, document, savedAt: Date.now() });
     await refreshArchiveList();
     setText($('#archive-status'), '已覆盖存档 {name}', { name: record.name });
-  } catch (error) { setText($('#archive-status'), '保存存档失败：{error}', { error: error.message }); }
+  } catch (error) {
+    const params = { error: error.message }; setText($('#archive-status'), '保存存档失败：{error}', params); showTopAlert('保存存档失败：{error}', params, 'error');
+  }
 }
 async function saveAutoArchive(savedAt = Date.now()) {
   if (!archiveStore) return;
@@ -2942,6 +3017,7 @@ async function saveAutoArchive(savedAt = Date.now()) {
     await refreshArchiveList();
   } catch (error) {
     archiveLoadError = error instanceof Error ? error.message : String(error);
+    showTopAlert('保存存档失败：{error}', { error: archiveLoadError }, 'error');
     renderArchiveList();
   }
 }
@@ -2969,7 +3045,10 @@ async function exportProjectCode() {
     const code = await createProjectCode();
     download(code, `${projectFileBaseName(projectName)}.ambcode.txt`, 'text/plain;charset=utf-8');
     setText($('#archive-code-status'), '已生成工程代码，共 {count} 个字符', { count: code.length });
-  } catch (error) { setText($('#archive-code-status'), '导出工程代码失败：{error}', { error: error instanceof Error ? error.message : String(error) }); }
+  } catch (error) {
+    const params = { error: error instanceof Error ? error.message : String(error) };
+    setText($('#archive-code-status'), '导出工程代码失败：{error}', params); showTopAlert('导出工程代码失败：{error}', params, 'error');
+  }
 }
 async function copyProjectCode() {
   if (busy) return;
@@ -2977,7 +3056,10 @@ async function copyProjectCode() {
     const code = $('#archive-code').value.trim() || await createProjectCode();
     await copyText(code);
     setText($('#archive-code-status'), '工程代码已复制到剪贴板');
-  } catch (error) { setText($('#archive-code-status'), '复制工程代码失败：{error}', { error: error instanceof Error ? error.message : String(error) }); }
+  } catch (error) {
+    const params = { error: error instanceof Error ? error.message : String(error) };
+    setText($('#archive-code-status'), '复制工程代码失败：{error}', params); showTopAlert('复制工程代码失败：{error}', params, 'error');
+  }
 }
 async function importProjectCode() {
   if (busy) return;
@@ -3002,7 +3084,10 @@ async function shareProjectCode() {
     url.searchParams.set('project', code);
     await copyText(url.toString());
     setText($('#archive-code-status'), '分享链接已复制到剪贴板');
-  } catch (error) { setText($('#archive-code-status'), '生成分享链接失败：{error}', { error: error instanceof Error ? error.message : String(error) }); }
+  } catch (error) {
+    const params = { error: error instanceof Error ? error.message : String(error) };
+    setText($('#archive-code-status'), '生成分享链接失败：{error}', params); showTopAlert('生成分享链接失败：{error}', params, 'error');
+  }
 }
 $('#archive-code-export').onclick = () => { void exportProjectCode(); };
 $('#archive-code-copy').onclick = () => { void copyProjectCode(); };
@@ -3067,6 +3152,7 @@ driveArchives = mountGoogleDriveArchives({
   saveClientId: value => { settings.googleClientId = value; saveSettings(); },
   validateDocument: value => migrateDocument(value, catalog.index),
   refreshArchives: refreshArchiveList, renderArchives: renderArchiveList, createId: archiveId, editorBusy: () => busy,
+  notify: showTopAlert,
 });
 void refreshArchiveList();
 async function checkSubgrids() {
@@ -3088,7 +3174,7 @@ async function checkSubgrids() {
     const errors = analysis.diagnostics.filter(item => item.severity === 'error').length;
     const warnings = analysis.diagnostics.filter(item => item.severity === 'warning').length;
     renderSubgridList();
-    status(changed ? '已检查并分离：{groups} 个子网格；{errors} 个错误；{warnings} 个警告' : '子网格检查完成：{groups} 个子网格；{errors} 个错误；{warnings} 个警告', { groups: analysis.groups.length, errors, warnings });
+    status(changed ? '已检查并分离：{groups} 个子网格；{errors} 个错误；{warnings} 个警告' : '子网格检查完成：{groups} 个子网格；{errors} 个错误；{warnings} 个警告', { groups: analysis.groups.length, errors, warnings }, { alert: errors > 0 || warnings > 0, severity: errors ? 'error' : 'warning' });
   });
 }
 async function setGridVisibility(gridId, hidden) {
@@ -3685,15 +3771,22 @@ function addMirroredPlate(state, plate) {
     ...(plate.type ? { type: plate.type } : {}),
     ...(Number.isFinite(plate.normalOffset) ? { normalOffset: plate.normalOffset } : {}),
     ...(plate.surfaceDirection ? { surfaceDirection: mirrorSurfaceDirection(plate.surfaceDirection, mirrorMode) } : {}),
+    ...(plate.surfaceLimitBypass ? { surfaceLimitBypass: true } : {}),
     ...(paintColorValue(plate.color_front) ? { color_front: plate.color_front } : {}),
     ...(paintColorValue(plate.color_back) ? { color_back: plate.color_back } : {}),
     gridId: plate.gridId || activeGridId,
   };
+  if (plate.surfaceFanAnchor) {
+    const source = sourceNodes.get(plate.surfaceFanAnchor);
+    const anchorIndex = plate.nodeIds.indexOf(plate.surfaceFanAnchor);
+    const mirroredIndex = nodeIds.length - 1 - anchorIndex;
+    if (source && anchorIndex >= 0 && nodeIds[mirroredIndex]) properties.surfaceFanAnchor = nodeIds[mirroredIndex];
+  }
   try {
     const result = createPlate(state.plates, [...nodeIds].reverse(), nodes, properties);
     return { ...state, nodes, plates: result.plates };
   } catch (error) {
-    if (error.message !== '该闭合梁环已有面板或玻璃') throw error;
+    if (error.message !== '该闭合梁环已有面板或窗') throw error;
     return state;
   }
 }
@@ -3939,6 +4032,11 @@ function inspect() {
     const kinds = selectedTopology.map(object => t({ node: '节点', edge: '梁', link: '连接', plate: '面板' }[object.userData.topology] || '面板'));
     const hint = document.createElement('p'); hint.className = 'status'; hint.textContent = t('\u9009\u4e2d\u5bf9\u8c61\u53ef\u6279\u91cf\u5220\u9664\u6216\u6d82\u8272'); host.append(hint);
     const selectedKinds = document.createElement('p'); selectedKinds.className = 'status'; selectedKinds.textContent = kinds.join(' · '); host.append(selectedKinds);
+    const selectedPlates = selectedTopology.filter(object => object.userData.topology === 'plate').map(object => topology.plates.find(plate => plate.id === object.userData.plateId)).filter(Boolean);
+    if (selectedPlates.length === selectedTopology.length && selectedPlates.length > 0 && selectedPlates.every(plate => plate.surfaceLimitBypass === true)) {
+      const merge = document.createElement('button'); merge.id = 'merge-selected-surface'; merge.className = 'full'; merge.textContent = t('合并为双平面单面');
+      merge.onclick = () => { setTool('select'); applyAutomaticTwoPlaneSurfaces(selectedPlates.map(plate => plate.id)); }; host.append(merge);
+    }
     const button = document.createElement('button'); button.className = 'full'; button.textContent = t('\u5220\u9664\u5df2\u9009\u5bf9\u8c61'); button.id = 'delete-selected';
     button.onclick = () => { void transact(removeSelection); }; host.append(button);
     return;
@@ -5065,11 +5163,12 @@ function nodePoint() {
   if (node) return new THREE.Vector3(node.position.x, node.position.y, node.position.z);
   return projectBuildPoint(raycaster.ray, nodeMoveFrame || cameraBuildFrame(camera, controls.target));
 }
-function commitTopology(next, message, params = {}) {
+function commitTopology(next, message, params = {}, nextVisibilityGroups = transparencyGroups) {
   const cleaned = pruneUnusedTopology(sanitizeConnectionTopology(next, snapshot()));
-  const candidate = validateDocument(project(snapshot(), cleaned, transparencyGroups, subgrids), catalog.index);
+  const candidate = validateDocument(project(snapshot(), cleaned, nextVisibilityGroups, subgrids, projectName), catalog.index);
   const visual = prepareTopologyVisual(candidate.topology, componentEntries(candidate.objects));
   topology = candidate.topology;
+  transparencyGroups = candidate.visibilityGroups || [];
   if (selectedTopologyNode && !topology.nodes.some(node => node.id === selectedTopologyNode)) clearNodeSelection();
   subgrids = candidate.grids || subgrids;
   replaceTopologyVisual(visual);
@@ -5101,12 +5200,12 @@ function deleteTopology(kind, id) {
   commitTopology(next, kind === 'node' ? '已删除节点及其关联拓扑' : kind === 'edge' ? '已删除梁' : '已删除面板');
 }
 function finishPlate(type = 'plate') {
-  const glass = type === 'glass';
-  if (!plateDraft?.closed || plateEdgeIds.length < 3) { status(glass ? '玻璃至少需要选择三根梁' : '面板至少需要选择三根梁'); return; }
+  const windowTool = type === 'window';
+  if (!plateDraft?.closed || plateEdgeIds.length < 3) { status(windowTool ? '窗至少需要选择三根梁' : '面板至少需要选择三根梁'); return; }
   try {
     const color = currentPaintColor();
     const offset = CELL_SIZE_WORLD * plateDraft.size / 2;
-    const result = createPlate(topology.plates, plateDraft.nodeIds, topology.nodes, { normalOffset: offset, gridId: plateDraft.gridId, ...(glass ? { type: 'window' } : {}), ...(color ? { color_front: color, color_back: color } : {}) });
+    const result = createPlate(topology.plates, plateDraft.nodeIds, topology.nodes, { normalOffset: offset, gridId: plateDraft.gridId, ...(windowTool ? { type: 'window' } : {}), ...(bypassSurfaceLimit ? { surfaceLimitBypass: true } : {}), ...(color ? { color_front: color, color_back: color } : {}) });
     const positions = new Map(topology.nodes.map(node => [node.id, new THREE.Vector3(node.position.x, node.position.y, node.position.z)]));
     const cameraOffset = cameraFacingPlateOffset(result.plate.nodeIds, positions, camera.position, offset);
     // The game derives a plate's front side from its node winding. Align the
@@ -5116,8 +5215,13 @@ function finishPlate(type = 'plate') {
     result.plate.normalOffset = Math.abs(cameraOffset);
     const surfaceDirection = cameraFacingPlateDirection(result.plate.nodeIds, positions, camera.position);
     result.plate.surfaceDirection = { x: surfaceDirection.x, y: surfaceDirection.y, z: surfaceDirection.z };
-    const next = addMirroredPlate({ ...topology, plates: result.plates }, result.plate);
-    commitTopology(next, glass ? '已创建玻璃面板' : '已创建面板');
+    let next = addMirroredPlate({ ...topology, plates: result.plates }, result.plate);
+    if (bypassSurfaceLimit) {
+      const existingIds = new Set(topology.plates.map(plate => plate.id));
+      next = prepareTwoPlaneNativeSurfaces(next, { plateIds: next.plates.filter(plate => !existingIds.has(plate.id)).map(plate => plate.id) }).topology;
+    }
+    commitTopology(next, windowTool ? '已创建窗' : '已创建面板');
+    if (bypassSurfaceLimit) status(windowTool ? '已创建曲面限制旁路窗，并自动生成双平面扇形' : '已创建曲面限制旁路面板，并自动生成双平面扇形');
     clearPlateSelection();
     hoveredObject = null;
     updateInteractionHighlights();
@@ -5135,7 +5239,7 @@ function plateEdgeCandidate() {
   const hit = placementPicker.firstHit(raycaster, constructionHitTargets());
   if (hit?.object.userData.topology !== 'edge') return null;
   try {
-    const selection = extendPlateSelection(plateDraft, hit.object.userData.edgeId, topology.edges, topology.nodes);
+    const selection = extendPlateSelection(plateDraft, hit.object.userData.edgeId, topology.edges, topology.nodes, { allowNonPlanar: bypassSurfaceLimit });
     return { object: hit.object, selection };
   } catch (error) { return { object: hit.object, error }; }
 }
@@ -5372,7 +5476,7 @@ function handleTopologyClick(point) {
     if (!created.created) selectTopologyNode(created.node.id);
     return true;
   }
-  if (tool === 'plate' || tool === 'glass') {
+  if (tool === 'plate' || tool === 'window') {
     const candidate = plateEdgeCandidate();
     if (!candidate) { status('面板需要选择可见的梁'); return true; }
     if (candidate.error) { status(candidate.error.message); return true; }
@@ -5459,10 +5563,10 @@ function processPointerMove(event) {
     const port = pickConnectionPort();
     hoveredConnectionPort = port;
     showConnectionPortTooltip(port, event);
-  } else if (['select', 'erase', 'paint', 'plate', 'glass', 'translate', 'rotate', 'scale', 'hide'].includes(tool)) {
+  } else if (['select', 'erase', 'paint', 'plate', 'window', 'translate', 'rotate', 'scale', 'hide'].includes(tool)) {
     const nextHover = tool === 'paint'
       ? pickPaintTarget()?.object || null
-      : tool === 'plate' || tool === 'glass'
+      : tool === 'plate' || tool === 'window'
         ? (() => { const candidate = plateEdgeCandidate(); return candidate && !candidate.error ? candidate.object : null; })()
         : pickInteractionHover();
     if (nextHover !== hoveredObject) { hoveredObject = nextHover; updateInteractionHighlights(); }
@@ -5554,7 +5658,7 @@ renderer.domElement.addEventListener('pointerup', event => {
     catch (error) { reportError('拓扑操作失败：{error}', error); }
     return;
   }
-  if (tool === 'plate' || tool === 'glass') {
+  if (tool === 'plate' || tool === 'window') {
     try { handleTopologyClick(); }
     catch (error) { reportError('拓扑操作失败：{error}', error); }
     return;
@@ -5652,6 +5756,8 @@ function setReferencePreview(value) {
   connectionToolbar.hidden = referencePreview || tool !== 'connect';
   transparencyToolbar.hidden = referencePreview || tool !== 'hide';
   edgeToolbar.hidden = referencePreview || tool !== 'edge';
+  plateToolbar.hidden = referencePreview || tool !== 'plate';
+  windowToolbar.hidden = referencePreview || tool !== 'window';
   updateMirrorToolbar();
   updateSubgridToolbar();
   $('.hud').hidden = referencePreview;
@@ -6053,9 +6159,9 @@ $('#native-input').onchange = async e => {
       setText($('#native-summary'), '已导入 {dataName} / {metaName}：{vehicle}。{warning}', () => ({
         dataName: pair.data.file.name, metaName: pair.meta.file.name,
         vehicle: t('载具 {id}：{nodes} 节点 / {edges} 梁 / {plates} 面板 / {grids} 网格 / {components} 组件', summary),
-        warning: result.removedPlateIds.length ? t('导入时已删除 {count} 个不共面的面板，其他内容已保留。', { count: result.removedPlateIds.length }) : '',
+        warning: result.curvedPlateIds.length ? t('已保留 {count} 个曲面；下载时将自动检查有限双平面扇形。', { count: result.curvedPlateIds.length }) : '',
       }));
-      showRemovedNativePlates(result.removedPlateIds);
+      showNativeCurvedPlates(result.curvedPlateIds, result.nativeLoadDiagnostics);
     }
   } catch (error) { showNativeImportFailure(error); }
 };
@@ -6105,7 +6211,7 @@ $('#native-subgrid-input').onchange = async e => {
     setTool('subgrid-place');
     if (cursorPoint && pointerInCanvas) setImportedSubgridPreviewPoint(cursorPoint);
     status('已载入 {name} 作为子网格虚像；在视口点击放置，Esc 取消', { name: pair.data.file.name });
-    showRemovedNativePlates(result.removedPlateIds);
+    showNativeCurvedPlates(result.curvedPlateIds, result.nativeLoadDiagnostics);
   } catch (error) {
     clearImportedSubgridPreview();
     showNativeImportFailure(error);
@@ -6143,6 +6249,7 @@ async function importNativeVehicle(model, vehicleIds) {
 }
 
 mountModelImportTool($('#resources-tab-panel'), {
+  notify: (message, params, severity) => showTopAlert(message, params, severity),
   generate: async (nextTopology, name) => transact(async () => {
     await restore([], nextTopology, [], [{ id: 'grid-1' }], name);
     activeGridId = 'grid-1'; nativeSceneShift.set(0, 0, 0);
@@ -6167,14 +6274,16 @@ async function saveNativeVehicle() {
         links: (source.topology.links || []).map(link => ({ ...link, points: (link.points || []).map(restorePoint) })),
       } : source.topology,
     };
-    const pair = toNativePairFromEditor(exportDocument, { componentDefinitions: definitions });
+    const prepared = prepareTwoPlaneNativeSurfaces(exportDocument.topology || { nodes: [], edges: [], plates: [] });
+    const pair = toNativePairFromEditor({ ...exportDocument, topology: prepared.topology }, { componentDefinitions: definitions });
     const baseName = projectFileBaseName(projectName);
     const files = [
       { name: `${baseName}.data`, content: JSON.stringify(pair.data, null, 2), type: 'application/json' },
       { name: `${baseName}.meta`, content: JSON.stringify(pair.meta, null, 2), type: 'application/json' },
     ];
     await saveFilePair(files, { download: downloadExportFile });
-    status('已下载原生格式 .data / .meta 配套载具');
+    if (prepared.merged.length) status('已下载 .data / .meta；已将 {count} 组旁路曲面自动导出为单面，未新增梁。', { count: prepared.merged.length });
+    else status('已下载原生格式 .data / .meta 配套载具');
   } catch (error) {
     if (error.structuralDiagnostics?.length) {
       const first = error.structuralDiagnostics[0];
@@ -6298,10 +6407,14 @@ backupBadge.append(backupStatus, resumeBackup); $('.hud').append(backupBadge);
 const storageHint = document.createElement('p'); storageHint.className = 'status';
 setText(storageHint, '本地存储只属于当前浏览器和站点；清理站点数据会删除备份，请定期下载工程。');
 $('#grid-settings').append(storageHint);
+let lastBackupAlert = '';
 function showBackupStatus({ state, savedAt, detail }) {
   backupStatus.dataset.state = state;
   const labels = { ready: '自动保存：每分钟', restored: '已恢复本地工程', recovered: '已从上一份有效备份恢复', saved: '已自动保存 {time}', error: '本地恢复失败：{detail}', 'write-error': '本地保存失败，请下载工程：{detail}', conflict: '另一标签页已保存，自动保存已暂停' };
   setText(backupStatus, labels[state], () => ({ detail, time: savedAt ? new Date(savedAt).toLocaleTimeString(getLocale() === 'zh' ? 'zh-CN' : 'en-US') : '' }));
+  const alertKey = ['error', 'write-error', 'conflict', 'recovered'].includes(state) ? `${state}:${detail || ''}` : '';
+  if (alertKey && alertKey !== lastBackupAlert) showTopAlert(labels[state], { detail }, ['error', 'write-error'].includes(state) ? 'error' : 'warning');
+  lastBackupAlert = alertKey;
   resumeBackup.hidden = !['error', 'conflict'].includes(state);
   if (['saved', 'restored', 'recovered'].includes(state)) void saveAutoArchive(savedAt);
 }
@@ -6395,12 +6508,14 @@ async function loadLatestPagesBuildTime() {
     if (!response.ok) {
       pagesBuildTimeUnavailable = true;
       renderLatestPagesBuildTime();
+      showTopAlert('无法读取 Pages 构建状态');
       return;
     }
     const payload = await response.json();
     if (!Array.isArray(payload?.workflow_runs)) {
       pagesBuildTimeUnavailable = true;
       renderLatestPagesBuildTime();
+      showTopAlert('无法读取 Pages 构建状态');
       return;
     }
     const run = payload.workflow_runs.find(candidate =>
@@ -6414,6 +6529,7 @@ async function loadLatestPagesBuildTime() {
     // GitHub API availability and rate limits must not delay the editor.
     pagesBuildTimeUnavailable = true;
     renderLatestPagesBuildTime();
+    showTopAlert('无法读取 Pages 构建状态');
   } finally {
     clearTimeout(timer);
   }

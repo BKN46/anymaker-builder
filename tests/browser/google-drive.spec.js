@@ -134,6 +134,7 @@ test('Drive failures keep local archives intact and stale account lists are clea
   const cloud = await mockGoogle(page); await open(page); await configure(page); const row = await save(page, 'Keep me');
   await page.evaluate(() => { window.googleTestError = 'popup'; }); await row.locator('.archive-drive-sync').click();
   await expect(page.locator('#drive-status')).toContainText('closed or blocked'); expect(cloud.requests).toHaveLength(0);
+  await expect(page.locator('#alert-host .app-alert-error').last()).toContainText('closed or blocked');
   await page.evaluate(() => { window.googleTestError = 'denied'; }); await row.locator('.archive-drive-sync').click();
   await expect(page.locator('#drive-status')).toContainText('not completed'); expect(cloud.requests).toHaveLength(0);
   await page.evaluate(() => { window.googleTestError = ''; }); await row.locator('.archive-drive-sync').click();
@@ -155,6 +156,7 @@ test('Google setup survives reload and failed SDK loading can be retried', async
   await page.route('https://accounts.google.com/gsi/client', route => route.abort());
   await open(page); await page.locator('#drive-client-id').fill('invalid'); await page.locator('#drive-config-save').click();
   await expect(page.locator('#drive-status')).toContainText('valid Google OAuth Client ID');
+  await expect(page.locator('#alert-host .app-alert-error').last()).toContainText('valid Google OAuth Client ID');
   await page.locator('#drive-client-id').fill(CLIENT_ID); await page.locator('#drive-config-save').click();
   await expect(page.locator('#drive-status')).toContainText('Could not load Google sign-in');
   await page.unroute('https://accounts.google.com/gsi/client'); const cloud = await mockGoogle(page);

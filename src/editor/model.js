@@ -471,9 +471,11 @@ export function toEditorTopology(model, { vehicleIds = null } = {}) {
     })));
     const prefix = id => `${grid.id}:${id}`;
     edges.push(...grid.edges.map(edge => ({ id: prefix(edge.id), a: prefix(edge.a), b: prefix(edge.b), gridId: grid.id,
+      ...(edge.extras?.native?.size === 1 ? { size: 3 } : {}),
       ...(Number.isInteger(edge.extras?.native?.col) && edge.extras.native.col >= 0 && edge.extras.native.col <= 255 ? { col: edge.extras.native.col } : {}),
     })));
     plates.push(...grid.plates.map(plate => ({ id: prefix(plate.id), nodeIds: (nativeImport ? [...plate.nodeIds].reverse() : plate.nodeIds).map(prefix), gridId: grid.id,
+      ...(!nativeImport && plate.surfaceFanAnchor ? { surfaceFanAnchor: prefix(plate.surfaceFanAnchor), surfaceLimitBypass: true, ...(plate.type ? { type: plate.type } : {}) } : {}),
       ...(Number.isInteger(plate.extras?.native?.col_front) && plate.extras.native.col_front >= 0 && plate.extras.native.col_front <= 255 ? { col_front: plate.extras.native.col_front } : {}),
       ...(Number.isInteger(plate.extras?.native?.col_back) && plate.extras.native.col_back >= 0 && plate.extras.native.col_back <= 255 ? { col_back: plate.extras.native.col_back } : {}),
       ...(plate.extras?.native?.type === 'window' ? { type: 'window' } : {}),

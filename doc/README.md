@@ -22,6 +22,7 @@
 | [15 Plate 渲染与选边](15_PLATES.md) | 法线支撑偏移、任意顺序选梁、闭环共面与自交校验及未完成的厚度/边框 |
 | [16 原生结构岛](16_NATIVE_ISLANDS.md) | 游戏拆岛崩溃定位、梁/面板遍历、通用导出防护、回归与验证边界 |
 | [17 Google 云盘存档](17_GOOGLE_DRIVE_ARCHIVES.md) | 本地覆盖、Google 登录配置、云端上传更新、列表与按需下载、权限及验证边界 |
+| [18 三角扇曲面研究](18_WINDOW_FAN_RESEARCH.md) | 当前游戏版本、窗间内缩、单扇心条件、有限双平面编辑/导出及独立原生探针 |
 | [资源研究记录](RESOURCE_ANALYSIS.md) | 扫描方法、Mesh 支持范围、Stormworks 方法参考 |
 | [审计报告](evidence/asset-audit.json) | ROM 计数、EXE/定义/Mesh SHA-256、解析成功和失败记录 |
 | [原生子网格变换证据](evidence/native-grid-transform.json) | 游戏 GCL 函数与常量、安装偏移、四个车门把手回归坐标 |
